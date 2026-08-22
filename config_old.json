@@ -1,0 +1,46 @@
+{
+  "gamer_tag": "BilingualBee",
+  "platform": "ps5",
+  "data_dir": "C:\\Users\\gabri\\.eafc-bot",
+  "postgres": {
+    "enabled": false,
+    "driver": "pgx",
+    "dsn": ""
+  },
+  "futgg": {
+    "base_url": "https://www.fut.gg",
+    "cycle": "26",
+    "endpoints": {
+      "club": "/api/gg-club/overview/",
+      "evolution": "/api/fut/evolutions/v2/26/v2/{slug}/",
+      "evolutions": "/api/fut/evolutions/v2/26/v2",
+      "news": "/api/fut/news/",
+      "objectives": "/objectives/",
+      "player": "/players/{basePlayerSlug}/{slug}/",
+      "players": "/api/fut/players/v2/26/",
+      "prices": "/api/fut/player-prices/",
+      "sbcs": "/sbc/"
+    },
+    "user_agent": "eafc-bot/0.1 (uso pessoal; contato via github.com/gscarneiro)",
+    "requests_per_sec": 3,
+    "concurrency": 6,
+    "cache_dir": "C:\\Users\\gabri\\AppData\\Local\\Temp\\eafc-bot-cache",
+    "cache_ttl": "30m0s",
+    "session_cookie": ""
+  },
+  "market": {
+    "min_rating": 80,
+    "max_rating": 99,
+    "max_price": 0,
+    "pages": 8,
+    "per_page": 50,
+    "extra_budget": 0
+  },
+  "report": {
+    "output_dir": "C:\\Users\\gabri\\.eafc-bot\\reports",
+    "max_rows": 12,
+    "min_gain": 2,
+    "trend_window_hours": 72,
+    "allow_out_of_position": false
+  }
+}

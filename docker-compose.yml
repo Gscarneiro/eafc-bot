@@ -1,0 +1,56 @@
+# docker compose up -d
+#   sobe só o bot, histórico em JSON num volume — nenhum outro serviço,
+#   nenhuma dependência extra. Publica em 127.0.0.1:4173 (não em 0.0.0.0):
+#   é a sua máquina, sem autenticação nenhuma na frente.
+#
+# Configuração via .env (copie de .env.example) ou variável de ambiente:
+#   EAFC_GAMERTAG  obrigatório — o nome do seu PERFIL NO FUT.GG (não a
+#                  gamertag da EA), ver fut.gg/gg-club/
+#   EAFC_BUDGET    moedas extras a considerar no orçamento, além do saldo
+#
+# Postgres é opcional, para histórico de preço consultável:
+#   go get github.com/jackc/pgx/v5   # localmente, antes — grava em go.mod
+#   docker compose --profile postgres up -d --build
+# As migrations rodam sozinhas na primeira subida do volume do Postgres
+# (docker-entrypoint-initdb.d). Defina EAFC_DSN e POSTGRES_PASSWORD no .env
+# combinando a mesma senha nos dois.
+
+services:
+  eafcbot:
+    build:
+      context: .
+      args:
+        BUILD_TAGS: ${BUILD_TAGS:-}
+    restart: unless-stopped
+    environment:
+      # America/Sao_Paulo por padrão: sem isto o container roda em UTC e
+      # "daily_at": "05:00" dispara às 02:00 no seu horário. O scheduler
+      # loga o horário do próximo disparo já resolvido — confira no
+      # primeiro `docker compose logs` se mudar o fuso.
+      TZ: ${TZ:-America/Sao_Paulo}
+      EAFC_GAMERTAG: ${EAFC_GAMERTAG:?defina EAFC_GAMERTAG no .env com o nome do seu perfil no fut.gg}
+      EAFC_BUDGET: ${EAFC_BUDGET:-0}
+      EAFC_DSN: ${EAFC_DSN:-}
+    volumes:
+      # Caminho relativo padrão do bot (".eafc-bot/", ver
+      # internal/config/config.go) — config, cache, snapshots e relatórios,
+      # tudo num volume só, sobrevivendo a `docker compose down`.
+      - eafcbot-data:/app/.eafc-bot
+    ports:
+      - "127.0.0.1:4173:4173"
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: eafc
+      POSTGRES_USER: eafc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env para usar o profile postgres}
+    volumes:
+      - eafcbot-postgres:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+
+volumes:
+  eafcbot-data:
+  eafcbot-postgres:

@@ -1,0 +1,15 @@
+/* Reaproveita .tx-card/.tx-head/.tx-row/.rationale de ../shared.css — só
+   os objetivos da evolução (EvoLevel.objectives, antes não exibidos) são
+   exclusivos daqui. */
+.evo-objectives {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.evo-objectives-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

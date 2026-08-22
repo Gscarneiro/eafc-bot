@@ -1,0 +1,266 @@
+/* Os mesmos tokens usados no briefing diário (internal/report/report.gohtml)
+   e no antigo relatório de cartas em html/template — consistência visual
+   entre os dois "produtos" deste bot. Mudou um valor aqui, muda lá também.
+
+   Regra de cor: cada matiz tem UM trabalho.
+     --turf   estrutura  (nav ativo, foco, réguas de seção, o campo)
+     --coin   dinheiro   (saldo, preço, custo — nunca delta)
+     --gain/--cost variação (só deltas: subiu, caiu, lucrou)
+     --alert  atenção    (falha, aviso, fora do orçamento)
+     --ink/--paper tudo o mais
+   Antes disso o dourado sozinho cobria posição, aviso, link, hover e
+   "em andamento" ao mesmo tempo — cinco significados por trás de uma cor
+   não são hierarquia, são ruído. */
+:root {
+  --paper: #f6f2e7;
+  --panel: #ffffff;
+  --sunk: #ece5d3;
+  --ink: #191c14;
+  --ink-2: #4b4a3b;
+  --ink-3: #7a7862;
+  --rule: #ddd4bc;
+  --rule-strong: #c7bb98;
+
+  --turf: #2b5940;
+  --turf-bg: #e1e9e2;
+  --pitch-fill: #1e4430;
+  --pitch-line: rgba(255, 255, 255, 0.22);
+
+  --coin: #8c6a13;
+  --coin-bg: #f1e4c2;
+  --gain: #1f7a46;
+  --gain-bg: #dcf0e3;
+  --cost: #9a3227;
+  --cost-bg: #f5deda;
+  --alert: #b54708;
+  --alert-bg: #fbe4d2;
+  --flat: #5c5a48;
+
+  --focus: #2b594055;
+
+  --shadow-sm: 0 1px 2px rgba(25, 28, 20, 0.08);
+  --shadow-md: 0 8px 24px rgba(25, 28, 20, 0.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12140f;
+    --panel: #1b1f17;
+    --sunk: #23281e;
+    --ink: #ecead0;
+    --ink-2: #b9b7a4;
+    --ink-3: #86846e;
+    --rule: #2e3427;
+    --rule-strong: #454c39;
+
+    --turf: #6fd19a;
+    --turf-bg: #16301f;
+    --pitch-fill: #14301f;
+    --pitch-line: rgba(255, 255, 255, 0.16);
+
+    --coin: #e8b33a;
+    --coin-bg: #3a2c0e;
+    --gain: #5fcb8c;
+    --gain-bg: #12301f;
+    --cost: #e8776a;
+    --cost-bg: #331a12;
+    --alert: #f0925a;
+    --alert-bg: #3a2210;
+    --flat: #9a9880;
+
+    --focus: #6fd19a66;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12140f;
+  --panel: #1b1f17;
+  --sunk: #23281e;
+  --ink: #ecead0;
+  --ink-2: #b9b7a4;
+  --ink-3: #86846e;
+  --rule: #2e3427;
+  --rule-strong: #454c39;
+
+  --turf: #6fd19a;
+  --turf-bg: #16301f;
+  --pitch-fill: #14301f;
+  --pitch-line: rgba(255, 255, 255, 0.16);
+
+  --coin: #e8b33a;
+  --coin-bg: #3a2c0e;
+  --gain: #5fcb8c;
+  --gain-bg: #12301f;
+  --cost: #e8776a;
+  --cost-bg: #331a12;
+  --alert: #f0925a;
+  --alert-bg: #3a2210;
+  --flat: #9a9880;
+
+  --focus: #6fd19a66;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Escalas — antes cada arquivo tinha os próprios números mágicos de
+   espaçamento/raio/fonte; qualquer ajuste de ritmo tinha que caçar 7
+   arquivos. Agora é um lugar só. */
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text-base: 14.5px;
+  --text-md: 16px;
+  --text-lg: 19px;
+  --text-xl: 26px;
+  --text-2xl: clamp(26px, 4.5vw, 38px);
+  --text-display: clamp(40px, 8vw, 68px);
+
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --duration: 180ms;
+
+  --font-display: "Archivo Black", Impact, sans-serif;
+  --font-body: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration: 0ms;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.5;
+}
+a {
+  color: inherit;
+}
+:focus-visible {
+  outline: 2px solid var(--turf);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 4px var(--focus);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-5) 60px;
+}
+.wrap.narrow {
+  max-width: 820px;
+}
+
+h1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-2xl);
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  margin: 0 0 4px;
+}
+h2 {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  margin: 0 0 var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--rule);
+}
+.meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  margin-bottom: var(--space-5);
+}
+
+.chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.chip.flat {
+  background: var(--sunk);
+  color: var(--flat);
+}
+.chip.turf {
+  background: var(--turf-bg);
+  color: var(--turf);
+}
+.chip.gain {
+  background: var(--gain-bg);
+  color: var(--gain);
+}
+.chip.cost {
+  background: var(--cost-bg);
+  color: var(--cost);
+}
+.chip.alert {
+  background: var(--alert-bg);
+  color: var(--alert);
+}
+.chip.coin {
+  background: var(--coin-bg);
+  color: var(--coin);
+}
+
+section {
+  margin-top: var(--space-7);
+}
+
+.back-link {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  text-decoration: none;
+  display: inline-block;
+  margin-bottom: var(--space-4);
+  transition: color var(--duration) var(--ease);
+}
+.back-link:hover {
+  color: var(--turf);
+}

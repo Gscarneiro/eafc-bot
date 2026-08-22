@@ -1,0 +1,14 @@
+/eafcbot
+/eafcbot.exe
+*.exe
+/briefing-demo.html
+/reports/
+*.tmp
+.eafc-bot/
+teste.json
+.env
+
+# app React (web/) — dependências e build; o build vira internal/webui/dist
+# via `npm run build` (ver web/vite.config.ts) e é o que o Go embute.
+web/node_modules/
+internal/webui/dist/

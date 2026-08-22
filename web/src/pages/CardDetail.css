@@ -1,0 +1,116 @@
+.head {
+  display: flex;
+  gap: var(--space-5);
+  align-items: center;
+  padding-bottom: var(--space-4);
+  border-bottom: 2px solid var(--ink);
+}
+.head img {
+  width: 110px;
+  height: auto;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+.head h1 {
+  font-size: clamp(24px, 4vw, 32px);
+}
+.sub {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.statline {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.statline .chip {
+  padding: 3px 9px;
+  font-size: 12.5px;
+}
+
+.attr-facts {
+  margin-top: var(--space-3);
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.pos-block {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.pos-block:last-child {
+  border-bottom: none;
+}
+.pos-block .pos-name {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.pos-block .roles {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.pos-block .roles .lvl {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.potential-card {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
+}
+.potential-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.potential-row .arrow {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+.big {
+  font-family: var(--font-display);
+  font-size: 24px;
+}
+.why {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.chain {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+.money {
+  margin-top: 12px;
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.alt {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 13.5px;
+}
+.alt:last-child {
+  border-bottom: none;
+}
+.alt .row1 {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}

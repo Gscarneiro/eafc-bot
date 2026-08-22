@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Briefing do Elenco</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#F6F2E7; --panel:#FFFFFF; --sunk:#ECE5D3;
+  --ink:#191C14; --ink-2:#4B4A3B; --ink-3:#7A7862;
+  --rule:#DDD4BC; --rule-strong:#C7BB98;
+  --accent:#8C6A13; --accent-bg:#F1E4C2;
+  --gain:#1F7A46; --gain-bg:#DCF0E3;
+  --cost:#9A3227; --cost-bg:#F5DEDA;
+  --flat:#5C5A48;
+  --shadow:0 1px 2px rgba(25,28,20,.08);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#12140F; --panel:#1B1F17; --sunk:#23281E;
+    --ink:#ECEAD0; --ink-2:#B9B7A4; --ink-3:#86846E;
+    --rule:#2E3427; --rule-strong:#454C39;
+    --accent:#E8B33A; --accent-bg:#3A2C0E;
+    --gain:#5FCB8C; --gain-bg:#12301F;
+    --cost:#E8776A; --cost-bg:#331A12;
+    --flat:#9A9880;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#12140F; --panel:#1B1F17; --sunk:#23281E;
+  --ink:#ECEAD0; --ink-2:#B9B7A4; --ink-3:#86846E;
+  --rule:#2E3427; --rule-strong:#454C39;
+  --accent:#E8B33A; --accent-bg:#3A2C0E;
+  --gain:#5FCB8C; --gain-bg:#12301F;
+  --cost:#E8776A; --cost-bg:#331A12;
+  --flat:#9A9880;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:15px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px; margin:0 auto; padding:32px 20px 80px}
+
+/* ---- cabeçalho: placar do dia ---- */
+.masthead{
+  display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between;
+  gap:16px; padding-bottom:14px; border-bottom:2px solid var(--ink);
+}
+.masthead h1{
+  font-family:"Archivo Black",Impact,sans-serif;
+  font-weight:700; font-size:clamp(30px,5vw,44px); line-height:1;
+  letter-spacing:.01em; text-transform:uppercase; margin:0; text-wrap:balance;
+}
+.masthead .meta{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
+  color:var(--ink-3); text-align:right; line-height:1.7;
+}
+
+.scoreline{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:1px; background:var(--rule); border:1px solid var(--rule);
+  margin:20px 0 34px;
+}
+.stat{background:var(--panel); padding:12px 14px}
+.stat dt{
+  font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--ink-3); margin:0 0 3px; font-weight:600;
+}
+.stat dd{
+  margin:0; font-family:"Archivo Black",sans-serif; font-weight:600;
+  font-size:27px; line-height:1.05; font-variant-numeric:tabular-nums;
+}
+.stat .sub{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-3); font-weight:400}
+
+/* ---- seções ---- */
+section{margin:0 0 40px}
+.sec-head{
+  display:flex; align-items:baseline; gap:12px;
+  border-bottom:1px solid var(--rule-strong); padding-bottom:6px; margin-bottom:2px;
+}
+.sec-head h2{
+  font-family:"Archivo Black",sans-serif; font-weight:600;
+  font-size:20px; text-transform:uppercase; letter-spacing:.05em; margin:0;
+}
+.sec-head .count{
+  font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-3);
+  margin-left:auto; font-variant-numeric:tabular-nums;
+}
+.sec-note{font-size:13px; color:var(--ink-3); margin:8px 0 14px; max-width:62ch}
+
+/* ---- linha de upgrade: a posição é a âncora ---- */
+.row{
+  display:grid; grid-template-columns:56px 1fr auto;
+  gap:0 16px; align-items:start;
+  padding:14px 0; border-bottom:1px solid var(--rule);
+}
+.slot{
+  font-family:"Archivo Black",sans-serif; font-weight:700; font-size:19px;
+  letter-spacing:.03em; color:var(--ink-2); padding-top:1px;
+}
+.swap{display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px}
+.card-thumb{height:48px; width:auto; display:block; border-radius:3px}
+.out{color:var(--ink-3); text-decoration:line-through; text-decoration-thickness:1px}
+.arrow{color:var(--ink-3); font-family:"IBM Plex Mono",monospace}
+.in{font-weight:600}
+.why{
+  margin:5px 0 0; font-size:12.5px; color:var(--ink-3);
+  font-family:"IBM Plex Mono",monospace;
+}
+.money{text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums}
+.money .net{
+  font-family:"Archivo Black",sans-serif; font-weight:600; font-size:20px;
+  display:block; line-height:1.2;
+}
+.money .gross{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-3)}
+
+.chip{
+  display:inline-block; padding:1px 7px; border-radius:2px;
+  font-family:"IBM Plex Mono",monospace; font-size:11px; font-weight:600;
+  letter-spacing:.02em; white-space:nowrap;
+}
+.chip.gain{background:var(--gain-bg); color:var(--gain)}
+.chip.cost{background:var(--cost-bg); color:var(--cost)}
+.chip.warn{background:var(--accent-bg); color:var(--accent)}
+.chip.flat{background:var(--sunk); color:var(--flat)}
+
+/* ---- listas simples ---- */
+.item{padding:12px 0; border-bottom:1px solid var(--rule)}
+.item h3{
+  font-size:15px; font-weight:600; margin:0 0 3px;
+  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+}
+.item p{margin:0; font-size:13px; color:var(--ink-2)}
+.item a{color:inherit; text-decoration:none; border-bottom:1px solid var(--rule-strong)}
+.item a:hover{border-bottom-color:var(--accent)}
+
+/* ---- elenco principal: grade de cartas ---- */
+.squad-grid{
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr));
+  gap:14px; margin-top:6px;
+}
+.squad-card{
+  background:var(--panel); border:1px solid var(--rule); border-radius:6px;
+  padding:10px; text-align:center; box-shadow:var(--shadow);
+}
+.squad-card-img{width:100%; height:auto; display:block; margin:0 auto 8px}
+.squad-card-name{
+  font-size:12.5px; font-weight:600; line-height:1.25;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.squad-card-meta{
+  display:flex; flex-wrap:wrap; justify-content:center; gap:4px; margin-top:6px;
+}
+.squad-card-meta .chip{font-size:10.5px; padding:2px 6px}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+.empty{
+  padding:16px; background:var(--sunk); color:var(--ink-3);
+  font-size:13.5px; border-left:2px solid var(--rule-strong);
+}
+
+/* ---- mercado ---- */
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse; width:100%; font-size:13.5px}
+th{
+  text-align:left; font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--ink-3); font-weight:600; padding:0 10px 6px 0;
+  border-bottom:1px solid var(--rule-strong);
+}
+td{padding:8px 10px 8px 0; border-bottom:1px solid var(--rule); font-variant-numeric:tabular-nums}
+th.num,td.num{text-align:right; padding-right:0}
+
+footer{
+  margin-top:48px; padding-top:14px; border-top:1px solid var(--rule);
+  font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3);
+  display:flex; flex-wrap:wrap; gap:6px 20px;
+}
+.errors{
+  margin:20px 0; padding:12px 14px; background:var(--cost-bg); color:var(--cost);
+  font-size:13px; border-left:2px solid var(--cost);
+}
+.errors ul{margin:6px 0 0; padding-left:18px}
+
+@media (max-width:560px){
+  .row{grid-template-columns:44px 1fr; gap:0 12px}
+  .money{grid-column:2; text-align:left; margin-top:6px}
+  .money .net{display:inline; font-size:17px; margin-right:8px}
+}
+@media print{body{background:#fff} .wrap{padding:0}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Briefing do Elenco</h1>
+  <div class="meta">
+    {{.GeneratedAt.Format "02 Jan 2006 · 15:04"}}<br>
+    {{.Club.GamerTag}} · FC {{.Cycle}}
+  </div>
+</header>
+
+<dl class="scoreline">
+  <div class="stat">
+    <dt>Nota do time</dt>
+    <dd>{{printf "%.1f" .SquadScore}}</dd>
+    <div class="sub">GG Rating médio do XI</div>
+  </div>
+  <div class="stat">
+    <dt>Moedas</dt>
+    <dd>{{coins .Club.Coins}}</dd>
+    <div class="sub">+{{coins .Raisable}} vendendo reservas</div>
+  </div>
+  <div class="stat">
+    <dt>Química</dt>
+    <dd>{{.Club.Squad.Chemistry}}<span class="sub"> /33</span></dd>
+    <div class="sub">{{.Club.Squad.Formation}}</div>
+  </div>
+  <div class="stat">
+    <dt>Elo mais fraco</dt>
+    <dd>{{.WeakestSlot}}</dd>
+    <div class="sub">{{.WeakestName}}{{if gt .WeakestGGRating 0.0}} · GG Rating {{printf "%.1f" .WeakestGGRating}}{{end}}</div>
+  </div>
+</dl>
+
+{{if .Errors}}
+<div class="errors">
+  <strong>Coleta incompleta</strong> — o relatório saiu com o que deu para buscar:
+  <ul>{{range .Errors}}<li>{{.}}</li>{{end}}</ul>
+</div>
+{{end}}
+
+{{if or .NewCards .News}}
+<section>
+  <div class="sec-head">
+    <h2>Novidades de hoje</h2>
+    <span class="count">{{len .NewCards}} cartas · {{len .News}} notícias</span>
+  </div>
+  <p class="sec-note">Cartas que apareceram no fut.gg desde a última execução, e as notícias que ainda não foram reportadas.</p>
+  {{range .NewCards}}
+  <div class="item">
+    <h3>{{.Display}} <span class="chip warn">{{.Rating}} {{.Position}}</span> <span class="chip flat">{{.Version}}</span></h3>
+    <p>{{attrs .}}{{if .Price.Tradeable}} · {{coins .Price.Coins}} moedas{{else}} · fora do mercado{{end}}</p>
+  </div>
+  {{end}}
+  {{range .News}}
+  <div class="item">
+    <h3>{{if .URL}}<a href="{{.URL}}">{{.Title}}</a>{{else}}{{.Title}}{{end}}</h3>
+    {{if .Summary}}<p>{{.Summary}}</p>{{end}}
+  </div>
+  {{end}}
+</section>
+{{end}}
+
+{{if .SquadSwaps}}
+<section>
+  <div class="sec-head">
+    <h2>Trocas dentro do seu elenco</h2>
+    <span class="count">{{len .SquadSwaps}} trocas</span>
+  </div>
+  <p class="sec-note">Custo zero: alguém que você já tem, na mesma posição, com GG Rating maior que o titular — o número é do próprio fut.gg, não uma conta deste bot. Vale conferir antes de gastar moeda no mercado.</p>
+  {{range .SquadSwaps}}
+  <div class="row">
+    <div class="slot">{{.Slot}}</div>
+    <div>
+      <div class="swap">
+        <span class="out">{{.Current.Display}} {{.Current.Rating}} <span class="chip flat">GG {{printf "%.1f" .Current.GGRating}}</span></span>
+        <span class="arrow">&rarr;</span>
+        <span class="in">{{.Candidate.Display}} {{.Candidate.Rating}} <span class="chip flat">GG {{printf "%.1f" .Candidate.GGRating}}</span></span>
+        <span class="chip gain">+{{printf "%.1f" .GGRatingGap}} GG</span>
+      </div>
+    </div>
+  </div>
+  {{end}}
+</section>
+{{end}}
+
+<section>
+  <div class="sec-head">
+    <h2>Upgrades diretos</h2>
+    <span class="count">{{len .Upgrades}} trocas</span>
+  </div>
+  <p class="sec-note">Ordenado por ganho por moeda gasta, não por ganho bruto — três trocas baratas costumam render mais que uma cara. O valor grande é o desembolso real, já descontando a venda do titular atual.{{if .AnyUnpriced}} As linhas com <strong>?</strong> vieram de uma fonte sem cotação: estão ranqueadas só pelo ganho em campo, e o preço você confere no link.{{end}}</p>
+  {{if .Upgrades}}
+    {{range .Upgrades}}
+    <div class="row">
+      <div class="slot">{{.Slot}}</div>
+      <div>
+        <div class="swap">
+          <span class="out">{{.Current.Display}} {{.Current.Rating}}</span>
+          <span class="arrow">&rarr;</span>
+          <span class="in">{{.Candidate.Display}} {{.Candidate.Rating}} {{.Candidate.Version}}</span>
+          <span class="chip gain">+{{printf "%.1f" .Gain}}</span>
+          {{if not .Affordable}}<span class="chip warn">fora do orçamento</span>{{end}}
+        </div>
+        {{if .Rationale}}<p class="why">{{join .Rationale " · "}}</p>{{end}}
+      </div>
+      <div class="money">
+        {{if .Unpriced}}
+          <span class="net" style="color:var(--ink-3)">?</span>
+          <span class="gross">{{if .Candidate.FutGGSlug}}<a href="{{.Candidate.FutGGSlug}}" style="color:inherit">conferir preço</a>{{else}}preço indisponível{{end}}</span>
+        {{else if .Profit}}
+          <span class="net" style="color:var(--gain)">+{{coins .Profit}}</span>
+          <span class="gross">sobra ao trocar</span>
+        {{else}}
+          <span class="net">{{coins .NetCost}}</span>
+          <span class="gross">{{coins .GrossCost}} &minus; {{coins .Recoup}}</span>
+        {{end}}
+      </div>
+    </div>
+    {{end}}
+  {{else}}
+    <div class="empty">Nenhuma troca passou do ganho mínimo hoje. Seu time está bem servido no orçamento atual — vale olhar as evoluções abaixo.</div>
+  {{end}}
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>Evoluções que cabem no seu elenco</h2>
+    <span class="count">{{len .Evolutions}} combinações</span>
+  </div>
+  <p class="sec-note">Só evoluções cujos requisitos os seus jogadores realmente cumprem. As marcadas como <em>vira titular</em> mudam a escalação. Overall atual e final são do próprio fut.gg (o final é o teto que a evolução declara); GG Rating é só o atual — o fut.gg não publica uma nota calculada pra carta depois de evoluída.</p>
+  {{if .Evolutions}}
+    {{range .Evolutions}}
+    <div class="row">
+      <div class="slot">{{.Slot}}</div>
+      <div>
+        <div class="swap">
+          {{if .Player.ImageURL}}<img class="card-thumb" src="{{.Player.ImageURL}}" alt="" loading="lazy">{{end}}
+          <span class="in">{{.Player.Display}} {{.Player.Rating}}&rarr;{{.Result.Rating}}{{if gt .Player.GGRating 0.0}} <span class="chip flat">GG {{printf "%.1f" .Player.GGRating}}</span>{{end}}</span>
+          <span class="arrow">via</span>
+          <span>{{if .Evolution.URL}}<a href="{{.Evolution.URL}}" style="color:inherit">{{.Evolution.Name}}</a>{{else}}{{.Evolution.Name}}{{end}}</span>
+          <span class="chip gain">+{{printf "%.1f" .Gain}}</span>
+          {{if .BeatsStarter}}<span class="chip warn">vira titular</span>{{end}}
+        </div>
+        {{if .Highlights}}<p class="why">{{join .Highlights " · "}}</p>{{end}}
+      </div>
+      <div class="money">
+        <span class="net">{{if .Cost}}{{coins .Cost}}{{else}}grátis{{end}}</span>
+        {{if .Evolution.ExpiresAt.IsZero}}{{else}}<span class="gross">até {{.Evolution.ExpiresAt.Format "02/01"}}</span>{{end}}
+      </div>
+    </div>
+    {{end}}
+  {{else}}
+    <div class="empty">Nenhuma evolução ativa combina com os jogadores do seu clube neste momento.</div>
+  {{end}}
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>Objetivos e SBCs</h2>
+    <span class="count">{{len .SBCs}} SBCs · {{len .Objectives}} objetivos</span>
+  </div>
+  <p class="sec-note">SBC com saldo positivo paga mais do que custa para montar. Prazo curto aparece primeiro.</p>
+  {{if or .SBCs .Objectives}}
+    {{range .SBCs}}
+    <div class="item">
+      <h3>
+        {{if .URL}}<a href="{{.URL}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}
+        {{if gt .NetValue 0}}<span class="chip gain">saldo +{{coins .NetValue}}</span>
+        {{else}}<span class="chip cost">custa {{coins .SolutionCost}}</span>{{end}}
+        {{if .Repeatable}}<span class="chip flat">repetível</span>{{end}}
+        {{if expiring .ExpiresAt}}<span class="chip warn">expira {{.ExpiresAt.Format "02/01 15h"}}</span>{{end}}
+      </h3>
+      {{if .Rewards}}<p>{{rewards .Rewards}}</p>{{end}}
+    </div>
+    {{end}}
+    {{range .Objectives}}
+    <div class="item">
+      <h3>
+        {{if .URL}}<a href="{{.URL}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}
+        <span class="chip flat">{{.Group}}</span>
+        {{if expiring .ExpiresAt}}<span class="chip warn">expira {{.ExpiresAt.Format "02/01 15h"}}</span>{{end}}
+      </h3>
+      {{if .Rewards}}<p>{{rewards .Rewards}}</p>{{end}}
+    </div>
+    {{end}}
+  {{else}}
+    <div class="empty">Nada ativo com recompensa relevante para o seu elenco agora.</div>
+  {{end}}
+</section>
+
+{{if .Market}}
+<section>
+  <div class="sec-head">
+    <h2>Mercado</h2>
+    <span class="count">janela de {{.TrendWindow}}</span>
+  </div>
+  <p class="sec-note">Movimento dos seus jogadores e dos alvos. Titular subindo é hora de considerar a venda; alvo caindo é hora de comprar.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr>
+      <th>Jogador</th><th>Situação</th>
+      <th class="num">Preço</th><th class="num">Variação</th><th class="num">Mín / Máx</th>
+    </tr></thead>
+    <tbody>
+    {{range .Market}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td>{{.Role}}</td>
+        <td class="num">{{coins .Trend.Last}}</td>
+        <td class="num"><span class="chip {{trendClass .Trend.ChangePct}}">{{signed .Trend.ChangePct}}%</span></td>
+        <td class="num">{{coins .Trend.Min}} / {{coins .Trend.Max}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+</section>
+{{end}}
+
+{{if .MainSquad}}
+<section>
+  <div class="sec-head">
+    <h2>Elenco principal</h2>
+    <span class="count">{{.Club.Squad.Formation}}</span>
+  </div>
+  <p class="sec-note">O XI titular sincronizado no fut.gg.</p>
+  <div class="squad-grid">
+    {{range .MainSquad}}
+    <div class="squad-card">
+      {{if .Player.ImageURL}}<img class="squad-card-img" src="{{.Player.ImageURL}}" alt="" loading="lazy">{{end}}
+      <div class="squad-card-name">{{.Player.Display}}</div>
+      <div class="squad-card-meta">
+        <span class="chip flat">{{.Position}}</span>
+        <span class="chip warn">{{.Player.Rating}}</span>
+        {{if gt .Player.GGRating 0.0}}<span class="chip flat">GG {{printf "%.1f" .Player.GGRating}}</span>{{end}}
+      </div>
+    </div>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
+<footer>
+  <span>{{.Stats.Requests}} requisições</span>
+  <span>{{.Stats.CacheHits}} do cache</span>
+  <span>{{.Stats.Retries}} retentativas</span>
+  <span>{{.MarketSize}} cartas avaliadas</span>
+  <span>gerado em {{.Duration}}</span>
+</footer>
+
+</div>
+</body>
+</html>

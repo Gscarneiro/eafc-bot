@@ -1,0 +1,146 @@
+/* O rail de navegação fica fixo à esquerda no desktop e vira barra de abas
+   embaixo no mobile — a topbar antiga empacotava marca + 4 links + chip de
+   status + botão numa linha só, sem nenhum @media no app inteiro; a régua
+   afundava a 767px pra baixo. Separar nav (rail) de status/ação (topbar,
+   sempre no topo) resolve os dois grupos sem espremer nada. */
+.shell {
+  min-height: 100%;
+  display: flex;
+}
+
+.rail {
+  flex: 0 0 208px;
+  background: var(--panel);
+  border-right: 1px solid var(--rule);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.rail-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-5) var(--space-3);
+}
+.rail-nav a {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--ink-2);
+  transition: color var(--duration) var(--ease), background-color var(--duration) var(--ease);
+}
+.rail-nav a:hover {
+  color: var(--ink);
+  background: var(--sunk);
+}
+.rail-nav a.active {
+  color: var(--turf);
+  background: var(--turf-bg);
+}
+
+.shell-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+  box-shadow: var(--shadow-sm);
+}
+.topbar-inner {
+  padding: 10px var(--space-5);
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.brand {
+  font-family: var(--font-display);
+  font-size: 17px;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.job {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.job-status .chip {
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.btn {
+  padding: 7px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--rule-strong);
+  background: var(--sunk);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--turf);
+  color: var(--turf);
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.content {
+  flex: 1;
+}
+
+@media (max-width: 767px) {
+  .shell {
+    flex-direction: column;
+  }
+  .rail {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: auto;
+    height: auto;
+    border-right: none;
+    border-top: 1px solid var(--rule);
+    z-index: 20;
+  }
+  .rail-nav {
+    flex-direction: row;
+    padding: 6px;
+  }
+  .rail-nav a {
+    flex: 1;
+    text-align: center;
+    padding: 8px 4px;
+  }
+  .shell-body {
+    padding-bottom: 56px;
+  }
+}

@@ -1,0 +1,8 @@
+.git/
+.eafc-bot/
+briefing-demo.html
+*.exe
+web/node_modules/
+internal/webui/dist/
+.claude/
+docs/

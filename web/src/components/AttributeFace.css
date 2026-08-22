@@ -1,0 +1,36 @@
+.attr-face {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.attr-row {
+  display: grid;
+  grid-template-columns: 38px 1fr 28px;
+  align-items: center;
+  gap: 10px;
+}
+.attr-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.attr-bar {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--sunk);
+  overflow: hidden;
+}
+.attr-fill {
+  display: block;
+  height: 100%;
+  background: var(--turf);
+  border-radius: var(--radius-pill);
+}
+.attr-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

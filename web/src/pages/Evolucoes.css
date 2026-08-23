@@ -13,3 +13,94 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
+.evolutions-page .page-header { margin-bottom: 18px; }
+.evo-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: clamp(20px, 4vw, 36px);
+  margin-bottom: 20px;
+  color: #f8f5ec;
+  background: linear-gradient(112deg, #172423 0%, #203d38 58%, #425b38 100%);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 44px rgba(21, 39, 34, .18);
+  overflow: hidden;
+  position: relative;
+}
+.evo-hero::after { content: ""; position: absolute; width: 210px; height: 210px; right: 8%; bottom: -125px; border: 1px solid rgba(242, 190, 89, .44); border-radius: 50%; box-shadow: 0 0 0 22px rgba(242, 190, 89, .08), 0 0 0 44px rgba(242, 190, 89, .05); }
+.evo-hero h2 { max-width: 590px; margin: 8px 0 7px; font-family: var(--font-display); font-size: clamp(28px, 4vw, 44px); font-weight: 400; letter-spacing: -.025em; }
+.evo-hero p { max-width: 620px; margin: 0; color: rgba(248, 245, 236, .74); font-size: 14px; }
+.evo-hero-kicker, .evo-path-kicker { color: #f2be59; font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: .12em; }
+.evo-hero-mark { z-index: 1; color: #f2be59; font: 72px/1 var(--font-display); transform: rotate(-8deg); }
+.evo-stat-grid { margin-bottom: 14px; }
+.evo-stat-grid .stat-tile { min-height: 112px; }
+.evo-acquisition-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 48px; margin: 0 0 4px; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+.evo-strip-label { margin-right: 4px; color: var(--ink-3); font: 10px var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
+.evo-acquisition-pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 999px; background: var(--panel); color: var(--ink-2); font: 12px var(--font-mono); cursor: pointer; transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease); }
+.evo-acquisition-pill strong { color: var(--turf); }
+.evo-acquisition-pill:hover, .evo-acquisition-pill.active { border-color: var(--turf); background: var(--turf-bg); }
+.evo-search { display: flex; align-items: center; gap: 12px; margin: 20px 0 0; }
+.evo-search label { color: var(--ink-3); font: 10px var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
+.evo-search input { flex: 1; min-width: 160px; min-height: 37px; padding: 8px 12px; border: 1px solid var(--rule-strong); border-radius: var(--radius-md); background: var(--panel); color: var(--ink); font: 13px var(--font-body); }
+.evo-search input:focus { outline: 2px solid var(--turf); outline-offset: 1px; }
+.evo-sort-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0 4px; }
+.evo-sort-toolbar p { margin: 0; color: var(--ink-3); font: 10px/1.5 var(--font-mono); }
+.evo-sort-toolbar button { min-height: 36px; padding: 6px 9px; border: 0; background: transparent; color: var(--turf); font: 600 10px var(--font-mono); cursor: pointer; white-space: nowrap; }
+.evo-sort-head { display: grid; grid-template-columns: 32px minmax(190px, 1.5fr) minmax(130px, 1fr) repeat(3, minmax(80px, .65fr)) 32px; align-items: center; gap: 12px; padding: 0 12px; color: var(--ink-3); }
+.evo-sort-number { text-align: center; font: 10px var(--font-mono); }
+.evo-sort-column button { display: inline-flex; align-items: center; gap: 7px; width: 100%; min-height: 44px; padding: 6px 0; border: 0; background: transparent; color: var(--ink-3); font: 600 10px var(--font-mono); text-align: left; text-transform: uppercase; letter-spacing: .04em; cursor: pointer; }
+.evo-sort-column button:hover, .evo-sort-column button:focus-visible, .evo-sort-column button.active { color: var(--turf); }
+.evo-sort-column button:focus-visible { outline: 2px solid var(--turf); outline-offset: 2px; border-radius: var(--radius-sm); }
+.evo-sort-state { display: inline-flex; align-items: center; gap: 3px; color: var(--turf); font-size: 13px; }
+.evo-sort-state b { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--turf-bg); font: 700 9px var(--font-mono); }
+.evo-row { border-left: 3px solid transparent; }
+.evo-row:hover, .evo-row.open { border-left-color: var(--turf); }
+.evo-favorite { flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; color: var(--ink-3); font-size: 18px; line-height: 1; cursor: pointer; }
+.evo-favorite:hover, .evo-favorite.active { color: var(--coin); background: color-mix(in srgb, var(--coin) 13%, transparent); }
+.evo-impact-value { display: flex; align-items: center; gap: 6px; }
+.evo-impact-value small { color: var(--ink-3); font: 9px var(--font-mono); text-transform: uppercase; letter-spacing: .03em; }
+.evo-detail { grid-template-columns: minmax(0, 1fr) minmax(220px, .7fr); }
+.evo-detail-heading { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.evo-detail-cost { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; font: 12px var(--font-mono); color: var(--ink-2); }
+.evo-objective-list { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.evo-objectives-label { flex-basis: 100%; }
+.evo-objective { padding: 5px 8px; border: 1px solid var(--rule); border-radius: var(--radius-sm); color: var(--ink-2); background: var(--sunk); font-size: 12px; }
+.evo-detail-path { grid-column: 1 / -1; padding-top: 16px; border-top: 1px solid var(--rule); }
+.evo-path { padding: 14px; border: 1px solid rgba(59, 127, 119, .3); border-radius: var(--radius-md); background: linear-gradient(120deg, var(--turf-bg), var(--panel)); }
+.evo-path-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; color: var(--ink-3); font: 11px var(--font-mono); }
+.evo-timeline { display: flex; align-items: center; gap: 7px; overflow-x: auto; padding: 14px 0 4px; }
+.evo-step { position: relative; display: flex; align-items: center; gap: 7px; min-width: 122px; }
+.evo-step img { width: 34px; height: 44px; object-fit: contain; border-radius: var(--radius-sm); }
+.evo-step > div { display: flex; flex-direction: column; gap: 3px; white-space: nowrap; }
+.evo-step strong { font: 700 12px var(--font-mono); }
+.evo-step span:not(.evo-step-index):not(.evo-step-arrow) { color: var(--ink-3); font: 10px var(--font-mono); }
+.evo-step-index { color: var(--turf); font: 10px var(--font-mono); }
+.evo-step-arrow { margin-left: auto; color: var(--turf); font: 18px var(--font-mono); }
+.evo-alternatives { margin-top: 12px; }
+.evo-alternatives summary { color: var(--turf); cursor: pointer; font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
+.evo-alternatives .evo-path { margin-top: 8px; background: var(--panel); }
+.evo-pagination { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 20px 0 10px; color: var(--ink-3); font: 12px var(--font-mono); }
+.evo-pagination button { min-height: 34px; padding: 7px 12px; border: 1px solid var(--rule-strong); border-radius: var(--radius-md); background: var(--panel); color: var(--ink-2); font: 12px var(--font-mono); cursor: pointer; }
+.evo-pagination button:hover:not(:disabled) { border-color: var(--turf); color: var(--turf); }
+.evo-pagination button:disabled { opacity: .4; cursor: not-allowed; }
+@media (max-width: 900px) {
+  .evo-sort-head { grid-template-columns: 28px minmax(170px, 1.5fr) repeat(2, minmax(75px, .7fr)) 32px; }
+  .evo-sort-head .optional-sort { display: none; }
+}
+@media (max-width: 620px) {
+  .evo-hero { align-items: flex-start; }
+  .evo-hero-mark { position: absolute; right: 15px; bottom: 8px; font-size: 56px; }
+  .evo-search { align-items: stretch; flex-direction: column; gap: 5px; }
+  .evo-sort-toolbar { align-items: flex-start; }
+  .evo-sort-head { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 8px; scrollbar-width: thin; }
+  .evo-sort-head .evo-sort-number, .evo-sort-head > span:last-child { display: none; }
+  .evo-sort-head .optional-sort { display: block; }
+  .evo-sort-column { flex: 0 0 auto; }
+  .evo-sort-column button { width: auto; min-height: 44px; padding: 7px 10px; border: 1px solid var(--rule); border-radius: var(--radius-md); background: var(--panel); }
+  .evo-detail { grid-template-columns: 1fr; }
+  .evo-timeline { align-items: flex-start; flex-direction: column; }
+  .evo-step { width: 100%; }
+  .evo-step-arrow { margin: 0 0 0 42px; transform: rotate(90deg); }
+}

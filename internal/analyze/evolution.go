@@ -18,20 +18,57 @@ type EvoMatch struct {
 	Gain         float64           `json:"gain"`
 	Result       domain.Player     `json:"result"` // a carta projetada
 	Cost         int               `json:"cost"`
+	Affordable   bool              `json:"affordable"`
+	Acquisition  string            `json:"acquisition"`
+	CardSlug     string            `json:"card_slug,omitempty"`
 	BeatsStarter bool              `json:"beats_starter"` // vira titular na posição?
 	Highlights   []string          `json:"highlights"`
+}
+
+// EvolutionOptions governa o cruzamento diário de evoluções com o elenco.
+type EvolutionOptions struct {
+	Budget              int
+	MinRating           int
+	IncludeUnaffordable bool
+}
+
+// EvolutionAcquisition classifica apenas o que os dados permitem afirmar.
+// Objetivos são desafios declarados para concluir a evolução, não prova de
+// que a EA liberou a evolução por recompensa.
+func EvolutionAcquisition(evo domain.Evolution) string {
+	if evo.CoinCost > 0 {
+		return "moedas"
+	}
+	if evo.PointCost > 0 {
+		return "pontos"
+	}
+	for _, level := range evo.Levels {
+		if len(level.Objectives) > 0 {
+			return "objetivos"
+		}
+	}
+	return "origem não identificada"
 }
 
 // FindEvolutions cruza as evoluções ativas com o seu elenco e devolve só
 // as combinações que melhoram alguma coisa de verdade.
 func FindEvolutions(club domain.Club, evos []domain.Evolution, budget int) []EvoMatch {
+	return FindEvolutionsWithOptions(club, evos, EvolutionOptions{Budget: budget})
+}
+
+// FindEvolutionsWithOptions é a versão usada pelo job: mantém metas fora do
+// bolso visíveis no painel e concentra a análise nas cartas relevantes.
+func FindEvolutionsWithOptions(club domain.Club, evos []domain.Evolution, options EvolutionOptions) []EvoMatch {
 	var out []EvoMatch
 
 	for _, evo := range evos {
-		if evo.CoinCost > budget {
+		if evo.CoinCost > options.Budget && !options.IncludeUnaffordable {
 			continue
 		}
 		for _, cp := range club.Players {
+			if options.MinRating > 0 && cp.Rating < options.MinRating {
+				continue
+			}
 			if !cp.Evolvable() {
 				continue
 			}
@@ -50,15 +87,17 @@ func FindEvolutions(club domain.Club, evos []domain.Evolution, budget int) []Evo
 			}
 
 			m := EvoMatch{
-				Evolution:  evo,
-				Player:     cp,
-				Slot:       bestSlot,
-				Before:     before,
-				After:      after,
-				Gain:       gain,
-				Result:     result,
-				Cost:       evo.CoinCost,
-				Highlights: evoHighlights(cp.Player, result, evo),
+				Evolution:   evo,
+				Player:      cp,
+				Slot:        bestSlot,
+				Before:      before,
+				After:       after,
+				Gain:        gain,
+				Result:      result,
+				Cost:        evo.CoinCost,
+				Affordable:  evo.CoinCost <= options.Budget,
+				Acquisition: EvolutionAcquisition(evo),
+				Highlights:  evoHighlights(cp.Player, result, evo),
 			}
 			// A evolução vale muito mais se a carta final passa o titular atual.
 			if starter, ok := club.Starter(bestSlot); ok {

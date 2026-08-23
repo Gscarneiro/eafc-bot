@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
+	"github.com/gscarneiro/eafc-bot/internal/cards"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/futgg"
 	"github.com/gscarneiro/eafc-bot/internal/store"
@@ -56,10 +57,14 @@ type Data struct {
 	// MainSquad é o XI titular, na ordem que o fut.gg usa (0 = goleiro,
 	// crescendo em direção ao ataque) — o "elenco principal" que fecha o
 	// relatório, com a arte da carta de cada um.
-	MainSquad   []SquadCard
-	NewCards    []domain.Player
-	News        []domain.NewsItem
-	Upgrades    []analyze.Upgrade
+	MainSquad []SquadCard
+	NewCards  []domain.Player
+	News      []domain.NewsItem
+	Upgrades  []analyze.Upgrade
+	// Funnel explica uma lista de Upgrades vazia carta a carta — ver o
+	// comentário de analyze.UpgradeFunnel. É o que o {{else}} da seção
+	// "Upgrades diretos" imprime em vez de um "nada aqui" mudo.
+	Funnel      analyze.UpgradeFunnel
 	Evolutions  []analyze.EvoMatch
 	SBCs        []domain.SBC
 	Objectives  []domain.Objective
@@ -71,6 +76,17 @@ type Data struct {
 	AnyUnpriced bool
 	Stats       futgg.Stats
 	Errors      []string
+
+	// Investments, SellCandidates e FodderDemand são o agente de trading:
+	// cartas do mercado ganhando valor, o que fazer com o banco de
+	// reservas, e demanda de fodder de SBC esquentando — ver
+	// analyze.FindInvestments/FindSellCandidates/FindFodderDemand.
+	// Puramente consultivo, como o resto do bot.
+	Investments      []analyze.Investment
+	InvestmentFunnel analyze.InvestmentFunnel
+	SellCandidates   []analyze.SellCandidate
+	SellFunnel       analyze.SellFunnel
+	FodderDemand     []analyze.FodderSignal
 }
 
 // Input reúne o que Build precisa para montar o briefing.
@@ -79,11 +95,26 @@ type Input struct {
 	NewCards    []domain.Player
 	FreshNews   []domain.NewsItem
 	Upgrades    []analyze.Upgrade
+	Funnel      analyze.UpgradeFunnel
 	Evolutions  []analyze.EvoMatch
 	Trends      map[int64]store.PriceTrend
 	TrendWindow time.Duration
 	Started     time.Time
 	MaxRows     int
+
+	// CardReports é a análise carta-a-carta (atual x potencial) do
+	// elenco — mesma fonte de cards.CardReport.Best que
+	// analyze.FindSellCandidates usa pra saber se vale segurar uma carta
+	// do banco por potencial de evolução.
+	CardReports []cards.CardReport
+	// Momentum é o último valor lido da rota de momentum do fut.gg (ver
+	// store.Store.LatestMomentum) — pode ser mais fresco que o resto do
+	// snapshot, já que vem do ciclo de coleta rápido
+	// (scheduler.FastTicker), não do job diário.
+	Momentum []domain.Player
+	// SBCCostTrends é a tendência de custo de cada desafio de SBC (ver
+	// store.Store.SBCCostTrend), indexada por store.SBCChallengeKey.
+	SBCCostTrends map[string]store.PriceTrend
 }
 
 // Build organiza os resultados na forma que o relatório apresenta:
@@ -106,6 +137,7 @@ func Build(in Input) Data {
 		NewCards:    trimPlayers(in.NewCards, 8),
 		News:        trimNews(in.FreshNews, 6),
 		Upgrades:    trimUpgrades(in.Upgrades, in.MaxRows),
+		Funnel:      in.Funnel,
 		Evolutions:  trimEvos(in.Evolutions, in.MaxRows),
 		TrendWindow: humanDuration(in.TrendWindow),
 		MarketSize:  len(snap.Market),
@@ -125,6 +157,26 @@ func Build(in Input) Data {
 	d.MainSquad = MainSquad(club)
 	d.SBCs, d.Objectives = RankChallenges(snap.SBCs, snap.Objectives)
 	d.Market = MarketRows(club, in.Upgrades, in.Trends)
+
+	investments, invFunnel := analyze.FindInvestments(club, in.Momentum, in.NewCards, analyze.DefaultInvestmentOptions())
+	d.Investments, d.InvestmentFunnel = trimInvestments(investments, in.MaxRows), invFunnel
+
+	sellCandidates, sellFunnel := analyze.FindSellCandidates(club, in.CardReports, d.SquadSwaps, analyze.DefaultSellOptions())
+	d.SellCandidates, d.SellFunnel = trimSellCandidates(sellCandidates, in.MaxRows), sellFunnel
+
+	// FindFodderDemand mora em internal/analyze, que já é importado por
+	// internal/store (store.Snapshot.Upgrades) — analyze não pode
+	// importar store de volta sem virar ciclo, então a conversão de
+	// store.PriceTrend pra analyze.CostTrend (mesmo formato, tipo local)
+	// acontece aqui, no pacote que já importa os dois.
+	costTrends := make(map[string]analyze.CostTrend, len(in.SBCCostTrends))
+	for key, t := range in.SBCCostTrends {
+		costTrends[key] = analyze.CostTrend{ChangePct: t.ChangePct, Samples: t.Samples}
+	}
+	d.FodderDemand = trimFodderSignals(
+		analyze.FindFodderDemand(snap.SBCs, snap.Market, costTrends, analyze.DefaultFodderDemandOptions()),
+		in.MaxRows)
+
 	return d
 }
 
@@ -281,6 +333,27 @@ func trimPlayers(in []domain.Player, n int) []domain.Player {
 
 func trimNews(in []domain.NewsItem, n int) []domain.NewsItem {
 	sort.Slice(in, func(i, j int) bool { return in[i].PublishedAt.After(in[j].PublishedAt) })
+	if len(in) > n {
+		return in[:n]
+	}
+	return in
+}
+
+func trimInvestments(in []analyze.Investment, n int) []analyze.Investment {
+	if len(in) > n {
+		return in[:n]
+	}
+	return in
+}
+
+func trimSellCandidates(in []analyze.SellCandidate, n int) []analyze.SellCandidate {
+	if len(in) > n {
+		return in[:n]
+	}
+	return in
+}
+
+func trimFodderSignals(in []analyze.FodderSignal, n int) []analyze.FodderSignal {
 	if len(in) > n {
 		return in[:n]
 	}

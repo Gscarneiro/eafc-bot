@@ -189,6 +189,15 @@ type Player struct {
 	// que GGRating não vem com nome de posição pronto.
 	RolesPlus     []int `json:"roles_plus,omitempty"`
 	RolesPlusPlus []int `json:"roles_plus_plus,omitempty"`
+
+	// MomentumPct é quanto o preço caiu da MÉDIA recente da própria carta
+	// (não um dia-a-dia contra ontem) — o fut.gg já calcula isso e
+	// recalcula a cada poucos minutos; o bot não reimplementa detecção de
+	// tendência em cima do próprio histórico esparso, só lê o resultado.
+	// Sempre positivo quando presente (maior desconto = maior número);
+	// zero significa "esta fonte não trouxe" (só a rota de momentum manda
+	// esse campo — o mesmo convênio de GGRating).
+	MomentumPct float64 `json:"momentum_pct,omitempty"`
 }
 
 // Display devolve o nome mais curto e reconhecível da carta.

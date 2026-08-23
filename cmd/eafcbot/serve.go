@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,6 +68,10 @@ func cmdServe(ctx context.Context, args []string) error {
 	sched := &scheduler.Scheduler{
 		DailyAt:    cfg.Serve.DailyAt,
 		StaleAfter: time.Duration(cfg.Serve.StaleAfterHours) * time.Hour,
+		Settings: func() (string, time.Duration) {
+			current := d.config()
+			return current.Serve.DailyAt, time.Duration(current.Serve.StaleAfterHours) * time.Hour
+		},
 		LastGood: func(ctx context.Context) time.Time {
 			snap, ok, err := st.LatestSnapshot(ctx, cfg.FutGG.Cycle)
 			if err != nil || !ok {
@@ -79,11 +84,78 @@ func cmdServe(ctx context.Context, args []string) error {
 	}
 	go sched.Run(ctx)
 
-	return serveHTTP(ctx, cfg, dist, &api.Server{
+	// Ciclo leve à parte da coleta diária — momentum e custo de SBC ficam
+	// velhos rápido demais pra esperar o próximo runJob (ver
+	// refreshMarketSignals). FastRefreshMinutes<=0 desliga.
+	go scheduler.FastTickerDynamic(ctx, func() time.Duration {
+		return time.Duration(d.config().Serve.FastRefreshMinutes) * time.Minute
+	}, func(ctx context.Context) {
+		refreshMarketSignals(ctx, d.config(), st)
+	})
+
+	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,
+		EvolutionMinRating: cfg.Serve.CardsMinRating, EvolutionExtraBudget: cfg.Market.ExtraBudget,
 		Trigger: func() { go d.run(context.Background()) },
 		Status:  d.status,
-	}, *open)
+	}
+	apiSrv.Config = &api.ConfigEditor{
+		Get:          func() config.UISettings { return d.config().Editable() },
+		GetFavorites: func() []string { return splitFavorites(d.config().Serve.EvolutionFavorites) },
+		UpdateFavorites: func(favorites []string) error {
+			current := d.config()
+			current.Serve.EvolutionFavorites = strings.Join(favorites, ",")
+			if err := current.SaveEditable(*cfgPath, current.Editable()); err != nil {
+				return fmt.Errorf("gravando favoritos: %w", err)
+			}
+			d.setConfig(current)
+			return nil
+		},
+		Update: func(v config.UISettings) (config.UISettings, error) {
+			current := d.config()
+			if err := rejectEnvEdits(current.Editable(), v); err != nil {
+				return config.UISettings{}, err
+			}
+			if err := current.ApplyEditable(v); err != nil {
+				return config.UISettings{}, err
+			}
+			if err := current.SaveEditable(*cfgPath, current.Editable()); err != nil {
+				return config.UISettings{}, fmt.Errorf("gravando configuração: %w", err)
+			}
+			d.setConfig(current)
+			apiSrv.History = current.Serve.RetentionDays
+			apiSrv.EvolutionMinRating = current.Serve.CardsMinRating
+			apiSrv.EvolutionExtraBudget = current.Market.ExtraBudget
+			return current.Editable(), nil
+		},
+		EnvLocked: envLockedSettings(),
+	}
+	return serveHTTP(ctx, cfg, dist, apiSrv, *open)
+}
+
+func envLockedSettings() []string {
+	locked := []string{}
+	if os.Getenv("EAFC_BUDGET") != "" {
+		locked = append(locked, "market.extra_budget")
+	}
+	return locked
+}
+
+func splitFavorites(value string) []string {
+	var out []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func rejectEnvEdits(current, next config.UISettings) error {
+	if os.Getenv("EAFC_BUDGET") != "" && current.Market.ExtraBudget != next.Market.ExtraBudget {
+		return fmt.Errorf("market.extra_budget é controlado por EAFC_BUDGET; altere a variável de ambiente")
+	}
+	return nil
 }
 
 // serveDemo grava o mesmo snapshot fictício do `demo` num store JSON
@@ -103,6 +175,19 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 	snap := demoSnapshot(rand.New(rand.NewSource(26)))
 	cfg.GamerTag = snap.Club.GamerTag
 
+	// Semeia o que o ciclo de coleta rápido (scheduler.FastTicker) deixaria
+	// salvo no Store de verdade — analyzeAndBuild lê os dois de lá, não do
+	// snapshot. SaveSBCCost só entra com 1 amostra aqui (sem dedupe pra
+	// burlar), então a fase de cada sinal de fodder sai "recente" neste
+	// modo — a variedade de fase (pico/esfriando) já é demonstrada pelo
+	// `eafcbot demo` (HTML), que monta a tendência na mão.
+	if err := st.SaveMomentum(ctx, cfg.FutGG.Cycle, demoMomentum()); err != nil {
+		return err
+	}
+	if err := st.SaveSBCCost(ctx, cfg.FutGG.Cycle, snap.SBCs); err != nil {
+		return err
+	}
+
 	if _, err := analyzeAndBuild(ctx, cfg, st, snap, time.Now(), false, demoCardReports(snap.Club)); err != nil {
 		return err
 	}
@@ -110,11 +195,30 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 	fmt.Println("modo demo: dados fictícios, sem rede — a análise carta-a-carta de")
 	fmt.Println("verdade precisa do fut.gg, então só Osimhen e Rodri têm CardReport")
 	fmt.Println("simulado à mão (/api/time/osimhen-88, /api/time/rodri-89).")
-	return serveHTTP(ctx, cfg, dist, &api.Server{
+	demoCfg := cfg
+	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,
+		EvolutionMinRating: cfg.Serve.CardsMinRating, EvolutionExtraBudget: cfg.Market.ExtraBudget,
 		Trigger: func() {}, // não há job de verdade para acionar no demo
 		Status:  func() api.JobStatus { return api.JobStatus{} },
-	}, open)
+	}
+	apiSrv.Config = &api.ConfigEditor{
+		Get:          func() config.UISettings { return demoCfg.Editable() },
+		GetFavorites: func() []string { return splitFavorites(demoCfg.Serve.EvolutionFavorites) },
+		UpdateFavorites: func(favorites []string) error {
+			demoCfg.Serve.EvolutionFavorites = strings.Join(favorites, ",")
+			return nil
+		},
+		Update: func(v config.UISettings) (config.UISettings, error) {
+			if err := demoCfg.ApplyEditable(v); err != nil {
+				return config.UISettings{}, err
+			}
+			apiSrv.EvolutionMinRating = demoCfg.Serve.CardsMinRating
+			apiSrv.EvolutionExtraBudget = demoCfg.Market.ExtraBudget
+			return demoCfg.Editable(), nil
+		},
+	}
+	return serveHTTP(ctx, demoCfg, dist, apiSrv, open)
 }
 
 func serveHTTP(ctx context.Context, cfg config.Config, dist fs.FS, apiSrv *api.Server, open bool) error {
@@ -168,8 +272,21 @@ type daemon struct {
 	cfg   config.Config
 	store store.Store
 
-	mu sync.Mutex
-	st api.JobStatus
+	mu    sync.Mutex
+	cfgMu sync.RWMutex
+	st    api.JobStatus
+}
+
+func (d *daemon) config() config.Config {
+	d.cfgMu.RLock()
+	defer d.cfgMu.RUnlock()
+	return d.cfg
+}
+
+func (d *daemon) setConfig(cfg config.Config) {
+	d.cfgMu.Lock()
+	d.cfg = cfg
+	d.cfgMu.Unlock()
 }
 
 func (d *daemon) status() api.JobStatus {
@@ -190,7 +307,7 @@ func (d *daemon) run(ctx context.Context) {
 	d.st.LastStarted = &started
 	d.mu.Unlock()
 
-	_, err := runJob(ctx, d.cfg, d.store, "", false)
+	_, err := runJob(ctx, d.config(), d.store, "", false)
 
 	d.mu.Lock()
 	d.st.Running = false

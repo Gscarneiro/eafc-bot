@@ -36,6 +36,12 @@ type Config struct {
 	CacheTTL       Duration          `json:"cache_ttl"`
 	SessionCookie  string            `json:"session_cookie"` // opcional: para ler seu GG Club privado
 
+	// Platform decide qual preço de solução de SBC ler — o fut.gg publica
+	// um valor por console e outro pra PC, que divergem (visto ao vivo em
+	// 22/08/2026: uma solução de 39300 no console e 56850 no PC). Espelha
+	// config.Config.Platform; Client.SBCs cai no console quando vazio.
+	Platform string `json:"platform,omitempty"`
+
 	// RespectRobots controla se a descoberta obedece ao robots.txt do site.
 	// O padrão é obedecer. Desligar é uma escolha sua, sobre a sua máquina
 	// e o seu uso — o bot só deixa de fingir que a regra não existe.
@@ -119,6 +125,15 @@ func DefaultConfig() Config {
 			"objectives": "/api/fut/objectives/",
 			"sbcs":       "/api/fut/sbc/sets/",
 			"news":       "/api/fut/news/",
+			// "Quanto essa carta caiu da própria média recente" — o fut.gg
+			// já calcula isso e recalcula a cada poucos minutos; o bot lê o
+			// resultado em vez de inferir tendência do próprio histórico
+			// esparso. {hours} (6, 12 ou 24) é SEGMENTO DE PATH, não query
+			// param — confirmado lendo o bundle JS de produção do próprio
+			// site em 22/08/2026 (searchMomentum: sc({path:
+			// "players/v2/momentum/:hours/"})) e testado ao vivo contra
+			// /api/fut/players/v2/momentum/24/?page=1 (HTTP 200).
+			"momentum": "/api/fut/players/v2/momentum/{hours}/",
 			// O clube vem pela rota PÚBLICA do perfil, a mesma que
 			// fut.gg/gg-club/<voce>/ usa para os outros verem o seu elenco.
 			// Ela responde 200 sem login nenhum, então não há cookie para
@@ -232,6 +247,14 @@ type Stats struct {
 	// para não tocar — preenchido por checkRobots (robots.go), para essa
 	// leitura nunca ficar silenciosa mesmo quando não bloqueia a coleta.
 	RobotsBypassed int `json:"robots_bypassed"`
+	// MarketPriceSkipped conta cartas do mercado descartadas por Players()
+	// porque o preço veio acima de PlayerFilter.MaxPrice — testado ao vivo
+	// em 22/08/2026: o parâmetro price__lte da query não filtra nada no lado
+	// do fut.gg (82 das 240 cartas da coleta voltaram acima de um teto de
+	// 100k, a mais cara a 10.000.000), então o corte precisa acontecer aqui
+	// para não ficar disfarçado no dia a dia — ver o comentário de
+	// PlayerFilter.query.
+	MarketPriceSkipped int `json:"market_price_skipped"`
 }
 
 func New(cfg Config) *Client {

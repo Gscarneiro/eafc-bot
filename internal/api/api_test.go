@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/cards"
+	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/store"
 )
@@ -52,13 +54,95 @@ func fixtureSnapshot() store.Snapshot {
 	}
 }
 
+func fixtureSnapshotComEvolucaoFutGG() store.Snapshot {
+	snap := fixtureSnapshot()
+	evolucao := domain.Evolution{ID: "evo-reserva", Name: "Evolução Reserva"}
+	snap.Evolutions = []domain.Evolution{evolucao}
+	snap.EvoMatches[0].Evolution = evolucao
+	snap.EvoMatches[0].Slot = domain.CB
+	snap.Cards = append(snap.Cards, cards.CardReport{
+		Slug: "26-2", Player: snap.EvoMatches[0].Player,
+		Best: &cards.EvoPotential{
+			Path:          domain.EvolutionPath{Chain: []string{evolucao.Name}},
+			FinalOverall:  85,
+			FinalGGRating: 84,
+			GGRatingGain:  3,
+		},
+	})
+	return snap
+}
+
+func TestHandleEvolucoesNaoDependeDaEstimativaDoAnalyze(t *testing.T) {
+	snap := fixtureSnapshotComEvolucaoFutGG()
+	snap.EvoMatches = nil
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes", nil))
+
+	got := decodeJSON[EvolucoesResponse](t, w)
+	if got.Total != 1 || len(got.Matches) != 1 || got.Matches[0].Evolution.ID != "evo-reserva" {
+		t.Fatalf("path fut.gg desapareceu sem EvoMatches: total=%d matches=%+v", got.Total, got.Matches)
+	}
+}
+
+func TestHandleConfigEditaSomenteOrigemLocal(t *testing.T) {
+	cfg := config.Default()
+	srv := &Server{Config: &ConfigEditor{
+		Get: func() config.UISettings { return cfg.Editable() },
+		Update: func(v config.UISettings) (config.UISettings, error) {
+			if err := cfg.ApplyEditable(v); err != nil {
+				return config.UISettings{}, err
+			}
+			return cfg.Editable(), nil
+		},
+	}}
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/config status %d", w.Code)
+	}
+	got := decodeJSON[ConfigResponse](t, w)
+	if got.Settings.Report.MinGain != cfg.Report.MinGain {
+		t.Errorf("min_gain = %v, esperava %v", got.Settings.Report.MinGain, cfg.Report.MinGain)
+	}
+
+	next := got.Settings
+	next.Report.MinGain = 4.5
+	body, err := json.Marshal(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Host = "127.0.0.1:4173"
+	req.Header.Set("Origin", "http://127.0.0.1:4173")
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK || cfg.Report.MinGain != 4.5 {
+		t.Fatalf("PUT /api/config status=%d min_gain=%v body=%s", w.Code, cfg.Report.MinGain, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Host = "127.0.0.1:4173"
+	req.Header.Set("Origin", "http://outro-host:4173")
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("origem externa: status=%d, esperava 403", w.Code)
+	}
+}
+
 func newTestServer(t *testing.T) (*Server, store.Store) {
+	return newTestServerWithSnapshot(t, fixtureSnapshot())
+}
+
+func newTestServerWithSnapshot(t *testing.T, snap store.Snapshot) (*Server, store.Store) {
 	t.Helper()
 	st, err := store.NewJSON(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewJSON: %v", err)
 	}
-	if err := st.SaveSnapshot(t.Context(), fixtureSnapshot()); err != nil {
+	if err := st.SaveSnapshot(t.Context(), snap); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
 	}
 	return &Server{
@@ -146,6 +230,61 @@ func TestHandleStatusSemSnapshotDevolve503(t *testing.T) {
 	}
 }
 
+func TestHandleInvestimentos(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// Sem momentum/custo de SBC salvos ainda, a rota responde mesmo assim
+	// — são sinais opcionais (ver o comentário de InvestimentosResponse).
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/investimentos", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[InvestimentosResponse](t, w)
+
+	// A "Reserva" da fixture está fora do XI titular (só o CM id=1 é
+	// titular) e não tem CardReport — deveria virar sugestão de venda.
+	foundReserva := false
+	for _, c := range got.SellCandidates {
+		if c.Player.ID == 2 {
+			foundReserva = true
+			if c.Recommendation != "vender" {
+				t.Errorf("Reserva deveria ser \"vender\" (sem CardReport, sem uso), veio %q", c.Recommendation)
+			}
+		}
+	}
+	if !foundReserva {
+		t.Fatalf("esperava a Reserva (id=2) entre os candidatos de venda, veio %+v", got.SellCandidates)
+	}
+	if got.InvestmentFunnel.Considered != 0 {
+		t.Errorf("sem momentum salvo, InvestmentFunnel.Considered deveria ser 0, veio %d", got.InvestmentFunnel.Considered)
+	}
+}
+
+// A rota reflete o momentum mais recente salvo pelo ciclo de coleta
+// rápido (scheduler.FastTicker) — não um campo congelado no snapshot
+// diário, que é justamente o motivo de handleInvestimentos calcular na
+// hora em vez de ler um campo pronto (ver o comentário do tipo).
+func TestHandleInvestimentosUsaOMomentumMaisRecenteDoStore(t *testing.T) {
+	srv, st := newTestServer(t)
+	if err := st.SaveMomentum(t.Context(), "26", []domain.Player{
+		{ID: 50, Name: "Descontado", Rating: 90, Price: domain.Price{Coins: 40000}, MomentumPct: 40},
+	}); err != nil {
+		t.Fatalf("SaveMomentum: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/investimentos", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[InvestimentosResponse](t, w)
+
+	if len(got.Investments) != 1 || got.Investments[0].Candidate.ID != 50 {
+		t.Fatalf("esperava 1 investimento (id=50, o momentum recém-salvo), veio %+v", got.Investments)
+	}
+}
+
 func TestHandleTime(t *testing.T) {
 	srv, _ := newTestServer(t)
 	w := httptest.NewRecorder()
@@ -206,7 +345,7 @@ func TestHandleMercado(t *testing.T) {
 }
 
 func TestHandleEvolucoes(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _ := newTestServerWithSnapshot(t, fixtureSnapshotComEvolucaoFutGG())
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes", nil))
 
@@ -216,6 +355,150 @@ func TestHandleEvolucoes(t *testing.T) {
 	got := decodeJSON[EvolucoesResponse](t, w)
 	if len(got.Matches) != 1 || got.Matches[0].Player.ID != 2 {
 		t.Errorf("Matches = %+v", got.Matches)
+	}
+}
+
+func TestHandleEvolucoesPaginaNoServidor(t *testing.T) {
+	srv, _ := newTestServerWithSnapshot(t, fixtureSnapshotComEvolucaoFutGG())
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes?page=2&page_size=1", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[EvolucoesResponse](t, w)
+	if got.Page != 1 || got.PageSize != 1 || got.Total != 1 || got.Pages != 1 {
+		t.Fatalf("paginação = %+v, esperava página corrigida e total 1", got)
+	}
+	if got.Summary.Matches != 1 || got.Summary.Players != 1 {
+		t.Fatalf("resumo = %+v", got.Summary)
+	}
+}
+
+func TestHandleEvolucoesBuscaSemResultadoPreservaFacetas(t *testing.T) {
+	srv, _ := newTestServerWithSnapshot(t, fixtureSnapshotComEvolucaoFutGG())
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes?q=mbappe", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[EvolucoesResponse](t, w)
+	if got.Total != 0 || len(got.Matches) != 0 {
+		t.Fatalf("busca sem resultado = total %d matches %d", got.Total, len(got.Matches))
+	}
+	if len(got.Filters.Positions) == 0 || len(got.Filters.Categories) == 0 {
+		t.Fatalf("facetas desapareceram com a busca vazia: %+v", got.Filters)
+	}
+}
+
+func TestHandleEvolucoesUsaSomentePathDoFutGGQueContemAEvolucao(t *testing.T) {
+	snap := fixtureSnapshot()
+	carta := domain.ClubPlayer{Player: domain.Player{
+		ID: 22, Name: "Carta Teste", CommonName: "Carta Teste",
+		Rating: 90, Position: domain.CM, GGRating: 89.5,
+	}}
+	evolucao := domain.Evolution{ID: "evo-certa", Name: "Evolução certa"}
+	snap.Evolutions = []domain.Evolution{evolucao}
+	snap.Club.Players = append(snap.Club.Players, carta)
+	snap.EvoMatches = []analyze.EvoMatch{{
+		Evolution: evolucao, Player: carta, Slot: domain.CM,
+		Before: 80, After: 89, Gain: 9,
+		Result: domain.Player{Rating: 92},
+	}}
+	snap.Cards = append(snap.Cards, cards.CardReport{
+		Slug: "carta-teste", Player: carta,
+		Best: &cards.EvoPotential{
+			Path:          domain.EvolutionPath{Chain: []string{"Outra evolução"}},
+			FinalGGRating: 99, GGRatingGain: 9.5,
+		},
+		Alternates: []cards.EvoPotential{{
+			Path:          domain.EvolutionPath{Chain: []string{"Evolução certa"}},
+			FinalGGRating: 93, GGRatingGain: 3.5,
+		}},
+	})
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[EvolucoesResponse](t, w)
+	if len(got.Matches) != 1 {
+		t.Fatalf("Matches = %+v, esperava uma evolução", got.Matches)
+	}
+	match := got.Matches[0]
+	if match.Impact != 3.5 {
+		t.Fatalf("impacto = %.1f, esperava +3.5 do fut.gg", match.Impact)
+	}
+	if match.BestPath == nil || len(match.BestPath.Path.Chain) != 1 || match.BestPath.Path.Chain[0] != "Evolução certa" {
+		t.Fatalf("BestPath = %+v, esperava somente o path da evolução certa", match.BestPath)
+	}
+	if len(match.Alternates) != 0 {
+		t.Fatalf("Alternates = %+v, não deveria incluir path de outra evolução", match.Alternates)
+	}
+}
+
+func TestHandleEvolucoesDescartaEstimativaQuandoNaoHaPathCorrespondente(t *testing.T) {
+	snap := fixtureSnapshot()
+	snap.Evolutions = []domain.Evolution{{ID: "sem-path", Name: "Sem path"}}
+	snap.EvoMatches[0].Evolution = snap.Evolutions[0]
+	snap.EvoMatches[0].Gain = 4.25
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes", nil))
+
+	got := decodeJSON[EvolucoesResponse](t, w)
+	if got.Total != 0 || len(got.Matches) != 0 {
+		t.Fatalf("estimativa sem path fut.gg entrou no ranking: total=%d matches=%+v", got.Total, got.Matches)
+	}
+	if len(got.Filters.Positions) != 0 || len(got.Filters.Categories) != 0 {
+		t.Fatalf("estimativa sem path fut.gg criou facetas: %+v", got.Filters)
+	}
+}
+
+func TestHandleEvolucoesDescartaPathSemGanhoDeGGRating(t *testing.T) {
+	snap := fixtureSnapshotComEvolucaoFutGG()
+	snap.Cards[len(snap.Cards)-1].Best.GGRatingGain = 0
+	snap.Cards[len(snap.Cards)-1].Best.FinalGGRating = snap.EvoMatches[0].Player.GGRating
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes", nil))
+
+	got := decodeJSON[EvolucoesResponse](t, w)
+	if got.Total != 0 || len(got.Matches) != 0 {
+		t.Fatalf("path sem ganho de GG Rating entrou no ranking: %+v", got.Matches)
+	}
+}
+
+func TestHandleEvolucoesOrdenaPorMultiplosCriteriosNaPrioridadeInformada(t *testing.T) {
+	snap := fixtureSnapshot()
+	snap.EvoMatches = []analyze.EvoMatch{
+		{Player: domain.ClubPlayer{Player: domain.Player{ID: 10, Name: "A", Rating: 90, GGRating: 80}}, Evolution: domain.Evolution{Name: "A"}, Cost: 100},
+		{Player: domain.ClubPlayer{Player: domain.Player{ID: 11, Name: "B", Rating: 90, GGRating: 80}}, Evolution: domain.Evolution{Name: "B"}, Cost: 50},
+		{Player: domain.ClubPlayer{Player: domain.Player{ID: 12, Name: "C", Rating: 90, GGRating: 80}}, Evolution: domain.Evolution{Name: "C"}, Cost: 0},
+	}
+	snap.Evolutions = []domain.Evolution{{Name: "A", CoinCost: 100}, {Name: "B", CoinCost: 50}, {Name: "C"}}
+	snap.Cards = []cards.CardReport{
+		{Player: snap.EvoMatches[0].Player, Best: &cards.EvoPotential{Path: domain.EvolutionPath{Chain: []string{"A"}}, FinalGGRating: 85, GGRatingGain: 5}},
+		{Player: snap.EvoMatches[1].Player, Best: &cards.EvoPotential{Path: domain.EvolutionPath{Chain: []string{"B"}}, FinalGGRating: 85, GGRatingGain: 5}},
+		{Player: snap.EvoMatches[2].Player, Best: &cards.EvoPotential{Path: domain.EvolutionPath{Chain: []string{"C"}}, FinalGGRating: 83, GGRatingGain: 3}},
+	}
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes?sort=impact:desc,cost:asc", nil))
+
+	got := decodeJSON[EvolucoesResponse](t, w)
+	if len(got.Matches) != 3 {
+		t.Fatalf("Matches = %+v, esperava três evoluções", got.Matches)
+	}
+	ids := []int64{got.Matches[0].Player.ID, got.Matches[1].Player.ID, got.Matches[2].Player.ID}
+	want := []int64{11, 10, 12}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("ordem = %v, esperava %v", ids, want)
+		}
 	}
 }
 

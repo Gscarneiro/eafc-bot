@@ -53,13 +53,75 @@ func DefaultUpgradeOptions(budget int) UpgradeOptions {
 	}
 }
 
+// UpgradeFunnel conta, carta a carta do mercado, ONDE cada candidata foi
+// reprovada. Sem isso uma lista vazia só sabe dizer "não achei nada" e quem
+// lê fica adivinhando qual botão mexer — foi exatamente o que a mensagem
+// antiga da UI fazia ao culpar o orçamento, que nem chega a filtrar
+// (UpgradeOptions.IncludeUnaffordable deixa o inacessível na lista, só
+// marcado como Affordable=false).
+type UpgradeFunnel struct {
+	Considered int `json:"considered"` // len(market)
+	Owned      int `json:"owned"`      // você já tem a carta
+	SBCOnly    int `json:"sbc_only"`   // exclusiva de SBC, não dá para comprar no mercado
+	Unpriced   int `json:"unpriced"`   // sem cotação, com AllowUnpriced desligado
+	// OutOfPosition conta carta que não joga em NENHUM slot titular seu —
+	// com AllowOutOfPos ligado essa gaveta fica sempre em zero, porque toda
+	// carta "cabe" (a penalidade de posição já sai no Score()).
+	OutOfPosition int `json:"out_of_position"`
+	BelowMinGain  int `json:"below_min_gain"` // jogaria em algum slot, mas não bateu MinGain em nenhum
+	// Suggested conta carta que passou do corte em pelo menos um slot — pode
+	// ser MAIOR que len(upgrades) devolvido, porque MaxPerSlot ainda decide
+	// quais aparecem na lista final.
+	Suggested int `json:"suggested"`
+
+	MinGain float64 `json:"min_gain"`
+	// BestGain é o maior ganho entre os pares carta×slot REPROVADOS (abaixo
+	// de MinGain), incluindo negativo — mede o quão perto (ou longe) o
+	// mercado chegou de bater algum titular. Só considera pares em que a
+	// carta joga naquela posição; comparar Score() fora de posição não diz
+	// nada, porque a penalidade já distorce o número.
+	BestGain float64         `json:"best_gain"`
+	BestSlot domain.Position `json:"best_slot"`
+	BestName string          `json:"best_name"`
+	HasBest  bool            `json:"has_best"`
+}
+
 // FindUpgrades varre o mercado atrás de trocas melhores para cada titular.
-// market deve conter as cartas candidatas já com preço.
-func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) []Upgrade {
+// market deve conter as cartas candidatas já com preço. O UpgradeFunnel
+// devolvido junto é o que alimenta a tela "nenhuma sugestão hoje" — ver o
+// comentário de UpgradeFunnel.
+func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) ([]Upgrade, UpgradeFunnel) {
 	owned := make(map[int64]bool, len(club.Players))
 	for _, p := range club.Players {
 		owned[p.ID] = true
 	}
+
+	funnel := UpgradeFunnel{Considered: len(market), MinGain: opt.MinGain}
+
+	// Pré-filtro por carta, fora do laço de slot: "já tenho" / "só SBC" /
+	// "sem preço" não dependem de posição, então cada candidata do mercado
+	// merece UMA resposta, não uma por titular — do contrário essas três
+	// checagens rodariam uma vez por titular (11x hoje) e o funil contaria a
+	// mesma carta várias vezes.
+	type poolCard struct {
+		player   domain.Player
+		unpriced bool
+	}
+	pool := make([]poolCard, 0, len(market))
+	for _, cand := range market {
+		switch {
+		case owned[cand.ID]:
+			funnel.Owned++
+		case cand.Price.IsSBC:
+			funnel.SBCOnly++
+		case cand.Price.Coins <= 0 && !opt.AllowUnpriced:
+			funnel.Unpriced++
+		default:
+			pool = append(pool, poolCard{player: cand, unpriced: cand.Price.Coins <= 0})
+		}
+	}
+	fitsSomeSlot := make([]bool, len(pool))
+	passedGain := make([]bool, len(pool))
 
 	var out []Upgrade
 
@@ -78,33 +140,29 @@ func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) 
 		recoup := current.SellValue()
 
 		var perSlot []Upgrade
-		for _, cand := range market {
-			if owned[cand.ID] {
-				continue // você já tem essa carta
-			}
-			unpriced := false
-			switch {
-			case cand.Price.IsSBC:
-				continue // exclusiva de SBC: não dá para comprar no mercado
-			case cand.Price.Coins <= 0:
-				if !opt.AllowUnpriced {
-					continue
-				}
-				unpriced = true
-			}
+		for i, pc := range pool {
+			cand := pc.player
 			if !opt.AllowOutOfPos && !cand.PlaysAt(slot) {
 				continue
 			}
+			fitsSomeSlot[i] = true
 
 			candScore := Score(cand, slot)
 			gain := candScore - curScore
 			if gain < opt.MinGain {
+				if !funnel.HasBest || gain > funnel.BestGain {
+					funnel.HasBest = true
+					funnel.BestGain = gain
+					funnel.BestSlot = slot
+					funnel.BestName = cand.Display()
+				}
 				continue
 			}
+			passedGain[i] = true
 
 			net := cand.Price.Coins - recoup
 			profit := 0
-			if unpriced {
+			if pc.unpriced {
 				// Sem cotação não há como calcular desembolso nem
 				// eficiência. Fingir um número aqui seria pior que admitir.
 				perSlot = append(perSlot, Upgrade{
@@ -166,8 +224,19 @@ func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) 
 		out = append(out, perSlot...)
 	}
 
+	for i := range pool {
+		switch {
+		case !fitsSomeSlot[i]:
+			funnel.OutOfPosition++
+		case !passedGain[i]:
+			funnel.BelowMinGain++
+		default:
+			funnel.Suggested++
+		}
+	}
+
 	sort.Slice(out, func(i, j int) bool { return lessUpgrade(out[i], out[j]) })
-	return out
+	return out, funnel
 }
 
 // lessUpgrade ordena com uma regra só, usada nos dois níveis: primeiro o

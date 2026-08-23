@@ -62,8 +62,11 @@ fut.gg. Não sugira caminho que contrarie isso.
 **robots.txt é obedecido por padrão** na *descoberta* de rotas novas
 (`autoconfig`): o do fut.gg tem `Disallow: /api/*` e `Disallow: /gg-club/`,
 justamente onde estão os dados; o bot pula essas rotas e diz quantas pulou,
-e ler assim mesmo é escolha explícita do usuário (`-ignore-robots`). Os
-endpoints de PRODUÇÃO (já aprendidos, usados por `Collect`) não passam por
+e ler assim mesmo é escolha explícita do usuário — pontual via
+`-ignore-robots`, ou permanente via `futgg.respect_robots: false` no
+`config.json` (`futgg.Config.RespectRobots`/`ShouldRespectRobots()` em
+`internal/futgg/client.go`; a flag, quando passada, sempre vence o config).
+Os endpoints de PRODUÇÃO (já aprendidos, usados por `Collect`) não passam por
 esse gate — travar isso quebraria a coleta diária inteira, já que são
 justamente rotas `/api/*`. Em vez de gate, `futgg.checkRobots`
 (`internal/futgg/robots.go`) conta quantas das rotas configuradas o
@@ -160,6 +163,15 @@ dele é mais direto e é a que o usuário confere no site. `roleTable` em
 testes de `internal/analyze` existem para travar esses invariantes.
 
 Sugestões saem ordenadas por **ganho por moeda gasta**, não por ganho bruto.
+
+**Orçamento marca, não filtra.** `analyze.DefaultUpgradeOptions` liga
+`IncludeUnaffordable`, então uma troca fora do bolso continua em
+`FindUpgrades` — só sai com `Affordable: false`. Uma lista de upgrades vazia
+nunca é "faltou moeda"; é sempre "nada bateu `MinGain`". `analyze.UpgradeFunnel`,
+devolvido junto com a lista, existe para dizer isso carta a carta (quantas já
+são suas, exclusivas de SBC, sem cotação, fora de posição, ou abaixo do
+ganho mínimo, mais a mais próxima que ficou de fora) — é o que a tela de
+mercado e o relatório imprimem em vez de um "nada aqui" mudo.
 
 ### Camadas
 

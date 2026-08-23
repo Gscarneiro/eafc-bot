@@ -392,4 +392,118 @@ func (s *PostgresStore) PriceSeries(ctx context.Context, cycle string, eaIDs []i
 	return out, rows.Err()
 }
 
+// SaveSBCCost grava o custo da solução mais barata de cada challenge —
+// mesmo padrão de bucket por hora de SavePrices/price_ticks
+// (date_trunc('hour', now()) com ON CONFLICT DO UPDATE), só que a chave é
+// SBCChallengeKey em vez de ea_id.
+func (s *PostgresStore) SaveSBCCost(ctx context.Context, cycle string, sbcs []domain.SBC) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	tick, err := tx.PrepareContext(ctx, `
+		INSERT INTO sbc_cost_ticks (challenge_key, cycle, observed_at, coins)
+		VALUES ($1, $2, date_trunc('hour', now()), $3)
+		ON CONFLICT (challenge_key, cycle, observed_at) DO UPDATE SET
+			coins = EXCLUDED.coins`)
+	if err != nil {
+		return err
+	}
+	defer tick.Close()
+
+	for _, sbc := range sbcs {
+		for idx, ch := range sbc.Challenges {
+			if ch.CheapestSolutionCoins <= 0 {
+				continue
+			}
+			key := SBCChallengeKey(sbc.ID, idx, ch.Name)
+			if _, err := tick.ExecContext(ctx, key, cycle, ch.CheapestSolutionCoins); err != nil {
+				return fmt.Errorf("tick de custo do challenge %q: %w", key, err)
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *PostgresStore) SBCCostTrend(ctx context.Context, cycle string, keys []string, since time.Duration) (map[string]PriceTrend, error) {
+	const q = `
+		WITH win AS (
+			SELECT challenge_key, coins, observed_at,
+			       first_value(coins) OVER w  AS first_coins,
+			       last_value(coins)  OVER w  AS last_coins
+			FROM sbc_cost_ticks
+			WHERE cycle = $1
+			  AND observed_at >= now() - $2::interval
+			  AND coins > 0
+			  AND ($3::text[] IS NULL OR challenge_key = ANY($3))
+			WINDOW w AS (PARTITION BY challenge_key ORDER BY observed_at
+			             ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
+		)
+		SELECT challenge_key, min(first_coins), min(last_coins), min(coins), max(coins), count(*)
+		FROM win GROUP BY challenge_key HAVING count(*) >= 2`
+
+	var keyArg any
+	if len(keys) > 0 {
+		quoted := make([]string, len(keys))
+		for i, k := range keys {
+			quoted[i] = `"` + strings.ReplaceAll(k, `"`, `\"`) + `"`
+		}
+		keyArg = "{" + strings.Join(quoted, ",") + "}"
+	}
+
+	rows, err := s.db.QueryContext(ctx, q, cycle, since.String(), keyArg)
+	if err != nil {
+		return nil, fmt.Errorf("consultando tendência de custo de SBC: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]PriceTrend{}
+	for rows.Next() {
+		var key string
+		var t PriceTrend
+		if err := rows.Scan(&key, &t.First, &t.Last, &t.Min, &t.Max, &t.Samples); err != nil {
+			return nil, err
+		}
+		if t.First > 0 {
+			t.ChangePct = (float64(t.Last-t.First) / float64(t.First)) * 100
+		}
+		out[key] = t
+	}
+	return out, rows.Err()
+}
+
+// SaveMomentum faz upsert do cache — não é série temporal, é sempre o
+// último valor lido (ver o comentário do método na interface Store).
+func (s *PostgresStore) SaveMomentum(ctx context.Context, cycle string, momentum []domain.Player) error {
+	payload, err := json.Marshal(momentum)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO momentum_cache (cycle, updated_at, payload)
+		VALUES ($1, now(), $2)
+		ON CONFLICT (cycle) DO UPDATE SET updated_at = now(), payload = EXCLUDED.payload`,
+		cycle, payload)
+	return err
+}
+
+func (s *PostgresStore) LatestMomentum(ctx context.Context, cycle string) ([]domain.Player, error) {
+	var payload []byte
+	err := s.db.QueryRowContext(ctx,
+		`SELECT payload FROM momentum_cache WHERE cycle = $1`, cycle).Scan(&payload)
+	if err == sql.ErrNoRows {
+		return nil, nil // ciclo rápido ainda não rodou não é erro
+	}
+	if err != nil {
+		return nil, err
+	}
+	var momentum []domain.Player
+	if err := json.Unmarshal(payload, &momentum); err != nil {
+		return nil, err
+	}
+	return momentum, nil
+}
+
 var _ Store = (*PostgresStore)(nil)

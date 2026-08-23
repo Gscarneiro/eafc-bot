@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
@@ -30,6 +31,29 @@ type PriceTrend struct {
 	Max       int     `json:"max"`
 	ChangePct float64 `json:"change_pct"`
 	Samples   int     `json:"samples"`
+}
+
+// SBCCostPoint é o equivalente de PricePoint para o custo da solução mais
+// barata de um desafio de SBC — o fut.gg já resolve o fodder mais barato
+// que bate o requisito, e é esse número que sobe quando a demanda esquenta
+// (ver CLAUDE.md, "SBC repetível" e "pico é no lançamento, não na
+// expiração").
+type SBCCostPoint struct {
+	Key        string    `json:"key"` // ver SBCChallengeKey
+	Coins      int       `json:"coins"`
+	ObservedAt time.Time `json:"observed_at"`
+}
+
+// SBCChallengeKey identifica um desafio de SBC de forma estável entre
+// coletas — não existe id próprio de challenge no fut.gg, só o do SBC pai.
+// SaveSBCCost usa pra gravar; quem consulta SBCCostTrend usa a mesma
+// função pra perguntar pelo challenge certo. Nome quando disponível (mais
+// legível no arquivo), índice como desempate/fallback pra nome vazio.
+func SBCChallengeKey(sbcID string, idx int, name string) string {
+	if name != "" {
+		return sbcID + "#" + name
+	}
+	return sbcID + "#" + strconv.Itoa(idx)
 }
 
 // Direction traduz a tendência para o relatório.
@@ -89,6 +113,30 @@ type Store interface {
 	// pedida — o mesmo histórico que Trends já lê, sem colapsar num resumo.
 	PriceSeries(ctx context.Context, cycle string, eaIDs []int64, since time.Duration) (map[int64][]PricePoint, error)
 
+	// SaveSBCCost grava o custo da solução mais barata de cada desafio de
+	// SBC observado nesta rodada — mesmo molde de SavePrices, mas pro
+	// custo que o fut.gg já resolve por challenge em vez de preço de carta.
+	SaveSBCCost(ctx context.Context, cycle string, sbcs []domain.SBC) error
+
+	// SBCCostTrend devolve a tendência de custo de cada challenge pedido
+	// (ver SBCChallengeKey) na janela — reusa PriceTrend em vez de outro
+	// formato; o campo EAID do resultado não se aplica aqui e fica zerado.
+	SBCCostTrend(ctx context.Context, cycle string, keys []string, since time.Duration) (map[string]PriceTrend, error)
+
+	// SaveMomentum grava o momentum mais recente lido do fut.gg. É um
+	// CACHE do último valor, não série temporal — o fut.gg já é a série
+	// (domain.Player.MomentumPct já vem pronto deles); aqui só existe pra
+	// internal/api conseguir montar a tela de investimentos sem nunca
+	// tocar a rede (CLAUDE.md), lendo o que o ciclo de coleta rápido
+	// (scheduler.FastTicker, bem mais frequente que o snapshot diário) já
+	// deixou salvo.
+	SaveMomentum(ctx context.Context, cycle string, momentum []domain.Player) error
+
+	// LatestMomentum devolve o último momentum salvo — vazio (não erro)
+	// se o ciclo rápido ainda não rodou nenhuma vez (ex.: `run`/`demo`
+	// chamados sem `serve` no ar).
+	LatestMomentum(ctx context.Context, cycle string) ([]domain.Player, error)
+
 	Close() error
 }
 
@@ -120,11 +168,15 @@ type Snapshot struct {
 	NewCards  []domain.Player   `json:"new_cards"`
 	FreshNews []domain.NewsItem `json:"fresh_news"`
 
-	Upgrades   []analyze.Upgrade    `json:"upgrades"`
-	EvoMatches []analyze.EvoMatch   `json:"evo_matches"`
-	SquadSwaps []analyze.SquadSwap  `json:"squad_swaps"`
-	Trends     map[int64]PriceTrend `json:"trends"`
-	SquadScore float64              `json:"squad_score"`
+	Upgrades []analyze.Upgrade `json:"upgrades"`
+	// MarketFunnel explica uma lista de Upgrades vazia carta a carta — ver o
+	// comentário de analyze.UpgradeFunnel. Zero-valor (Considered == 0) é o
+	// sentinela de snapshot gravado antes deste campo existir.
+	MarketFunnel analyze.UpgradeFunnel `json:"market_funnel"`
+	EvoMatches   []analyze.EvoMatch    `json:"evo_matches"`
+	SquadSwaps   []analyze.SquadSwap   `json:"squad_swaps"`
+	Trends       map[int64]PriceTrend  `json:"trends"`
+	SquadScore   float64               `json:"squad_score"`
 
 	// Cards é a análise carta-a-carta (atual x potencial) do elenco acima do
 	// min_rating configurado — o trabalho caro (~1,3 MB por carta contra o

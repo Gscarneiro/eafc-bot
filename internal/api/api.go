@@ -9,10 +9,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/cards"
+	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/report"
 	"github.com/gscarneiro/eafc-bot/internal/store"
@@ -43,9 +47,33 @@ type Server struct {
 	Store   store.Store
 	Cycle   string
 	History int // dias de histórico para o gráfico de tendência
+	// EvolutionMinRating espelha serve.cards_min_rating. Zero mantém
+	// compatibilidade com servidores de teste e snapshots antigos.
+	EvolutionMinRating int
+	// EvolutionExtraBudget espelha market.extra_budget para o selo de
+	// disponibilidade usar o mesmo orçamento do job, sem reaproveitar a
+	// estimativa de analyze.EvoMatch.
+	EvolutionExtraBudget int
 
 	Trigger func()
 	Status  func() JobStatus
+	Config  *ConfigEditor
+}
+
+// ConfigEditor expõe somente o subconjunto de preferências que a UI pode
+// alterar. Update deve persistir e trocar a configuração em execução; a API
+// não conhece o caminho do arquivo nem credenciais.
+type ConfigEditor struct {
+	Get             func() config.UISettings
+	Update          func(config.UISettings) (config.UISettings, error)
+	EnvLocked       []string
+	GetFavorites    func() []string
+	UpdateFavorites func([]string) error
+}
+
+type ConfigResponse struct {
+	Settings  config.UISettings `json:"settings"`
+	EnvLocked []string          `json:"env_locked"`
 }
 
 func (s *Server) Handler() http.Handler {
@@ -55,9 +83,90 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/time/{slug}", s.handleTimeSlug)
 	mux.HandleFunc("GET /api/mercado", s.handleMercado)
 	mux.HandleFunc("GET /api/evolucoes", s.handleEvolucoes)
+	mux.HandleFunc("GET /api/investimentos", s.handleInvestimentos)
 	mux.HandleFunc("GET /api/job", s.handleJobStatus)
 	mux.HandleFunc("POST /api/job", s.handleJobTrigger)
+	if s.Config != nil {
+		mux.HandleFunc("GET /api/config", s.handleConfig)
+		mux.HandleFunc("PUT /api/config", s.handleConfigUpdate)
+		mux.HandleFunc("GET /api/evolucoes/favoritos", s.handleFavorites)
+		mux.HandleFunc("PUT /api/evolucoes/favoritos", s.handleFavoritesUpdate)
+	}
 	return mux
+}
+
+type FavoritesResponse struct {
+	Favorites []string `json:"favorites"`
+}
+
+func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {
+	if s.Config == nil || s.Config.GetFavorites == nil {
+		http.Error(w, "favoritos indisponíveis", http.StatusNotImplemented)
+		return
+	}
+	writeJSON(w, FavoritesResponse{Favorites: s.Config.GetFavorites()})
+}
+
+func (s *Server) handleFavoritesUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.Config == nil || s.Config.UpdateFavorites == nil {
+		http.Error(w, "favoritos indisponíveis", http.StatusNotImplemented)
+		return
+	}
+	var in FavoritesResponse
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
+		http.Error(w, fmt.Sprintf("lendo favoritos: %v", err), http.StatusBadRequest)
+		return
+	}
+	if len(in.Favorites) > 500 {
+		http.Error(w, "lista de favoritos grande demais", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if err := s.Config.UpdateFavorites(in.Favorites); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, FavoritesResponse{Favorites: in.Favorites})
+}
+
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if s.Config == nil || s.Config.Get == nil {
+		http.Error(w, "configuração editável indisponível", http.StatusNotImplemented)
+		return
+	}
+	writeJSON(w, ConfigResponse{Settings: s.Config.Get(), EnvLocked: s.Config.EnvLocked})
+}
+
+func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.Config == nil || s.Config.Update == nil {
+		http.Error(w, "configuração editável indisponível", http.StatusNotImplemented)
+		return
+	}
+	// A UI sem autenticação é intencionalmente local. A checagem evita que uma
+	// página de outra origem faça POST silencioso contra o bot; o deploy ainda
+	// deve publicar a porta somente em loopback, como no docker-compose.
+	if origin := r.Header.Get("Origin"); origin != "" {
+		parsed, err := url.Parse(origin)
+		if err != nil || parsed.Host == "" || parsed.Host != r.Host {
+			http.Error(w, "origem não autorizada", http.StatusForbidden)
+			return
+		}
+	}
+	if r.ContentLength > 1<<20 {
+		http.Error(w, "configuração grande demais", http.StatusRequestEntityTooLarge)
+		return
+	}
+	var in config.UISettings
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := dec.Decode(&in); err != nil {
+		http.Error(w, fmt.Sprintf("lendo configuração: %v", err), http.StatusBadRequest)
+		return
+	}
+	out, err := s.Config.Update(in)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, ConfigResponse{Settings: out, EnvLocked: s.Config.EnvLocked})
 }
 
 // load busca o snapshot mais recente, já respondendo o erro HTTP certo
@@ -281,7 +390,12 @@ func (s *Server) handleTimeSlug(w http.ResponseWriter, r *http.Request) {
 // ordenados por ganho por moeda gasta (ver analyze.FindUpgrades), com a
 // série de preço de cada alvo.
 type MercadoResponse struct {
-	Upgrades    []analyze.Upgrade            `json:"upgrades"`
+	Upgrades []analyze.Upgrade `json:"upgrades"`
+	// Funnel explica uma lista de Upgrades vazia carta a carta — ver o
+	// comentário de analyze.UpgradeFunnel. Considered==0 quando o snapshot
+	// foi gravado antes deste campo existir; a tela cai no texto genérico
+	// nesse caso.
+	Funnel      analyze.UpgradeFunnel        `json:"funnel"`
 	PriceSeries map[int64][]store.PricePoint `json:"price_series"`
 }
 
@@ -300,13 +414,272 @@ func (s *Server) handleMercado(w http.ResponseWriter, r *http.Request) {
 		series = nil
 	}
 
-	writeJSON(w, MercadoResponse{Upgrades: snap.Upgrades, PriceSeries: series})
+	writeJSON(w, MercadoResponse{Upgrades: snap.Upgrades, Funnel: snap.MarketFunnel, PriceSeries: series})
 }
 
 // EvolucoesResponse são as evoluções do dia que valem a pena NO seu elenco
 // — distinto da análise carta-a-carta de /api/time/{slug} (ver CLAUDE.md).
+type EvoMatchView struct {
+	Evolution       domain.Evolution     `json:"evolution"`
+	Player          domain.ClubPlayer    `json:"player"`
+	Slot            domain.Position      `json:"slot"`
+	Result          domain.Player        `json:"result"`
+	Cost            int                  `json:"cost"`
+	Affordable      bool                 `json:"affordable"`
+	Acquisition     string               `json:"acquisition"`
+	CardSlug        string               `json:"card_slug,omitempty"`
+	BeatsStarter    bool                 `json:"beats_starter"`
+	Highlights      []string             `json:"highlights"`
+	Impact          float64              `json:"impact"`
+	CurrentGGRating float64              `json:"current_gg_rating,omitempty"`
+	FinalGGRating   float64              `json:"final_gg_rating,omitempty"`
+	BestPath        *cards.EvoPotential  `json:"best_path,omitempty"`
+	Alternates      []cards.EvoPotential `json:"alternates,omitempty"`
+}
+
+// evoMatchView nasce exclusivamente do relatório carta-a-carta do fut.gg.
+// analyze.EvoMatch não participa: o path confirma elegibilidade, carta final
+// e GG Rating; o catálogo de evoluções só completa custo, prazo e objetivos.
+func evoMatchView(report cards.CardReport, evolution domain.Evolution, club domain.Club, budget int) (EvoMatchView, bool) {
+	potentials := matchingEvoPotentials(report, evolution.Name)
+	if len(potentials) == 0 {
+		return EvoMatchView{}, false
+	}
+	best := potentials[0]
+	final := best.Path.Final()
+	slot := final.GGRatingPos
+	if slot == "" {
+		slot = report.Player.GGRatingPos
+	}
+	if slot == "" {
+		slot = final.Position
+	}
+	if slot == "" {
+		slot = report.Player.Position
+	}
+	view := EvoMatchView{
+		Evolution:       evolution,
+		Player:          report.Player,
+		Slot:            slot,
+		Result:          final,
+		Cost:            evolution.CoinCost,
+		Affordable:      evolution.CoinCost <= budget,
+		Acquisition:     analyze.EvolutionAcquisition(evolution),
+		CardSlug:        report.Slug,
+		Impact:          best.GGRatingGain,
+		CurrentGGRating: report.Player.GGRating,
+		FinalGGRating:   best.FinalGGRating,
+		BestPath:        &best,
+		Alternates:      potentials[1:],
+	}
+	if starter, ok := weakestStarterByGG(club, slot); ok {
+		view.BeatsStarter = starter.ID != report.Player.ID && view.FinalGGRating > starter.GGRating
+	}
+	return view, true
+}
+
+func confirmedEvoViews(snap store.Snapshot, minRating, extraBudget int) []EvoMatchView {
+	cash, raisable := snap.Club.Budget()
+	budget := cash + raisable + extraBudget
+	views := make([]EvoMatchView, 0)
+	for _, report := range snap.Cards {
+		if (minRating > 0 && report.Player.Rating < minRating) || !report.Player.Evolvable() {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, evolution := range snap.Evolutions {
+			key := strings.ToLower(strings.TrimSpace(evolution.ID + "\x00" + evolution.Name))
+			if seen[key] {
+				continue
+			}
+			view, ok := evoMatchView(report, evolution, snap.Club, budget)
+			if !ok {
+				continue
+			}
+			seen[key] = true
+			views = append(views, view)
+		}
+	}
+	return views
+}
+
+func weakestStarterByGG(club domain.Club, position domain.Position) (domain.ClubPlayer, bool) {
+	var weakest domain.ClubPlayer
+	found := false
+	for _, slot := range club.Squad.Starters {
+		if slot.Position != position {
+			continue
+		}
+		player, ok := club.PlayerByID(slot.PlayerID)
+		if !ok || player.GGRating <= 0 {
+			continue
+		}
+		if !found || player.GGRating < weakest.GGRating {
+			weakest, found = player, true
+		}
+	}
+	return weakest, found
+}
+
+func matchingEvoPotentials(report cards.CardReport, evolutionName string) []cards.EvoPotential {
+	if report.Player.GGRating <= 0 {
+		return nil
+	}
+	all := make([]cards.EvoPotential, 0, 1+len(report.Alternates))
+	if report.Best != nil {
+		all = append(all, *report.Best)
+	}
+	all = append(all, report.Alternates...)
+	matched := all[:0]
+	for _, potential := range all {
+		if potential.GGRatingGain <= 0 || potential.FinalGGRating <= report.Player.GGRating {
+			continue
+		}
+		for _, name := range potential.Path.Chain {
+			if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(evolutionName)) {
+				matched = append(matched, potential)
+				break
+			}
+		}
+	}
+	sort.SliceStable(matched, func(i, j int) bool {
+		if matched[i].FinalGGRating != matched[j].FinalGGRating {
+			return matched[i].FinalGGRating > matched[j].FinalGGRating
+		}
+		return matched[i].CoinsCost < matched[j].CoinsCost
+	})
+	return matched
+}
+
+type evoSortCriterion struct {
+	Field string
+	Desc  bool
+}
+
+func parseEvoSort(raw string) []evoSortCriterion {
+	if strings.TrimSpace(raw) == "" {
+		raw = "impact:desc"
+	}
+	criteria := make([]evoSortCriterion, 0, 4)
+	seen := map[string]bool{}
+	for _, item := range strings.Split(raw, ",") {
+		parts := strings.SplitN(strings.ToLower(strings.TrimSpace(item)), ":", 2)
+		field := parts[0]
+		if field == "gain" {
+			field = "impact"
+		}
+		defaultDesc := field == "impact" || field == "result" || field == "final"
+		desc := defaultDesc
+		if len(parts) == 2 {
+			desc = parts[1] == "desc"
+		}
+		switch field {
+		case "impact", "result", "cost", "final", "player", "evolution", "acquisition":
+		default:
+			continue
+		}
+		if seen[field] {
+			continue
+		}
+		seen[field] = true
+		criteria = append(criteria, evoSortCriterion{Field: field, Desc: desc})
+		if len(criteria) == 4 {
+			break
+		}
+	}
+	if len(criteria) == 0 {
+		return []evoSortCriterion{{Field: "impact", Desc: true}}
+	}
+	return criteria
+}
+
+func compareEvoViews(a, b EvoMatchView, criterion evoSortCriterion) int {
+	cmp := 0
+	switch criterion.Field {
+	case "impact":
+		cmp = compareFloat(a.Impact, b.Impact)
+	case "result":
+		cmp = compareBool(a.BeatsStarter, b.BeatsStarter)
+	case "cost":
+		cmp = compareInt(a.Cost, b.Cost)
+	case "final":
+		aFinal, bFinal := a.Result.Rating, b.Result.Rating
+		if a.BestPath != nil && a.BestPath.FinalOverall > 0 {
+			aFinal = a.BestPath.FinalOverall
+		}
+		if b.BestPath != nil && b.BestPath.FinalOverall > 0 {
+			bFinal = b.BestPath.FinalOverall
+		}
+		cmp = compareInt(aFinal, bFinal)
+	case "player":
+		cmp = strings.Compare(strings.ToLower(a.Player.Display()), strings.ToLower(b.Player.Display()))
+	case "evolution":
+		cmp = strings.Compare(strings.ToLower(a.Evolution.Name), strings.ToLower(b.Evolution.Name))
+	case "acquisition":
+		cmp = strings.Compare(strings.ToLower(a.Acquisition), strings.ToLower(b.Acquisition))
+	}
+	if criterion.Desc {
+		return -cmp
+	}
+	return cmp
+}
+
+func compareFloat(a, b float64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func compareInt(a, b int) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func compareBool(a, b bool) int {
+	if a == b {
+		return 0
+	}
+	if a {
+		return 1
+	}
+	return -1
+}
+
+type EvolucoesSummary struct {
+	Matches       int            `json:"matches"`
+	Players       int            `json:"players"`
+	Starters      int            `json:"starters"`
+	Unaffordable  int            `json:"unaffordable"`
+	ExpiringSoon  int            `json:"expiring_soon"`
+	ByAcquisition map[string]int `json:"by_acquisition"`
+}
+
+type EvolucoesFilters struct {
+	Positions  []string `json:"positions"`
+	Categories []string `json:"categories"`
+}
+
+// EvolucoesResponse são as evoluções do dia com filtros e paginação no
+// servidor. O resumo usa o conjunto filtrado, não apenas a página visível.
 type EvolucoesResponse struct {
-	Matches []analyze.EvoMatch `json:"matches"`
+	Matches  []EvoMatchView   `json:"matches"`
+	Total    int              `json:"total"`
+	Page     int              `json:"page"`
+	PageSize int              `json:"page_size"`
+	Pages    int              `json:"pages"`
+	Summary  EvolucoesSummary `json:"summary"`
+	Filters  EvolucoesFilters `json:"filters"`
 }
 
 func (s *Server) handleEvolucoes(w http.ResponseWriter, r *http.Request) {
@@ -314,7 +687,183 @@ func (s *Server) handleEvolucoes(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, EvolucoesResponse{Matches: snap.EvoMatches})
+	q := r.URL.Query()
+	page := parsePositive(q.Get("page"), 1)
+	pageSize := parsePositive(q.Get("page_size"), 20)
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	position := strings.ToUpper(strings.TrimSpace(q.Get("position")))
+	impact := strings.ToLower(strings.TrimSpace(q.Get("impact")))
+	category := strings.ToLower(strings.TrimSpace(q.Get("category")))
+	search := strings.ToLower(strings.TrimSpace(q.Get("q")))
+	status := strings.ToLower(strings.TrimSpace(q.Get("status")))
+	expiring := strings.EqualFold(q.Get("expiring"), "proxima")
+	sortCriteria := parseEvoSort(q.Get("sort"))
+
+	now := time.Now()
+	filterPositions := map[string]bool{}
+	filterCategories := map[string]bool{}
+	confirmed := confirmedEvoViews(snap, s.EvolutionMinRating, s.EvolutionExtraBudget)
+	for _, view := range confirmed {
+		filterPositions[string(view.Slot)] = true
+		filterCategories[view.Acquisition] = true
+	}
+
+	filtered := make([]EvoMatchView, 0, len(confirmed))
+	for _, view := range confirmed {
+		m := view
+		if position != "" && position != "TODAS" && string(m.Slot) != position {
+			continue
+		}
+		if category != "" && category != "todas" && m.Acquisition != category {
+			continue
+		}
+		if (status == "fora_orcamento" && m.Affordable) || (status == "disponivel" && !m.Affordable) {
+			continue
+		}
+		if expiring && (m.Evolution.ExpiresAt.IsZero() || m.Evolution.ExpiresAt.Before(now) || m.Evolution.ExpiresAt.After(now.Add(7*24*time.Hour))) {
+			continue
+		}
+		if search != "" {
+			name := strings.ToLower(m.Evolution.Name + " " + m.Player.Name + " " + m.Player.CommonName)
+			if !strings.Contains(name, search) {
+				continue
+			}
+		}
+		if (impact == "titular" && !view.BeatsStarter) || (impact == "reserva" && view.BeatsStarter) {
+			continue
+		}
+		filtered = append(filtered, view)
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		a, b := filtered[i], filtered[j]
+		for _, criterion := range sortCriteria {
+			if cmp := compareEvoViews(a, b, criterion); cmp != 0 {
+				return cmp < 0
+			}
+		}
+		return false
+	})
+
+	summary := EvolucoesSummary{ByAcquisition: map[string]int{}}
+	players := map[int64]bool{}
+	for _, m := range filtered {
+		summary.Matches++
+		players[m.Player.ID] = true
+		if m.BeatsStarter {
+			summary.Starters++
+		}
+		if !m.Affordable {
+			summary.Unaffordable++
+		}
+		if !m.Evolution.ExpiresAt.IsZero() && !m.Evolution.ExpiresAt.Before(now) && !m.Evolution.ExpiresAt.After(now.Add(7*24*time.Hour)) {
+			summary.ExpiringSoon++
+		}
+		summary.ByAcquisition[m.Acquisition]++
+	}
+	summary.Players = len(players)
+	total := len(filtered)
+	pages := 0
+	if total > 0 {
+		pages = (total + pageSize - 1) / pageSize
+	}
+	if pages > 0 && page > pages {
+		page = pages
+	}
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+
+	views := filtered[start:end]
+	positions := make([]string, 0, len(filterPositions))
+	for position := range filterPositions {
+		positions = append(positions, position)
+	}
+	categories := make([]string, 0, len(filterCategories))
+	for category := range filterCategories {
+		categories = append(categories, category)
+	}
+	sort.Strings(positions)
+	sort.Strings(categories)
+	writeJSON(w, EvolucoesResponse{Matches: views, Total: total, Page: page, PageSize: pageSize, Pages: pages, Summary: summary, Filters: EvolucoesFilters{Positions: positions, Categories: categories}})
+}
+
+func parsePositive(value string, fallback int) int {
+	var n int
+	if _, err := fmt.Sscanf(value, "%d", &n); err != nil || n < 1 {
+		return fallback
+	}
+	return n
+}
+
+// InvestimentosResponse é o agente de trading: cartas do mercado ganhando
+// valor, o que fazer com o banco de reservas, e demanda de fodder de SBC
+// esquentando — ver analyze.FindInvestments/FindSellCandidates/
+// FindFodderDemand. Puramente consultivo, como o resto do bot.
+//
+// Diferente das outras rotas, calcula os três FRESCOS a cada request em
+// vez de ler um campo pronto do snapshot: Investments depende do momentum
+// mais recente (Store.LatestMomentum), que o ciclo de coleta rápido
+// (scheduler.FastTicker) atualiza bem mais vezes por dia que o snapshot
+// completo — ler um campo congelado no snapshot diário jogaria fora
+// justamente o motivo de existir um ciclo rápido. O cálculo em si é
+// barato (funções puras em cima do que já está no Store), então recalcular
+// por request segue o mesmo padrão que report.SquadSummary/RankChallenges
+// já usam.
+type InvestimentosResponse struct {
+	Investments      []analyze.Investment     `json:"investments"`
+	InvestmentFunnel analyze.InvestmentFunnel `json:"investment_funnel"`
+	SellCandidates   []analyze.SellCandidate  `json:"sell_candidates"`
+	SellFunnel       analyze.SellFunnel       `json:"sell_funnel"`
+	FodderDemand     []analyze.FodderSignal   `json:"fodder_demand"`
+}
+
+func (s *Server) handleInvestimentos(w http.ResponseWriter, r *http.Request) {
+	snap, ok := s.load(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+
+	// Momentum e tendência de custo de SBC são sinais OPCIONAIS: sem eles
+	// (ciclo rápido ainda não rodou) a rota ainda responde, só sem esses
+	// dois sinais — mesmo princípio de tolerância a falha parcial que
+	// futgg.Collect já segue.
+	momentum, err := s.Store.LatestMomentum(ctx, s.Cycle)
+	if err != nil {
+		momentum = nil
+	}
+
+	keys := make([]string, 0, len(snap.SBCs))
+	for _, sbc := range snap.SBCs {
+		for idx, ch := range sbc.Challenges {
+			keys = append(keys, store.SBCChallengeKey(sbc.ID, idx, ch.Name))
+		}
+	}
+	rawTrends, err := s.Store.SBCCostTrend(ctx, s.Cycle, keys, priceSeriesWindow)
+	if err != nil {
+		rawTrends = nil
+	}
+	costTrends := make(map[string]analyze.CostTrend, len(rawTrends))
+	for k, t := range rawTrends {
+		costTrends[k] = analyze.CostTrend{ChangePct: t.ChangePct, Samples: t.Samples}
+	}
+
+	investments, invFunnel := analyze.FindInvestments(snap.Club, momentum, snap.NewCards, analyze.DefaultInvestmentOptions())
+	sellCandidates, sellFunnel := analyze.FindSellCandidates(snap.Club, snap.Cards, snap.SquadSwaps, analyze.DefaultSellOptions())
+	fodderDemand := analyze.FindFodderDemand(snap.SBCs, snap.Market, costTrends, analyze.DefaultFodderDemandOptions())
+
+	writeJSON(w, InvestimentosResponse{
+		Investments: investments, InvestmentFunnel: invFunnel,
+		SellCandidates: sellCandidates, SellFunnel: sellFunnel,
+		FodderDemand: fodderDemand,
+	})
 }
 
 func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {

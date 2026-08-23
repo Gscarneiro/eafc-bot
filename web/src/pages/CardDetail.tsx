@@ -6,8 +6,14 @@ import Chip from "../components/Chip";
 import TrendChart from "../components/TrendChart";
 import { formatCoins, formatDate, formatSigned, styleNames } from "../format";
 import { useData } from "../useData";
+import type { EvoPotential } from "../types";
 import "../shared.css";
 import "./CardDetail.css";
+
+function PathTimeline({ potential }: { potential: EvoPotential }) {
+  const steps = potential.path?.steps ?? [];
+  return <div className="detail-timeline" aria-label="Linha do tempo do path">{steps.map((step, index) => <div className="detail-step" key={`${step.id}-${index}`}><span className="detail-step-index">{String(index + 1).padStart(2, "0")}</span>{step.image_url && <img src={step.image_url} alt="" loading="lazy" />}<div><strong>{step.rating} {step.position}</strong><span>{step.gg_rating ? `GG ${step.gg_rating.toFixed(1)}` : index === 0 ? "atual" : "projetado"}</span></div>{index < steps.length - 1 && <span className="detail-step-arrow" aria-hidden="true">→</span>}</div>)}</div>;
+}
 
 // CardDetail é "/time/:slug" — atual x potencial de uma carta específica,
 // com o histórico de preço dela e a face de atributos (PAC/SHO/PAS/DRI/DEF/
@@ -135,6 +141,7 @@ export default function CardDetail() {
               <p className="why">Novos PlayStyles: {styleNames(report.best.gained_play_styles)}</p>
             )}
             <div className="chain">via {(report.best.path.chain ?? []).join(" → ")}</div>
+            <PathTimeline potential={report.best} />
             <div className="money">
               <span>{report.best.coin_cost ? `${formatCoins(report.best.coin_cost)} moedas` : "grátis"}</span>
               {report.best.point_cost > 0 && <span>{report.best.point_cost} pontos</span>}
@@ -161,6 +168,7 @@ export default function CardDetail() {
                 <span>{alt.coin_cost ? `${formatCoins(alt.coin_cost)} moedas` : "grátis"}</span>
               </div>
               <div className="chain">via {(alt.path.chain ?? []).join(" → ")}</div>
+              <PathTimeline potential={alt} />
             </div>
           ))}
         </section>

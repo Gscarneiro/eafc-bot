@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/cards"
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
@@ -43,13 +44,27 @@ func cmdDemo(args []string) error {
 	data.Market = demoMarketRows(snap, rng)
 	data.TrendWindow = "72 horas"
 
+	// Mesmo motivo das linhas acima: analyzeAndBuild com dryRun=true e
+	// st=nil não tem de onde ler momentum nem tendência de custo de SBC
+	// (vêm do Store, não do snapshot) — monta na mão pro demo mostrar a
+	// seção de investimentos completa, inclusive o sinal de out-of-packs
+	// (Doué ganha uma versão nova em demoNewCards).
+	investments, invFunnel := analyze.FindInvestments(
+		snap.Club, demoMomentum(), demoNewCards(), analyze.DefaultInvestmentOptions())
+	data.Investments, data.InvestmentFunnel = investments, invFunnel
+	sellCandidates, sellFunnel := analyze.FindSellCandidates(
+		snap.Club, demoCardReports(snap.Club), data.SquadSwaps, analyze.DefaultSellOptions())
+	data.SellCandidates, data.SellFunnel = sellCandidates, sellFunnel
+	data.FodderDemand = analyze.FindFodderDemand(
+		snap.SBCs, snap.Market, demoSBCCostTrends(), analyze.DefaultFodderDemandOptions())
+
 	if err := writeReport(*outPath, data); err != nil {
 		return err
 	}
 
 	fmt.Printf("relatório de exemplo: %s\n", *outPath)
-	fmt.Printf("  %d upgrades · %d evoluções · %d SBCs\n",
-		len(data.Upgrades), len(data.Evolutions), len(data.SBCs))
+	fmt.Printf("  %d upgrades · %d evoluções · %d SBCs · %d investimentos · %d sinais de fodder\n",
+		len(data.Upgrades), len(data.Evolutions), len(data.SBCs), len(data.Investments), len(data.FodderDemand))
 	return nil
 }
 
@@ -254,14 +269,64 @@ func demoSBCs() []domain.SBC {
 	return []domain.SBC{
 		{ID: "s1", Name: "Upgrade 85+ Garantido", Group: "Upgrades", Repeatable: true,
 			SolutionCost: 62_000, ExpiresAt: time.Now().Add(30 * time.Hour),
-			Rewards: []domain.Reward{{Kind: "pack", Description: "1x jogador 85+ não negociável", PackValue: 78_000}}},
+			Rewards: []domain.Reward{{Kind: "pack", Description: "1x jogador 85+ não negociável", PackValue: 78_000}},
+			Challenges: []domain.SBCChallenge{
+				{Name: "85+", RequirementsText: []string{"Min. Team Rating: 85"}, CheapestSolutionCoins: 62_000},
+			}},
 		{ID: "s2", Name: "Desafio da Liga: Serie A", Group: "Ligas",
 			SolutionCost: 18_000, ExpiresAt: time.Now().Add(200 * time.Hour),
-			Rewards: []domain.Reward{{Kind: "pack", Description: "Pacote Ouro Premium Jogadores", PackValue: 25_000}}},
+			Rewards: []domain.Reward{{Kind: "pack", Description: "Pacote Ouro Premium Jogadores", PackValue: 25_000}},
+			Challenges: []domain.SBCChallenge{
+				{Name: "Serie A", RequirementsText: []string{"Min. 1 Players from: Serie A", "Min. Team Rating: 83"}, CheapestSolutionCoins: 18_000},
+			}},
 		{ID: "s3", Name: "Marcelo Icon", Group: "Ícones",
 			SolutionCost: 890_000, ExpiresAt: time.Now().Add(400 * time.Hour),
-			Rewards: []domain.Reward{{Kind: "player", Description: "Marcelo 89 LB (não negociável)", PackValue: 700_000}}},
+			Rewards: []domain.Reward{{Kind: "player", Description: "Marcelo 89 LB (não negociável)", PackValue: 700_000}},
+			Challenges: []domain.SBCChallenge{
+				{Name: "Ícones", RequirementsText: []string{"Min. 1 Players: Any Icons"}, CheapestSolutionCoins: 890_000},
+			}},
 	}
+}
+
+// demoSBCCostTrends dá uma fase diferente pra cada SBC do demo — pico
+// (s1, custo subindo forte), esfriando (s2, custo caindo) e recente (s3,
+// sem tendência ainda) — pra tela de Investimentos mostrar os três casos.
+func demoSBCCostTrends() map[string]analyze.CostTrend {
+	return map[string]analyze.CostTrend{
+		store.SBCChallengeKey("s1", 0, "85+"):     {ChangePct: 22.5, Samples: 4},
+		store.SBCChallengeKey("s2", 0, "Serie A"): {ChangePct: -14.0, Samples: 3},
+	}
+}
+
+// demoMomentum simula a rota de momentum do fut.gg: cartas do mercado
+// caindo da própria média recente. Doué (id=101) também aparece como
+// out-of-packs: demoNewCards inclui uma carta nova que compartilha o
+// mesmo BasePlayerEaID, simulando "o jogador ganhou uma versão nova".
+func demoMomentum() []domain.Player {
+	discount := func(base domain.Player, pct float64, baseEaID int64) domain.Player {
+		base.MomentumPct = pct
+		base.BasePlayerEaID = baseEaID
+		return base
+	}
+	market := demoMarket()
+	byID := make(map[int64]domain.Player, len(market))
+	for _, p := range market {
+		byID[p.ID] = p
+	}
+	return []domain.Player{
+		discount(byID[101], 28.4, 9001), // Doué — vira out-of-packs (ver demoNewCards)
+		discount(byID[103], 19.2, 9002), // Guéhi
+		discount(byID[109], 8.0, 9003),  // Hato — abaixo do piso de 15%, cai no funil
+	}
+}
+
+// demoNewCards simula "cartas vistas pela primeira vez hoje" — uma versão
+// especial nova do MESMO jogador do Doué (BasePlayerEaID 9001), pra
+// exercitar o sinal de out-of-packs em FindInvestments.
+func demoNewCards() []domain.Player {
+	novaVersao := p(9101, "Doué TOTS+", 91, domain.RW, "TOTS+", 95, 87, 86, 94, 50, 74, 480_000)
+	novaVersao.BasePlayerEaID = 9001
+	return []domain.Player{novaVersao}
 }
 
 func demoObjectives() []domain.Objective {

@@ -319,7 +319,119 @@ footer{
     </div>
     {{end}}
   {{else}}
-    <div class="empty">Nenhuma troca passou do ganho mínimo hoje. Seu time está bem servido no orçamento atual — vale olhar as evoluções abaixo.</div>
+    <div class="empty">
+      Nenhuma troca passou do ganho mínimo de {{printf "%.1f" .Funnel.MinGain}} hoje.
+      {{if eq .Funnel.Considered 0}}
+        Seu time está bem servido no mercado atual — vale olhar as evoluções abaixo.
+      {{else}}
+        Das {{.Funnel.Considered}} cartas do mercado: {{.Funnel.Owned}} você já tem, {{.Funnel.SBCOnly}} são exclusivas de SBC, {{.Funnel.Unpriced}} vieram sem cotação, {{.Funnel.OutOfPosition}} não jogam em nenhum titular seu, e {{.Funnel.BelowMinGain}} jogariam mas não bateram o ganho mínimo.
+        {{if .Funnel.HasBest}}
+          {{if gt .Funnel.BestGain 0.0}}A mais perto foi {{.Funnel.BestName}} no {{.Funnel.BestSlot}}, {{signed .Funnel.BestGain}} (mínimo exigido: +{{printf "%.1f" .Funnel.MinGain}}).
+          {{else}}Nenhum candidato ficou acima de um titular seu (melhor caso: {{.Funnel.BestName}} no {{.Funnel.BestSlot}}, {{signed .Funnel.BestGain}}).{{end}}
+        {{end}}
+        Vale baixar <code>report.min_gain</code>, ligar <code>report.allow_unpriced</code> ou <code>report.allow_out_of_position</code> na configuração — <code>market.extra_budget</code> não muda essa lista, só marca o que está fora do bolso.
+      {{end}}
+    </div>
+  {{end}}
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>Cartas em alta</h2>
+    <span class="count">{{len .Investments}} sinais</span>
+  </div>
+  <p class="sec-note">Puramente consultivo — o bot nunca compra nem vende sozinho. <strong>Moedas deste ciclo não passam pro próximo jogo</strong>: um flip só vale a pena se der tempo de vender antes da virada. "Out-of-packs" (o jogador ganhou uma carta especial nova, esta sai do pool de pacotes) é o sinal mais forte da pesquisa; "desconto" é a carta abaixo da própria média recente, já calculado pelo fut.gg.</p>
+  {{if .Investments}}
+    {{range .Investments}}
+    <div class="row">
+      <div class="slot">{{if eq .Signal "out-of-packs"}}OOP{{else}}%{{end}}</div>
+      <div>
+        <div class="swap">
+          <span class="in">{{.Candidate.Display}} {{.Candidate.Rating}} {{.Candidate.Version}}</span>
+          <span class="chip gain">-{{printf "%.1f" .MomentumPct}}%</span>
+          {{if eq .Signal "out-of-packs"}}<span class="chip warn">out-of-packs</span>{{end}}
+        </div>
+        {{if .Rationale}}<p class="why">{{join .Rationale " · "}}</p>{{end}}
+      </div>
+      <div class="money">
+        <span class="net">{{coins .Candidate.Price.Coins}}</span>
+        <span class="gross">média recente ~{{coins .ImpliedAverage}}</span>
+      </div>
+    </div>
+    {{end}}
+  {{else}}
+    <div class="empty">
+      Nenhuma carta passou do desconto mínimo de {{printf "%.1f" .InvestmentFunnel.MinMomentumPct}}% hoje.
+      {{if gt .InvestmentFunnel.Considered 0}}
+        Das {{.InvestmentFunnel.Considered}} cartas do momentum: {{.InvestmentFunnel.Owned}} você já tem, {{.InvestmentFunnel.NotTradeable}} não são compráveis (SBC ou extinta), {{.InvestmentFunnel.SupersededBySibling}} têm uma versão melhor do mesmo jogador na lista, e {{.InvestmentFunnel.BelowMinMomentum}} caíram menos que o piso.
+        {{if .InvestmentFunnel.HasBestRejected}}A mais perto foi {{.InvestmentFunnel.BestRejectedName}}, -{{printf "%.1f" .InvestmentFunnel.BestRejectedPct}}%.{{end}}
+      {{else}}
+        O ciclo de coleta rápido (momentum) ainda não rodou — ver <code>serve.fast_refresh_minutes</code>.
+      {{end}}
+    </div>
+  {{end}}
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>Vale vender do banco?</h2>
+    <span class="count">{{len .SellCandidates}} cartas</span>
+  </div>
+  <p class="sec-note">Só o banco (fora do XI titular). Untradeable nunca vira sugestão de venda — some como fodder de SBC sem custo de oportunidade. O valor líquido já desconta a taxa de venda de 5% da EA.</p>
+  {{if .SellCandidates}}
+    {{range .SellCandidates}}
+    <div class="row">
+      <div class="slot">{{.Player.Position}}</div>
+      <div>
+        <div class="swap">
+          <span class="in">{{.Player.Display}} {{.Player.Rating}}</span>
+          {{if eq .Recommendation "vender"}}<span class="chip cost">vender</span>
+          {{else if eq .Recommendation "segurar_potencial"}}<span class="chip gain">segurar: potencial</span>
+          {{else if eq .Recommendation "promover"}}<span class="chip gain">promover</span>
+          {{else}}<span class="chip flat">não vendável</span>{{end}}
+        </div>
+        {{if .Rationale}}<p class="why">{{join .Rationale " · "}}</p>{{end}}
+      </div>
+      <div class="money">
+        {{if .NetSellValue}}<span class="net">{{coins .NetSellValue}}</span><span class="gross">líquido</span>{{end}}
+      </div>
+    </div>
+    {{end}}
+  {{else}}
+    <div class="empty">Nada no banco além do XI titular hoje.</div>
+  {{end}}
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>SBCs puxando demanda</h2>
+    <span class="count">{{len .FodderDemand}} sinais</span>
+  </div>
+  <p class="sec-note">O fut.gg já resolve o fodder mais barato pra cada desafio — aqui é o CUSTO dessa solução ao longo do tempo, não uma carta específica. Pico de demanda é logo no lançamento do SBC, não perto da expiração: perto de expirar é hora de esvaziar o fodder que você já tem, não comprar mais.</p>
+  {{if .FodderDemand}}
+    {{range .FodderDemand}}
+    <div class="row">
+      <div class="slot">SBC</div>
+      <div>
+        <div class="swap">
+          <span class="in">{{.SBCName}} — {{.Challenge}}</span>
+          {{if eq .Phase "esvaziar"}}<span class="chip warn">esvaziar</span>
+          {{else if eq .Phase "pico"}}<span class="chip warn">pico — não compre</span>
+          {{else if eq .Phase "esfriando"}}<span class="chip gain">esfriando</span>
+          {{else}}<span class="chip flat">{{.Phase}}</span>{{end}}
+          {{if .Repeatable}}<span class="chip flat">repetível</span>{{end}}
+        </div>
+        <p class="why">{{.Requirement}}{{if ge .PoolSize 0}} · {{.PoolSize}} cartas do mercado bateriam{{end}}</p>
+        {{if .Rationale}}<p class="why">{{join .Rationale " · "}}</p>{{end}}
+      </div>
+      <div class="money">
+        <span class="net">{{coins .CostCoins}}</span>
+        {{if .CostChangePct}}<span class="gross">{{signed .CostChangePct}}%</span>{{end}}
+      </div>
+    </div>
+    {{end}}
+  {{else}}
+    <div class="empty">Nenhum SBC com custo de solução resolvido hoje.</div>
   {{end}}
 </section>
 

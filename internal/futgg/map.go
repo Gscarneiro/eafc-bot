@@ -86,6 +86,11 @@ func mapPlayer(n node, cycle string, l lens) domain.Player {
 	p.RolesPlus = n.ints("rolesPlus", "roles_plus")
 	p.RolesPlusPlus = n.ints("rolesPlusPlus", "roles_plus_plus")
 
+	// Só a rota de momentum (Client.Momentum) manda este campo — testado
+	// ao vivo em 22/08/2026 contra /api/fut/players/v2/momentum/?hours=24.
+	// Fica 0 pra qualquer outra fonte, mesmo convênio de GGRating.
+	p.MomentumPct = n.float64(l.k("momentum_pct", "momentumPercentage", "momentum_percentage")...)
+
 	if ts := n.str("releasedAt", "released_at", "createdAt", "created_at"); ts != "" {
 		if t, err := parseTime(ts); err == nil {
 			p.ReleasedAt = t
@@ -191,17 +196,40 @@ func resolvePlayStyleName(raw string, l lens) string {
 func mapPrice(n node, l lens) domain.Price {
 	p := domain.Price{
 		Coins:     n.int(l.k("price", "price.current", "currentPrice", "price", "priceNum", "lowestBin", "lowest_bin")...),
-		Extinct:   n.bool_("price.isExtinct", "isExtinct", "extinct"),
 		IsSBC:     n.bool_("isSbc", "is_sbc", "sbcOnly", "untradeable"),
 		UpdatedAt: time.Now(),
+	}
+	// Extinct só é lido quando a FONTE mandou a chave — checagem de
+	// presença, não n.bool_ direto, porque "ausente" e "presente e false"
+	// não podem virar o mesmo caso (mesmo padrão de GGRatingPos acima).
+	// Antes disto o código inferia Extinct=true de Coins==0, misturando
+	// dois sinais diferentes: "sem oferta de verdade" (a demanda passou do
+	// teto que a EA define pra faixa — sinal real de mercado, pesquisa de
+	// 22/08/2026) e "não conseguimos ler o preço" (falha de raspagem — a
+	// listagem de mercado às vezes não renderiza preço no servidor). O
+	// segundo já tem tratamento próprio (report.AllowUnpriced,
+	// analyze.Upgrade.Unpriced); tratá-lo como "extinto" escondia os dois
+	// atrás de uma métrica só — scan de prices_26.json em 22/08/2026 achou
+	// 22,5% dos pontos gravados nesse estado contaminado.
+	for _, key := range []string{"price.isExtinct", "isExtinct", "extinct"} {
+		v, ok := n.lookup(key)
+		if !ok || v == nil {
+			continue
+		}
+		switch t := v.(type) {
+		case bool:
+			p.Extinct = t
+		case float64:
+			p.Extinct = t != 0
+		case string:
+			p.Extinct, _ = strconv.ParseBool(t)
+		}
+		break
 	}
 	if ts := n.str("price.updatedAt", "priceUpdatedAt", "updatedAt"); ts != "" {
 		if t, err := parseTime(ts); err == nil {
 			p.UpdatedAt = t
 		}
-	}
-	if p.Coins == 0 && !p.IsSBC {
-		p.Extinct = true
 	}
 	return p
 }

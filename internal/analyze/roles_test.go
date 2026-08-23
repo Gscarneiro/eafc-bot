@@ -187,12 +187,12 @@ func TestSugereMesmoSemPrecoQuandoPermitido(t *testing.T) {
 	semPreco := []domain.Player{melhor} // Price.Coins == 0
 
 	opt := DefaultUpgradeOptions(100_000)
-	if got := FindUpgrades(club, semPreco, opt); len(got) != 0 {
+	if got, _ := FindUpgrades(club, semPreco, opt); len(got) != 0 {
 		t.Fatalf("sem AllowUnpriced não deveria sugerir nada, veio %d", len(got))
 	}
 
 	opt.AllowUnpriced = true
-	got := FindUpgrades(club, semPreco, opt)
+	got, _ := FindUpgrades(club, semPreco, opt)
 	if len(got) != 1 {
 		t.Fatalf("com AllowUnpriced deveria sugerir 1, veio %d", len(got))
 	}

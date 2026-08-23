@@ -57,7 +57,7 @@ type CardReport struct {
 }
 
 // BuildReports monta um CardReport para cada jogador do clube com rating
-// acima de minRating. A ordem de saída é por GGRatingGain do Best
+// igual ou acima de minRating. A ordem de saída é por GGRatingGain do Best
 // decrescente (quem ganha mais primeiro); cartas sem Best vão ao final,
 // ordenadas por nome.
 func BuildReports(ctx context.Context, client *futgg.Client, club domain.Club, minRating int) ([]CardReport, error) {
@@ -65,7 +65,7 @@ func BuildReports(ctx context.Context, client *futgg.Client, club domain.Club, m
 
 	var out []CardReport
 	for _, cp := range club.Players {
-		if cp.Player.Rating <= minRating {
+		if cp.Player.Rating < minRating {
 			continue
 		}
 		r := CardReport{

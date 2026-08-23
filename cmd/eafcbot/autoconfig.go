@@ -25,7 +25,8 @@ func cmdAutoconfig(ctx context.Context, args []string) error {
 	maxScripts := fs.Int("max-scripts", 60, "quantos bundles JS baixar")
 	maxProbes := fs.Int("max-probes", 200, "quantas rotas candidatas sondar")
 	ignoreRobots := fs.Bool("ignore-robots", false,
-		"sondar também as rotas que o robots.txt do site pede para não bater")
+		"sondar também as rotas que o robots.txt do site pede para não bater "+
+			"(sem passar a flag, quem decide é futgg.respect_robots no config)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -34,6 +35,16 @@ func cmdAutoconfig(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// fs.Visit, não *ignoreRobots direto, porque o valor zero de um bool
+	// não distingue "não passei a flag" de "passei -ignore-robots=false".
+	passedFlag := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "ignore-robots" {
+			passedFlag = true
+		}
+	})
+	ignore := resolveIgnoreRobots(*ignoreRobots, passedFlag, cfg)
 
 	// A descoberta precisa ver o estado atual do site, não o cache; e pode
 	// pedir bastante coisa de uma vez, então afrouxamos a concorrência mas
@@ -47,8 +58,8 @@ func cmdAutoconfig(ctx context.Context, args []string) error {
 	opt.ArgValues = map[string]string{"gamertag": cfg.GamerTag}
 	opt.MaxProbes = *maxProbes
 	opt.Mine.MaxScripts = *maxScripts
-	opt.RespectRobots = !*ignoreRobots
-	if *ignoreRobots {
+	opt.RespectRobots = !ignore
+	if ignore {
 		fmt.Println("aviso: -ignore-robots ligado. O fut.gg pede, no robots.txt deles,")
 		fmt.Println("para não bater em /api/* nem em /gg-club/ — e é exatamente onde")
 		fmt.Println("ficam os dados. A escolha de ler assim mesmo é sua; o bot só não")
@@ -83,7 +94,7 @@ func cmdAutoconfig(ctx context.Context, args []string) error {
 		// as rotas de dados da fila antes da primeira requisição. Dizer
 		// "o site não quer ser lido" quando a API responde 200 manda o
 		// usuário para o caminho errado.
-		if res.BlockedCount > 0 && !*ignoreRobots {
+		if res.BlockedCount > 0 && !ignore {
 			return fmt.Errorf(
 				"nada foi identificado, e %d rotas nem chegaram a ser sondadas "+
 					"porque o robots.txt do site pede para não bater nelas — é lá "+
@@ -115,6 +126,20 @@ func cmdAutoconfig(ctx context.Context, args []string) error {
 	}
 	fmt.Println("\npróximo passo: eafcbot run")
 	return nil
+}
+
+// resolveIgnoreRobots decide se a descoberta ignora o robots.txt. A flag,
+// quando passada na linha de comando, sempre vence — é o override pontual.
+// Sem ela, quem decide não é mais um "false" fixo: é futgg.respect_robots
+// no config (ShouldRespectRobots) — o campo já existia mas não tinha call
+// site nenhum antes desta função, então setar "respect_robots": false no
+// config.json não fazia autoconfig ignorar o robots.txt "para sempre" como
+// o comentário do campo promete.
+func resolveIgnoreRobots(flagValue, flagPassed bool, cfg config.Config) bool {
+	if flagPassed {
+		return flagValue
+	}
+	return !cfg.FutGG.ShouldRespectRobots()
 }
 
 type applyStats struct{ endpoints, fieldMaps int }

@@ -267,6 +267,10 @@ func runJob(ctx context.Context, cfg config.Config, st store.Store, outPath stri
 		fmt.Printf("  aviso: %d rotas configuradas lidas apesar do robots.txt do site\n",
 			snap.Stats.RobotsBypassed)
 	}
+	if snap.Stats.MarketPriceSkipped > 0 {
+		fmt.Printf("  %d cartas do mercado descartadas por passar de market.max_price\n",
+			snap.Stats.MarketPriceSkipped)
+	}
 	if len(snap.Club.Players) == 0 {
 		// O clube é o dado central do bot — quando ele falha, o resto do
 		// briefing perde o sentido. "N fontes falharam" deixava esse erro
@@ -281,7 +285,7 @@ func runJob(ctx context.Context, cfg config.Config, st store.Store, outPath stri
 
 	var cardReports []cards.CardReport
 	if !dryRun && len(snap.Club.Players) > 0 {
-		fmt.Printf("analisando cartas acima de %d de overall (atual x potencial)...\n", cfg.Serve.CardsMinRating)
+		fmt.Printf("analisando cartas a partir de %d de overall (atual x potencial)...\n", cfg.Serve.CardsMinRating)
 		if cardReports, err = cards.BuildReports(ctx, client, snap.Club, cfg.Serve.CardsMinRating); err != nil {
 			snap.Errors = append(snap.Errors, "análise carta-a-carta: "+err.Error())
 		}
@@ -322,12 +326,27 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 	upOpt.AllowOutOfPos = cfg.Report.AllowOutOfPos
 	upOpt.AllowUnpriced = cfg.Report.AllowUnpriced
 
-	upgrades := analyze.FindUpgrades(snap.Club, snap.Market, upOpt)
-	evos := analyze.FindEvolutions(snap.Club, snap.Evolutions, budget)
+	upgrades, upFunnel := analyze.FindUpgrades(snap.Club, snap.Market, upOpt)
+	evos := analyze.FindEvolutionsWithOptions(snap.Club, snap.Evolutions, analyze.EvolutionOptions{
+		Budget:              budget,
+		MinRating:           cfg.Serve.CardsMinRating,
+		IncludeUnaffordable: true,
+	})
+	if len(cardReports) > 0 {
+		slugByID := make(map[int64]string, len(cardReports))
+		for _, card := range cardReports {
+			slugByID[card.Player.ID] = card.Slug
+		}
+		for i := range evos {
+			evos[i].CardSlug = slugByID[evos[i].Player.ID]
+		}
+	}
 
 	var newCards []domain.Player
 	var freshNews []domain.NewsItem
 	trends := map[int64]store.PriceTrend{}
+	var momentum []domain.Player
+	sbcCostTrends := map[string]store.PriceTrend{}
 	window := time.Duration(cfg.Report.TrendWindowHrs) * time.Hour
 
 	if !dryRun && st != nil {
@@ -346,6 +365,16 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 			snap.Errors = append(snap.Errors, "consultando tendências: "+err.Error())
 		}
 
+		// Momentum é o último valor lido pelo ciclo de coleta rápido
+		// (scheduler.FastTicker) — pode ser mais fresco que este snapshot
+		// diário; vazio (não erro) enquanto o ciclo rápido não rodou.
+		if momentum, err = st.LatestMomentum(ctx, cfg.FutGG.Cycle); err != nil {
+			snap.Errors = append(snap.Errors, "lendo momentum: "+err.Error())
+		}
+		if sbcCostTrends, err = st.SBCCostTrend(ctx, cfg.FutGG.Cycle, sbcChallengeKeys(snap.SBCs), window); err != nil {
+			snap.Errors = append(snap.Errors, "consultando tendência de custo de SBC: "+err.Error())
+		}
+
 		if err := st.SavePrices(ctx, cfg.FutGG.Cycle, snap.Market); err != nil {
 			snap.Errors = append(snap.Errors, "gravando preços: "+err.Error())
 		}
@@ -357,15 +386,19 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 	}
 
 	data := report.Build(report.Input{
-		Snapshot:    snap,
-		NewCards:    newCards,
-		FreshNews:   freshNews,
-		Upgrades:    upgrades,
-		Evolutions:  evos,
-		Trends:      trends,
-		TrendWindow: window,
-		Started:     started,
-		MaxRows:     cfg.Report.MaxRows,
+		Snapshot:      snap,
+		NewCards:      newCards,
+		FreshNews:     freshNews,
+		Upgrades:      upgrades,
+		Evolutions:    evos,
+		Funnel:        upFunnel,
+		Trends:        trends,
+		TrendWindow:   window,
+		Started:       started,
+		MaxRows:       cfg.Report.MaxRows,
+		CardReports:   cardReports,
+		Momentum:      momentum,
+		SBCCostTrends: sbcCostTrends,
 	})
 
 	if !dryRun && st != nil {
@@ -380,26 +413,27 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 				diff = store.DiffClubs(prev, snap.Club)
 			}
 			err := st.SaveSnapshot(ctx, store.Snapshot{
-				GeneratedAt: data.GeneratedAt,
-				Duration:    time.Since(started),
-				Cycle:       snap.Club.Cycle,
-				Club:        snap.Club,
-				Market:      snap.Market,
-				Evolutions:  snap.Evolutions,
-				Objectives:  snap.Objectives,
-				SBCs:        snap.SBCs,
-				News:        snap.News,
-				Stats:       snap.Stats,
-				Errors:      snap.Errors,
-				Diff:        diff,
-				NewCards:    newCards,
-				FreshNews:   freshNews,
-				Upgrades:    upgrades,
-				EvoMatches:  evos,
-				SquadSwaps:  data.SquadSwaps,
-				Trends:      trends,
-				SquadScore:  data.SquadScore,
-				Cards:       cardReports,
+				GeneratedAt:  data.GeneratedAt,
+				Duration:     time.Since(started),
+				Cycle:        snap.Club.Cycle,
+				Club:         snap.Club,
+				Market:       snap.Market,
+				Evolutions:   snap.Evolutions,
+				Objectives:   snap.Objectives,
+				SBCs:         snap.SBCs,
+				News:         snap.News,
+				Stats:        snap.Stats,
+				Errors:       snap.Errors,
+				Diff:         diff,
+				NewCards:     newCards,
+				FreshNews:    freshNews,
+				Upgrades:     upgrades,
+				MarketFunnel: upFunnel,
+				EvoMatches:   evos,
+				SquadSwaps:   data.SquadSwaps,
+				Trends:       trends,
+				SquadScore:   data.SquadScore,
+				Cards:        cardReports,
 			})
 			if err != nil {
 				data.Errors = append(data.Errors, "gravando snapshot: "+err.Error())
@@ -428,6 +462,19 @@ func interestingIDs(club domain.Club, ups []analyze.Upgrade) []int64 {
 		add(u.Candidate.ID)
 	}
 	return ids
+}
+
+// sbcChallengeKeys lista a chave (store.SBCChallengeKey) de todo desafio
+// de SBC ativo hoje — o que analyze.FindFodderDemand precisa pra saber a
+// tendência de custo de cada um.
+func sbcChallengeKeys(sbcs []domain.SBC) []string {
+	var keys []string
+	for _, sbc := range sbcs {
+		for idx, ch := range sbc.Challenges {
+			keys = append(keys, store.SBCChallengeKey(sbc.ID, idx, ch.Name))
+		}
+	}
+	return keys
 }
 
 func writeReport(path string, data report.Data) error {

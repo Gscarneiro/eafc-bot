@@ -81,7 +81,8 @@ export default function Status() {
             </>
           ) : (
             <div className="hero-move-empty">
-              Nada dentro do orçamento hoje. Aumente <code>market.extra_budget</code> ou espere o mercado se mexer.
+              Nenhum upgrade de mercado nem evolução passou do ganho mínimo hoje — <code>market.extra_budget</code> não
+              é o botão certo aqui, ele só marca o que está fora do bolso. Veja o funil em <Link to="/mercado">mercado</Link>.
             </div>
           )}
         </div>

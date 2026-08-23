@@ -49,6 +49,20 @@ type ServeConf struct {
 	// (evolução atual x potencial) que o scheduler paga à noite, uma vez
 	// por dia, em vez de sob demanda a cada clique em /time/:slug.
 	CardsMinRating int `json:"cards_min_rating"`
+
+	// FastRefreshMinutes é o intervalo do ciclo de coleta LEVE (momentum,
+	// custo de solução de SBC) — bem mais barato que a coleta completa
+	// (`runJob`), então vale rodar bem mais vezes por dia: o fut.gg
+	// recalcula momentum a cada poucos minutos do lado deles, e a coleta
+	// diária sozinha ficaria sempre um dia atrás desse sinal. Zero ou
+	// negativo desliga o ciclo rápido (scheduler.FastTicker).
+	FastRefreshMinutes int `json:"fast_refresh_minutes"`
+	// MomentumWindowHours é a janela pedida à rota de momentum — a rota
+	// aceita 6, 12 ou 24 (testado ao vivo em 22/08/2026).
+	MomentumWindowHours int `json:"momentum_window_hours"`
+	// EvolutionFavorites é uma lista separada por vírgulas para manter Config
+	// comparável nos testes de edição atômica e simples no JSON de configuração.
+	EvolutionFavorites string `json:"evolution_favorites"`
 }
 
 type PostgresConf struct {
@@ -79,6 +93,70 @@ type ReportConf struct {
 	AllowUnpriced bool `json:"allow_unpriced"`
 }
 
+// UISettings é o subconjunto seguro do config.json que pode ser editado pela
+// interface. Credenciais, rotas descobertas, diretórios e banco continuam
+// deliberadamente fora deste contrato: a UI é um painel de decisão, não um
+// editor de infraestrutura.
+type UISettings struct {
+	Market UISettingsMarket `json:"market"`
+	Report UISettingsReport `json:"report"`
+	Serve  UISettingsServe  `json:"serve"`
+}
+
+type UISettingsMarket struct {
+	MinRating   int `json:"min_rating"`
+	MaxRating   int `json:"max_rating"`
+	MaxPrice    int `json:"max_price"`
+	Pages       int `json:"pages"`
+	PerPage     int `json:"per_page"`
+	ExtraBudget int `json:"extra_budget"`
+}
+
+type UISettingsReport struct {
+	MinGain        float64 `json:"min_gain"`
+	TrendWindowHrs int     `json:"trend_window_hours"`
+	AllowOutOfPos  bool    `json:"allow_out_of_position"`
+	AllowUnpriced  bool    `json:"allow_unpriced"`
+}
+
+type UISettingsServe struct {
+	DailyAt             string `json:"daily_at"`
+	StaleAfterHours     int    `json:"stale_after_hours"`
+	RetentionDays       int    `json:"retention_days"`
+	CardsMinRating      int    `json:"cards_min_rating"`
+	FastRefreshMinutes  int    `json:"fast_refresh_minutes"`
+	MomentumWindowHours int    `json:"momentum_window_hours"`
+	EvolutionFavorites  string `json:"evolution_favorites"`
+}
+
+// Editable devolve apenas os valores que a tela pode mostrar e alterar.
+func (c Config) Editable() UISettings {
+	return UISettings{
+		Market: UISettingsMarket{MinRating: c.Market.MinRating, MaxRating: c.Market.MaxRating, MaxPrice: c.Market.MaxPrice, Pages: c.Market.Pages, PerPage: c.Market.PerPage, ExtraBudget: c.Market.ExtraBudget},
+		Report: UISettingsReport{MinGain: c.Report.MinGain, TrendWindowHrs: c.Report.TrendWindowHrs, AllowOutOfPos: c.Report.AllowOutOfPos, AllowUnpriced: c.Report.AllowUnpriced},
+		Serve:  UISettingsServe{DailyAt: c.Serve.DailyAt, StaleAfterHours: c.Serve.StaleAfterHours, RetentionDays: c.Serve.RetentionDays, CardsMinRating: c.Serve.CardsMinRating, FastRefreshMinutes: c.Serve.FastRefreshMinutes, MomentumWindowHours: c.Serve.MomentumWindowHours, EvolutionFavorites: c.Serve.EvolutionFavorites},
+	}
+}
+
+// ApplyEditable aplica e valida uma edição atômica. O receiver só muda depois
+// que a configuração inteira continua válida, para um formulário inválido não
+// deixar o scheduler ou o próximo job em estado parcial.
+func (c *Config) ApplyEditable(v UISettings) error {
+	previous := *c
+	c.Market.MinRating, c.Market.MaxRating, c.Market.MaxPrice = v.Market.MinRating, v.Market.MaxRating, v.Market.MaxPrice
+	c.Market.Pages, c.Market.PerPage, c.Market.ExtraBudget = v.Market.Pages, v.Market.PerPage, v.Market.ExtraBudget
+	c.Report.MinGain, c.Report.TrendWindowHrs = v.Report.MinGain, v.Report.TrendWindowHrs
+	c.Report.AllowOutOfPos, c.Report.AllowUnpriced = v.Report.AllowOutOfPos, v.Report.AllowUnpriced
+	c.Serve.DailyAt, c.Serve.StaleAfterHours, c.Serve.RetentionDays = v.Serve.DailyAt, v.Serve.StaleAfterHours, v.Serve.RetentionDays
+	c.Serve.CardsMinRating, c.Serve.FastRefreshMinutes, c.Serve.MomentumWindowHours = v.Serve.CardsMinRating, v.Serve.FastRefreshMinutes, v.Serve.MomentumWindowHours
+	c.Serve.EvolutionFavorites = v.Serve.EvolutionFavorites
+	if err := c.Validate(); err != nil {
+		*c = previous
+		return err
+	}
+	return nil
+}
+
 // baseDir é onde tudo que o bot grava mora por padrão: config, cache,
 // histórico e relatórios, todos debaixo de ".eafc-bot" NO DIRETÓRIO ATUAL —
 // não em $HOME nem em $TEMP. O bot só é chamado de dentro do repo (é o que
@@ -94,6 +172,10 @@ func Default() Config {
 	// e por padrão manda o cache para $TEMP. Aqui, que já conhece o baseDir,
 	// trazemos o cache para debaixo dele também.
 	fcfg.CacheDir = filepath.Join(baseDir, "cache")
+	// Espelha Platform: Client.SBCs escolhe entre o preço de solução de
+	// console e de PC com base nisso, e futgg.Config é um pacote genérico
+	// que não lê Config.Platform sozinho.
+	fcfg.Platform = "ps5"
 
 	return Config{
 		Platform: "ps5",
@@ -114,11 +196,13 @@ func Default() Config {
 			TrendWindowHrs: 72,
 		},
 		Serve: ServeConf{
-			Port:            4173,
-			DailyAt:         "05:00",
-			StaleAfterHours: 20,
-			RetentionDays:   30,
-			CardsMinRating:  88,
+			Port:                4173,
+			DailyAt:             "05:00",
+			StaleAfterHours:     20,
+			RetentionDays:       30,
+			CardsMinRating:      88,
+			FastRefreshMinutes:  60,
+			MomentumWindowHours: 24,
 		},
 	}
 }
@@ -139,6 +223,11 @@ func Load(path string) (Config, error) {
 
 	applyEnv(&cfg)
 	cfg.GamerTag = normalizeProfile(cfg.GamerTag)
+	// Re-espelha Platform depois do unmarshal: um config.json que só seta
+	// "platform" no topo (o normal — ninguém escreve "futgg":{"platform":
+	// ...} à mão) deixaria cfg.FutGG.Platform preso no valor de Default(),
+	// já que json.Unmarshal só sobrescreve o que o arquivo de fato traz.
+	cfg.FutGG.Platform = cfg.Platform
 	return cfg, cfg.Validate()
 }
 
@@ -208,6 +297,18 @@ func (c Config) Validate() error {
 	if _, err := time.Parse("15:04", c.Serve.DailyAt); err != nil {
 		return fmt.Errorf("serve.daily_at %q inválido — use o formato \"05:00\" (HH:MM, 24h)", c.Serve.DailyAt)
 	}
+	if c.Market.MinRating < 1 || c.Market.MaxRating > 99 || c.Market.MinRating > c.Market.MaxRating {
+		return fmt.Errorf("market.min_rating/max_rating inválidos — use uma faixa entre 1 e 99")
+	}
+	if c.Market.MaxPrice < 0 || c.Market.Pages < 1 || c.Market.PerPage < 1 || c.Market.ExtraBudget < 0 {
+		return fmt.Errorf("limites do mercado inválidos — preço, páginas, cartas por página e orçamento extra não podem ser negativos")
+	}
+	if c.Report.MinGain < 0 || c.Report.TrendWindowHrs < 1 {
+		return fmt.Errorf("report.min_gain/trend_window_hours inválidos — use ganho não negativo e uma janela positiva")
+	}
+	if c.Serve.StaleAfterHours < 1 || c.Serve.RetentionDays < 1 || c.Serve.CardsMinRating < 1 || c.Serve.CardsMinRating > 99 || c.Serve.MomentumWindowHours < 1 || c.Serve.FastRefreshMinutes < 0 {
+		return fmt.Errorf("agenda inválida — retenção, atraso, overall de cartas e janela de momentum devem ser positivos")
+	}
 	return nil
 }
 
@@ -217,6 +318,35 @@ func (c Config) Save(path string) error {
 		return err
 	}
 	b, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
+// SaveEditable altera somente os três blocos permitidos pela UI. Ler o JSON
+// original antes de gravar é importante: valores vindos de ambiente (cookie,
+// DSN e gamer tag) não podem ser reserializados acidentalmente para o arquivo
+// só porque uma preferência visual foi salva.
+func (c Config) SaveEditable(path string, v UISettings) error {
+	var raw map[string]any
+	if b, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(b, &raw); err != nil {
+			return fmt.Errorf("lendo %s para atualização parcial: %w", path, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("abrindo %s para atualização parcial: %w", path, err)
+	}
+	if raw == nil {
+		raw = make(map[string]any)
+	}
+	raw["market"] = v.Market
+	raw["report"] = v.Report
+	raw["serve"] = v.Serve
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return err
 	}

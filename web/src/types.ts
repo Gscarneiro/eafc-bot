@@ -74,6 +74,10 @@ export interface Player {
   base_player_slug?: string;
   roles_plus?: number[];
   roles_plus_plus?: number[];
+  // momentum_pct só vem preenchido em cartas lidas da rota de momentum —
+  // quanto a carta caiu da própria média recente (o fut.gg já calcula;
+  // ver analyze.FindInvestments). Ausente nas demais fontes.
+  momentum_pct?: number;
 }
 
 export interface ClubPlayer extends Player {
@@ -156,6 +160,16 @@ export interface Objective {
   url: string;
 }
 
+// SBCChallenge é um desafio dentro de um SBC — o fut.gg já resolve o
+// fodder mais barato que bate o requisito; requirements_text é texto
+// livre, sem id de nação/liga/raridade (ver analyze.ParsedSBCRequirement
+// no lado Go, que tenta reconhecer os padrões conhecidos).
+export interface SBCChallenge {
+  name: string;
+  requirements_text: string[] | null;
+  cheapest_solution_coins: number;
+}
+
 export interface SBC {
   id: string;
   name: string;
@@ -166,6 +180,7 @@ export interface SBC {
   expires_at: string;
   cycle: string;
   url: string;
+  challenges?: SBCChallenge[];
 }
 
 export interface NewsItem {
@@ -254,8 +269,30 @@ export interface Upgrade {
   rationale: string[] | null;
 }
 
+// UpgradeFunnel explica uma lista de upgrades vazia carta a carta — sem
+// isso, "0 sugestões" só sabe dizer que não achou nada, e quem lê fica
+// adivinhando qual botão mexer (foi o que a mensagem antiga fazia ao culpar
+// market.extra_budget, que nem chega a filtrar — ver analyze.UpgradeFunnel
+// no lado Go). considered == 0 é o sinal de snapshot gravado antes deste
+// campo existir; a tela cai no texto genérico nesse caso.
+export interface UpgradeFunnel {
+  considered: number;
+  owned: number;
+  sbc_only: number;
+  unpriced: number;
+  out_of_position: number;
+  below_min_gain: number;
+  suggested: number;
+  min_gain: number;
+  best_gain: number;
+  best_slot: Position;
+  best_name: string;
+  has_best: boolean;
+}
+
 export interface MercadoResponse {
   upgrades: Upgrade[] | null;
+  funnel: UpgradeFunnel;
   // chave é o eaId em texto — Go serializa map[int64]... como objeto JSON,
   // e chave de objeto JSON é sempre string.
   price_series: Record<string, PricePoint[]> | null;
@@ -302,17 +339,46 @@ export interface EvoMatch {
   evolution: Evolution;
   player: ClubPlayer;
   slot: Position;
-  before: number;
-  after: number;
-  gain: number;
+  impact: number;
+  current_gg_rating: number;
+  final_gg_rating: number;
   result: Player;
   cost: number;
+  affordable: boolean;
+  acquisition: string;
+  card_slug?: string;
+  best_path: EvoPotential;
+  alternates?: EvoPotential[];
   beats_starter: boolean;
   highlights: string[] | null;
 }
 
+export interface EvolucoesSummary {
+  matches: number;
+  players: number;
+  starters: number;
+  unaffordable: number;
+  expiring_soon: number;
+  by_acquisition: Record<string, number>;
+}
+
+export interface EvolucoesFilters {
+  positions: Position[] | null;
+  categories: string[] | null;
+}
+
 export interface EvolucoesResponse {
   matches: EvoMatch[] | null;
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+  summary: EvolucoesSummary;
+  filters: EvolucoesFilters;
+}
+
+export interface EvolutionFavoritesResponse {
+  favorites: string[];
 }
 
 export interface JobStatus {
@@ -320,4 +386,111 @@ export interface JobStatus {
   last_started?: string;
   last_success?: string;
   last_error?: string;
+}
+
+export interface UISettings {
+  market: {
+    min_rating: number;
+    max_rating: number;
+    max_price: number;
+    pages: number;
+    per_page: number;
+    extra_budget: number;
+  };
+  report: {
+    min_gain: number;
+    trend_window_hours: number;
+    allow_out_of_position: boolean;
+    allow_unpriced: boolean;
+  };
+  serve: {
+    daily_at: string;
+    stale_after_hours: number;
+    retention_days: number;
+    cards_min_rating: number;
+    fast_refresh_minutes: number;
+    momentum_window_hours: number;
+    evolution_favorites: string;
+  };
+}
+
+export interface ConfigResponse {
+  settings: UISettings;
+  env_locked: string[];
+}
+
+// --- Investimentos: agente de trading (ver analyze.FindInvestments /
+// FindSellCandidates / FindFodderDemand no lado Go). Puramente
+// consultivo — o bot nunca compra nem vende sozinho.
+
+export interface Investment {
+  candidate: Player;
+  momentum_pct: number;
+  implied_average: number;
+  signal: "desconto" | "out-of-packs";
+  rationale: string[] | null;
+}
+
+export interface InvestmentFunnel {
+  considered: number;
+  owned: number;
+  not_tradeable: number;
+  superseded_by_sibling: number;
+  below_min_momentum: number;
+  suggested: number;
+  min_momentum_pct: number;
+  best_rejected_pct: number;
+  best_rejected_name: string;
+  has_best_rejected: boolean;
+}
+
+export type SellRecommendation = "vender" | "segurar_potencial" | "promover" | "nao_vendavel";
+
+export interface SellCandidate {
+  player: ClubPlayer;
+  recommendation: SellRecommendation;
+  net_sell_value?: number;
+  evo_gg_gain?: number;
+  evo_cost?: number;
+  rationale: string[] | null;
+}
+
+export interface SellFunnel {
+  considered: number;
+  not_tradeable: number;
+  promotable: number;
+  held_for_potential: number;
+  suggested: number;
+  min_evo_gg_gain: number;
+}
+
+export type FodderPhase = "recente" | "pico" | "esfriando" | "estavel" | "esvaziar" | "expirado";
+
+export interface ParsedSBCRequirement {
+  kind: "min_from" | "min_team_rating" | "min_rarity_count";
+  value: string;
+  min: number;
+}
+
+export interface FodderSignal {
+  sbc_id: string;
+  sbc_name: string;
+  challenge: string;
+  requirement: string;
+  parsed?: ParsedSBCRequirement;
+  pool_size: number; // -1 quando não computado, não "zero cartas"
+  cost_coins: number;
+  cost_change_pct: number;
+  phase: FodderPhase;
+  repeatable: boolean;
+  expires_at: string;
+  rationale: string[] | null;
+}
+
+export interface InvestimentosResponse {
+  investments: Investment[] | null;
+  investment_funnel: InvestmentFunnel;
+  sell_candidates: SellCandidate[] | null;
+  sell_funnel: SellFunnel;
+  fodder_demand: FodderSignal[] | null;
 }

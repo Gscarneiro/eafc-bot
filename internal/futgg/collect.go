@@ -157,6 +157,12 @@ func (f PlayerFilter) query(page int) string {
 		q += "&overall__lte=" + strconv.Itoa(f.MaxRating)
 	}
 	if f.MaxPrice > 0 {
+		// Mandado mesmo sabendo que o fut.gg não filtra por ele hoje —
+		// testado ao vivo em 22/08/2026, 82 das 240 cartas de uma coleta com
+		// max_price=100000 voltaram acima do teto (a mais cara, 10.000.000).
+		// É barato de manter e volta a valer se o site consertar; Players()
+		// faz o corte de verdade do lado de cá e conta em
+		// Stats.MarketPriceSkipped.
 		q += "&price__lte=" + strconv.Itoa(f.MaxPrice)
 	}
 	for _, p := range f.Positions {
@@ -198,8 +204,110 @@ func (c *Client) Players(ctx context.Context, f PlayerFilter) ([]domain.Player, 
 				return
 			}
 			out := make([]domain.Player, 0, len(nodes))
+			skipped := 0
 			for _, n := range nodes {
 				p := mapPlayer(n, c.cfg.Cycle, c.lensFor("players"))
+				if p.ID == 0 || p.Rating <= 0 {
+					continue
+				}
+				// Carta SEM preço (Coins <= 0) não é descartada aqui: é a
+				// que report.AllowUnpriced existe para tratar, e tratá-la
+				// como "cara demais" seria um chute na direção errada (ver
+				// o comentário de Stats.MarketPriceSkipped).
+				if f.MaxPrice > 0 && p.Price.Coins > f.MaxPrice {
+					skipped++
+					continue
+				}
+				out = append(out, p)
+			}
+			if skipped > 0 {
+				c.mu.Lock()
+				c.stats.MarketPriceSkipped += skipped
+				c.mu.Unlock()
+			}
+			results <- result{page: page, players: out}
+		}(page)
+	}
+
+	wg.Wait()
+	close(results)
+
+	var all []domain.Player
+	var firstErr error
+	for r := range results {
+		if r.err != nil {
+			if firstErr == nil {
+				firstErr = r.err
+			}
+			continue
+		}
+		all = append(all, r.players...)
+	}
+	if len(all) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return dedupe(all), nil
+}
+
+// MomentumOptions controla a leitura de Client.Momentum.
+type MomentumOptions struct {
+	// Hours é a janela que o fut.gg usa pra calcular a queda em relação à
+	// própria média — testado ao vivo em 22/08/2026 aceitando 6, 12 ou 24;
+	// outro valor pode não ser reconhecido pelo site. Padrão 24.
+	Hours int
+	// Pages limita quantas páginas ler. O endpoint devolve a base inteira
+	// (~6178 cartas, 206 páginas de 30) JÁ ORDENADA por maior desconto
+	// primeiro — não precisamos do catálogo inteiro pra achar os melhores
+	// candidatos, só o topo. Padrão 5 (150 cartas).
+	Pages int
+}
+
+// Momentum lê quanto cada carta caiu da própria média recente — sinal que
+// o fut.gg já calcula e recalcula a cada poucos minutos do lado deles
+// (testado ao vivo em 22/08/2026). O bot não infere tendência a partir do
+// próprio histórico de preço, esparso demais pra isso (1 ponto/carta/dia
+// na operação normal): lê o resultado já pronto. Mesmo envelope e paginação
+// de Players — decodeList/mapPlayer não mudam.
+func (c *Client) Momentum(ctx context.Context, opt MomentumOptions) ([]domain.Player, error) {
+	if opt.Hours <= 0 {
+		opt.Hours = 24
+	}
+	if opt.Pages <= 0 {
+		opt.Pages = 5
+	}
+	// hours é segmento de path ({hours} no endpoint configurado), não
+	// query param — ver o comentário do endpoint "momentum" em client.go.
+	base, err := c.URL("momentum", map[string]string{"hours": strconv.Itoa(opt.Hours)})
+	if err != nil {
+		return nil, err
+	}
+
+	type result struct {
+		page    int
+		players []domain.Player
+		err     error
+	}
+	results := make(chan result, opt.Pages)
+	var wg sync.WaitGroup
+
+	for page := 1; page <= opt.Pages; page++ {
+		wg.Add(1)
+		go func(page int) {
+			defer wg.Done()
+			q := fmt.Sprintf("?page=%d", page)
+			body, err := c.GetRaw(ctx, base+q)
+			if err != nil {
+				results <- result{page: page, err: err}
+				return
+			}
+			nodes, err := c.decodeList(body, "momentum")
+			if err != nil {
+				results <- result{page: page, err: err}
+				return
+			}
+			out := make([]domain.Player, 0, len(nodes))
+			for _, n := range nodes {
+				p := mapPlayer(n, c.cfg.Cycle, c.lensFor("momentum"))
 				if p.ID != 0 && p.Rating > 0 {
 					out = append(out, p)
 				}
@@ -497,6 +605,16 @@ func (c *Client) SBCs(ctx context.Context) ([]domain.SBC, error) {
 		for _, r := range n.nodes(ls.k("rewards", "rewards", "reward")...) {
 			s.Rewards = append(s.Rewards, mapReward(r))
 		}
+		// challenges[] é o array que field_maps.sbcs.challenges já aponta
+		// pra "challenges" (aprendido pelo autoconfig, ver CLAUDE.md), mas
+		// ficava sem leitor — o requisito de cada desafio e o preço da
+		// solução mais barata (já resolvida pelo fut.gg) morava só na
+		// resposta crua. Sub-campos de challenges[] são fixos (não passam
+		// pelo lens de ls): não são campo de topo de "sbcs", é outra forma,
+		// mesmo padrão de mapReward abaixo.
+		for _, cn := range n.nodes(ls.k("challenges", "challenges")...) {
+			s.Challenges = append(s.Challenges, mapSBCChallenge(cn, c.cfg.Platform))
+		}
 		if s.Name != "" {
 			out = append(out, s)
 		}
@@ -560,6 +678,24 @@ func mapReward(n node) domain.Reward {
 		r.Kind = "pack"
 	}
 	return r
+}
+
+// mapSBCChallenge lê um desafio dentro de um SBC. O fut.gg publica um
+// preço de solução POR PLATAFORMA — visto ao vivo em 22/08/2026 divergindo
+// de verdade (uma solução de 39300 no console e 56850 no PC) — plataforma
+// vazia ou desconhecida cai no console, que é o valor que a chave
+// "cheapestSolutionPrice" (sem sufixo) representa.
+func mapSBCChallenge(n node, platform string) domain.SBCChallenge {
+	ch := domain.SBCChallenge{
+		Name:             n.str("name", "title", "label"),
+		RequirementsText: n.strs("requirementsText", "requirements_text"),
+	}
+	if strings.EqualFold(platform, "pc") {
+		ch.CheapestSolutionCoins = n.int("cheapestSolutionPricePc", "cheapest_solution_price_pc")
+	} else {
+		ch.CheapestSolutionCoins = n.int("cheapestSolutionPrice", "cheapest_solution_price")
+	}
+	return ch
 }
 
 // maxClubPages é um teto de segurança: 40 páginas de 30 são 1200 cartas,

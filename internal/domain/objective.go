@@ -36,6 +36,29 @@ type SBC struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 	Cycle        string    `json:"cycle"`
 	URL          string    `json:"url"`
+
+	// Challenges são as partes individuais do SBC (um SBC costuma pedir
+	// mais de um sub-squad — "Portugal", "Serie A", "Time nota 90"...).
+	// Cada uma carrega o requisito em texto e o preço da solução mais
+	// barata QUE O FUT.GG JÁ RESOLVEU — o bot não reimplementa um solver
+	// de squad com química (fut.gg e FUTBIN já fazem isso bem), só lê o
+	// resultado. Fica vazio se a fonte não trouxe (rota antiga, ou campo
+	// ainda não mapeado — ver o comentário de SBCChallenge).
+	Challenges []SBCChallenge `json:"challenges,omitempty"`
+}
+
+// SBCChallenge é um desafio dentro de um SBC.
+//
+// O fut.gg manda o requisito só como TEXTO LIVRE
+// ("Min. 1 Players from: Portugal", "Min. Team Rating: 89") — sem id de
+// nação/liga/raridade. Quem precisa entender esse texto (pra estimar o
+// tamanho do pool elegível, por exemplo) faz um parse best-effort e
+// aceita não reconhecer um padrão novo, em vez de chutar — mesmo espírito
+// de internal/futgg/map.go's parseRequirementText pra evolução.
+type SBCChallenge struct {
+	Name                  string   `json:"name"`
+	RequirementsText      []string `json:"requirements_text"`
+	CheapestSolutionCoins int      `json:"cheapest_solution_coins"` // já na plataforma configurada (PC/console)
 }
 
 // NetValue é o saldo do SBC: o que você recebe menos o que gasta.

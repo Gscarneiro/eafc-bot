@@ -438,6 +438,129 @@ func (s *JSONStore) PriceSeries(ctx context.Context, cycle string, eaIDs []int64
 	return out, nil
 }
 
+func sbcCostFile(cycle string) string { return "sbc_cost_" + cycle + ".json" }
+
+type sbcCostHistory struct {
+	Points map[string][]SBCCostPoint `json:"points"` // challenge key -> série
+}
+
+// SaveSBCCost espelha SavePrices: mesmo dedupe de 1h, mesma retenção de 60
+// dias, só que a chave é SBCChallengeKey em vez do id da carta.
+func (s *JSONStore) SaveSBCCost(ctx context.Context, cycle string, sbcs []domain.SBC) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	hist := sbcCostHistory{Points: map[string][]SBCCostPoint{}}
+	_ = s.readJSON(sbcCostFile(cycle), &hist)
+	if hist.Points == nil {
+		hist.Points = map[string][]SBCCostPoint{}
+	}
+
+	now := time.Now()
+	cutoff := now.Add(-60 * 24 * time.Hour) // mesma retenção de prices_<cycle>.json
+
+	for _, sbc := range sbcs {
+		for idx, ch := range sbc.Challenges {
+			if ch.CheapestSolutionCoins <= 0 {
+				continue
+			}
+			key := SBCChallengeKey(sbc.ID, idx, ch.Name)
+			series := hist.Points[key]
+
+			if n := len(series); n > 0 && now.Sub(series[n-1].ObservedAt) < time.Hour {
+				continue
+			}
+			series = append(series, SBCCostPoint{Key: key, Coins: ch.CheapestSolutionCoins, ObservedAt: now})
+
+			keep := series[:0]
+			for _, pt := range series {
+				if pt.ObservedAt.After(cutoff) {
+					keep = append(keep, pt)
+				}
+			}
+			hist.Points[key] = keep
+		}
+	}
+	return s.writeJSON(sbcCostFile(cycle), hist)
+}
+
+func (s *JSONStore) SBCCostTrend(ctx context.Context, cycle string, keys []string, since time.Duration) (map[string]PriceTrend, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var hist sbcCostHistory
+	if err := s.readJSON(sbcCostFile(cycle), &hist); err != nil {
+		return map[string]PriceTrend{}, nil // sem histórico ainda não é erro
+	}
+
+	want := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		want[k] = true
+	}
+	cutoff := time.Now().Add(-since)
+	out := make(map[string]PriceTrend, len(keys))
+
+	for key, series := range hist.Points {
+		if len(want) > 0 && !want[key] {
+			continue
+		}
+		var inWindow []SBCCostPoint
+		for _, pt := range series {
+			if pt.ObservedAt.After(cutoff) && pt.Coins > 0 {
+				inWindow = append(inWindow, pt)
+			}
+		}
+		if len(inWindow) < 2 {
+			continue
+		}
+		sort.Slice(inWindow, func(i, j int) bool {
+			return inWindow[i].ObservedAt.Before(inWindow[j].ObservedAt)
+		})
+
+		t := PriceTrend{
+			First:   inWindow[0].Coins,
+			Last:    inWindow[len(inWindow)-1].Coins,
+			Min:     inWindow[0].Coins,
+			Max:     inWindow[0].Coins,
+			Samples: len(inWindow),
+		}
+		for _, pt := range inWindow {
+			if pt.Coins < t.Min {
+				t.Min = pt.Coins
+			}
+			if pt.Coins > t.Max {
+				t.Max = pt.Coins
+			}
+		}
+		if t.First > 0 {
+			t.ChangePct = (float64(t.Last-t.First) / float64(t.First)) * 100
+		}
+		out[key] = t
+	}
+	return out, nil
+}
+
+func momentumFile(cycle string) string { return "momentum_" + cycle + ".json" }
+
+// SaveMomentum sobrescreve o cache — não acumula histórico, é sempre o
+// último valor lido (ver o comentário do método na interface Store).
+func (s *JSONStore) SaveMomentum(ctx context.Context, cycle string, momentum []domain.Player) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writeJSON(momentumFile(cycle), momentum)
+}
+
+func (s *JSONStore) LatestMomentum(ctx context.Context, cycle string) ([]domain.Player, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var momentum []domain.Player
+	if err := s.readJSON(momentumFile(cycle), &momentum); err != nil {
+		return nil, nil // ciclo rápido ainda não rodou não é erro
+	}
+	return momentum, nil
+}
+
 func (s *JSONStore) Close() error { return nil }
 
 var _ Store = (*JSONStore)(nil)

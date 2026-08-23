@@ -92,6 +92,14 @@
   color: var(--ink-3);
   font-family: var(--font-mono);
 }
+.detail-timeline { display: flex; align-items: center; gap: 8px; overflow-x: auto; margin-top: 14px; padding: 10px 0 2px; border-top: 1px solid var(--rule); }
+.detail-step { display: flex; align-items: center; gap: 6px; min-width: 118px; }
+.detail-step img { width: 30px; height: 39px; object-fit: contain; border-radius: var(--radius-sm); }
+.detail-step > div { display: flex; flex-direction: column; gap: 2px; white-space: nowrap; }
+.detail-step strong { font: 700 11px var(--font-mono); }
+.detail-step span:not(.detail-step-index):not(.detail-step-arrow) { color: var(--ink-3); font: 10px var(--font-mono); }
+.detail-step-index { color: var(--turf); font: 10px var(--font-mono); }
+.detail-step-arrow { margin-left: auto; color: var(--turf); font: 17px var(--font-mono); }
 .money {
   margin-top: 12px;
   display: flex;

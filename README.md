@@ -103,8 +103,16 @@ assim mesmo é uma escolha sua, e é explícita:
 ./eafcbot autoconfig -ignore-robots
 ```
 
-Mesmo assim ele continua se identificando pelo User-Agent, respeitando o
-limite de requisições e sem tocar em rota de escrita.
+Pra não repetir a flag toda vez, o mesmo efeito também dá pra deixar
+permanente no `config.json`:
+
+```json
+{"futgg": {"respect_robots": false}}
+```
+
+(a flag, quando passada, sempre vence o que estiver no config). Mesmo
+assim ele continua se identificando pelo User-Agent, respeitando o limite
+de requisições e sem tocar em rota de escrita.
 
 ### O clube não precisa de login
 
@@ -127,9 +135,13 @@ um jogador que você já tem.
 Duas coisas que essa rota **não** entrega, porque a Community API da EA não
 as expõe a ninguém:
 
-- **Seu saldo de moedas.** Sem ele o orçamento fica zero e o bot não
-  recomenda compra nenhuma. Preencha `market.extra_budget` no `config.json`
-  com quantas moedas você tem para gastar.
+- **Seu saldo de moedas.** Sem ele o orçamento fica zero — mas isso NÃO some
+  com as sugestões: uma troca fora do bolso continua na lista, só marcada
+  "fora do orçamento" (`analyze.Upgrade.Affordable`), porque
+  `IncludeUnaffordable` é o padrão. Preencha `market.extra_budget` no
+  `config.json` para essa marcação ficar correta; se a lista de upgrades
+  estiver vazia, o motivo é outro — veja o funil na tela de mercado ou no
+  relatório, e ajuste `report.min_gain`/`report.allow_unpriced` em vez disso.
 - **A escalação titular por posição.** O bot deduz pelos jogadores marcados
   como `isInActiveSquad`.
 

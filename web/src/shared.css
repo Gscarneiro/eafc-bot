@@ -252,6 +252,47 @@ th.num {
   gap: 10px;
 }
 
+.ranking-controls { display: flex; align-items: end; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin: 20px 0 10px; padding: 12px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.ranking-count { color: var(--ink-3); font: 12px var(--font-mono); }
+.ranking-count strong { color: var(--ink); font-size: 15px; }
+.ranking-filters { display: flex; align-items: end; justify-content: end; gap: 8px; flex-wrap: wrap; }
+.control-select { display: flex; flex-direction: column; gap: 4px; min-width: 118px; color: var(--ink-3); font: 10px var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
+.control-select select { min-height: 36px; padding: 7px 26px 7px 9px; border: 1px solid var(--rule-strong); border-radius: var(--radius-md); background: var(--panel); color: var(--ink); font: 12px var(--font-body); }
+.clear-control { min-height: 36px; border: 0; background: transparent; color: var(--turf); font: 600 11px var(--font-mono); cursor: pointer; }
+.rank-list { display: flex; flex-direction: column; gap: 6px; }
+.rank-row { overflow: hidden; border: 1px solid var(--rule); border-radius: var(--radius-md); background: var(--panel); transition: border-color var(--duration) var(--ease), box-shadow var(--duration) var(--ease); }
+.rank-row:hover, .rank-row.open { border-color: var(--rule-strong); box-shadow: var(--shadow-sm); }
+.rank-main { min-height: 66px; display: grid; grid-template-columns: 32px minmax(190px, 1.5fr) minmax(130px, 1fr) repeat(3, minmax(80px, .65fr)) 32px; align-items: center; gap: 12px; padding: 10px 12px; }
+.rank-number { color: var(--ink-3); font: 12px var(--font-mono); text-align: center; }
+.rank-player { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.rank-player img { width: 36px; height: 44px; object-fit: contain; border-radius: var(--radius-sm); }
+.rank-player-text { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rank-player-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.rank-player-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font: 11px var(--font-mono); }
+.rank-metric { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.rank-metric-label { color: var(--ink-3); font: 10px var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
+.rank-metric-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 13px var(--font-mono); }
+.rank-chevron { width: 32px; height: 32px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink-3); font-size: 18px; cursor: pointer; }
+.rank-chevron:hover { color: var(--turf); background: var(--turf-bg); }
+.expand-icon { width: 18px; height: 18px; display: block; margin: auto; }
+.rank-detail { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(210px, .7fr); gap: 18px; padding: 0 58px 16px; }
+.rank-detail-copy { padding-top: 12px; border-top: 1px solid var(--rule); color: var(--ink-2); font-size: 13px; }
+.rank-detail-copy ul { margin: 8px 0 0; padding-left: 18px; }
+.rank-detail-copy li + li { margin-top: 4px; }
+.rank-detail-side { padding-top: 12px; border-top: 1px solid var(--rule); }
+.rank-detail .spark { max-width: none; margin: 0; }
+.rank-link { color: var(--turf); text-decoration: none; font: 600 12px var(--font-mono); }
+.rank-link:hover { text-decoration: underline; }
+@media (max-width: 900px) { .rank-main { grid-template-columns: 28px minmax(170px, 1.5fr) repeat(2, minmax(75px, .7fr)) 32px; } .rank-main .optional-metric { display: none; } }
+@media (max-width: 620px) {
+  .ranking-controls { align-items: stretch; }
+  .ranking-filters { justify-content: stretch; width: 100%; }
+  .ranking-filters .control-select { flex: 1; min-width: 0; }
+  .rank-main { grid-template-columns: 22px minmax(0, 1fr) auto 30px; gap: 8px; padding: 9px; }
+  .rank-main .optional-metric { display: none; }
+  .rank-detail { grid-template-columns: 1fr; gap: 8px; padding: 0 40px 13px; }
+}
+
 /* .tx-* é o cartão de transação usado por Mercado e Evoluções — as duas
    telas descrevem a mesma mecânica (sai algo, entra algo, custa/rende
    algo), só com rótulos diferentes; ver components/TransactionCard.tsx. */

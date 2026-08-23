@@ -59,6 +59,10 @@ type Scheduler struct {
 	// para um erro de TZ no container aparecer no primeiro `docker logs` em
 	// vez de só se revelar pela hora real em que o job rodou.
 	Log func(line string)
+	// Settings permite alterar o horário e o limite de atraso enquanto o
+	// processo segue vivo. Quando nil, DailyAt/StaleAfter continuam sendo a
+	// fonte fixa compatível com o comportamento anterior.
+	Settings func() (dailyAt string, staleAfter time.Duration)
 }
 
 func (s *Scheduler) clock() Clock {
@@ -77,14 +81,17 @@ func (s *Scheduler) log(line string) {
 // Run bloqueia disparando Job repetidamente até ctx cancelar.
 func (s *Scheduler) Run(ctx context.Context) {
 	now := s.clock().Now()
-	if ShouldRunNow(now, s.LastGood(ctx), s.StaleAfter) {
+	dailyAt, staleAfter := s.settings()
+	if ShouldRunNow(now, s.LastGood(ctx), staleAfter) {
 		s.log("snapshot ausente ou velho na subida — coletando agora")
 		s.Job(ctx)
 	}
 
 	for {
 		now = s.clock().Now()
-		next, err := Next(now, s.DailyAt)
+		currentDailyAt, _ := s.settings()
+		dailyAt = currentDailyAt
+		next, err := Next(now, dailyAt)
 		if err != nil {
 			// daily_at malformado já é barrado em config.Validate(); chegar
 			// aqui assim mesmo não trava o processo, só encerra o scheduler.
@@ -94,12 +101,32 @@ func (s *Scheduler) Run(ctx context.Context) {
 		s.log(fmt.Sprintf("próxima coleta: %s", next.Format("2006-01-02 15:04 -07:00")))
 
 		timer := time.NewTimer(next.Sub(now))
+		settingsTicker := time.NewTicker(15 * time.Second)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
+			settingsTicker.Stop()
 			return
 		case <-timer.C:
+			settingsTicker.Stop()
 			s.Job(ctx)
+		case <-settingsTicker.C:
+			updatedDailyAt, _ := s.settings()
+			if updatedDailyAt != dailyAt {
+				timer.Stop()
+				settingsTicker.Stop()
+				s.log("horário da próxima coleta atualizado pela configuração")
+				continue
+			}
+			timer.Stop()
+			settingsTicker.Stop()
 		}
 	}
+}
+
+func (s *Scheduler) settings() (string, time.Duration) {
+	if s.Settings != nil {
+		return s.Settings()
+	}
+	return s.DailyAt, s.StaleAfter
 }

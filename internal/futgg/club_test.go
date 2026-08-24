@@ -226,7 +226,7 @@ func activeSquadFixture() string {
 	// de dentro. É exatamente esse nível errado que fazia o título aparecer
 	// (o de fora também tem um) enquanto a escalação sumia em silêncio.
 	return `{"data":{"title":"Carneiro FC","user":{"id":1},` +
-		`"data":{"title":"Carneiro FC","activeGroupPositions":[` +
+		`"data":{"title":"Carneiro FC","activeFormationId":"18","activeGroupPositions":[` +
 		strings.Join(entries, ",") + `]}}}`
 }
 
@@ -263,6 +263,9 @@ func TestActiveSquadSoPegaOsOnzeDoField(t *testing.T) {
 	}
 	if sq.Name != "Carneiro FC" {
 		t.Errorf("nome %q, esperava \"Carneiro FC\"", sq.Name)
+	}
+	if sq.Formation != "4-4-1-1" {
+		t.Errorf("formação %q, esperava 4-4-1-1", sq.Formation)
 	}
 	if len(sq.Starters) != 11 {
 		t.Fatalf("titulares %d, esperava 11 (SUBSTITUTE não pode entrar)", len(sq.Starters))

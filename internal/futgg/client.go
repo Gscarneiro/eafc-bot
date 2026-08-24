@@ -152,7 +152,8 @@ func DefaultConfig() Config {
 			// O catálogo de funções táticas (Wide Playmaker, Box-To-Box...).
 			// A carta só declara IDs (rolesPlus/rolesPlusPlus); é esta tabela
 			// que traduz o ID em nome e diz a posição. Ver roles.go.
-			"roles": "/api/fut/roles/",
+			"roles":    "/api/fut/roles/",
+			"metarank": "/api/fut/metarank/players/",
 			// Os caminhos de evolução de um JOGADOR (não de uma carta:
 			// {id} é o basePlayerEaId, compartilhado por todas as versões
 			// dele). Cada caminho é a carta passo a passo, do estado atual

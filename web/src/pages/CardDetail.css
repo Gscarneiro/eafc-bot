@@ -2,8 +2,11 @@
   display: flex;
   gap: var(--space-5);
   align-items: center;
-  padding-bottom: var(--space-4);
-  border-bottom: 2px solid var(--ink);
+  padding: var(--space-4);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
 }
 .head img {
   width: 110px;
@@ -29,6 +32,8 @@
   padding: 3px 9px;
   font-size: 12.5px;
 }
+.playstyle-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.playstyle-grid .chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 
 .attr-facts {
   margin-top: var(--space-3);

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +22,14 @@ type Snapshot struct {
 	News       []domain.NewsItem  `json:"news"`
 	Stats      Stats              `json:"stats"`
 	Errors     []string           `json:"errors"`
+}
+
+// formationByID traduz o identificador que o GG Club guarda na tática para
+// a notação que a UI desenha. O payload público só expõe o id, embora já
+// exponha todos os slots; manter a tradução aqui impede que a tela trate um
+// XI completo como formação desconhecida.
+var formationByID = map[string]string{
+	"18": "4-4-1-1",
 }
 
 // Collect busca todas as fontes em paralelo. Uma fonte que falha não
@@ -129,8 +138,85 @@ func (c *Client) Collect(ctx context.Context, gamerTag string, marketFilter Play
 	})
 
 	wg.Wait()
+	if len(snap.Club.Players) > 0 && len(snap.Club.Squad.Starters) > 0 {
+		if err := c.enrichPositionRatings(ctx, &snap.Club); err != nil {
+			snap.Errors = append(snap.Errors, "notas por posição: "+err.Error())
+		}
+	}
 	snap.Stats = c.Stats()
 	return snap, nil
+}
+
+type metarankRow struct {
+	EaID     int64   `json:"eaId"`
+	Position int     `json:"position"`
+	Score    float64 `json:"score"`
+}
+type metarankResponse struct {
+	Data []metarankRow `json:"data"`
+}
+
+func (c *Client) enrichPositionRatings(ctx context.Context, club *domain.Club) error {
+	positions := map[domain.Position]bool{}
+	for _, s := range club.Squad.Starters {
+		positions[s.Position] = true
+	}
+	for pos := range positions {
+		var ids []string
+		for _, p := range club.Players {
+			if p.PlaysAt(pos) {
+				ids = append(ids, strconv.FormatInt(p.ID, 10))
+			}
+		}
+		for start := 0; start < len(ids); start += 50 {
+			end := start + 50
+			if end > len(ids) {
+				end = len(ids)
+			}
+			raw, err := c.URL("metarank", nil)
+			if err != nil {
+				return err
+			}
+			u, _ := url.Parse(raw)
+			q := u.Query()
+			q.Set("ids", strings.Join(ids[start:end], ","))
+			q.Set("positions", strconv.Itoa(positionID(pos)))
+			u.RawQuery = q.Encode()
+			var resp metarankResponse
+			if err := c.GetJSON(ctx, u.String(), &resp); err != nil {
+				return err
+			}
+			for _, r := range resp.Data {
+				p, ok := club.PlayerByID(r.EaID)
+				if !ok {
+					continue
+				}
+				if got, ok := domain.PositionFromID(r.Position); !ok || got != pos {
+					continue
+				}
+				if p.GGRatings == nil {
+					p.GGRatings = map[domain.Position]float64{}
+				}
+				p.GGRatings[pos] = r.Score
+				for i := range club.Players {
+					if club.Players[i].ID == p.ID {
+						club.Players[i] = p
+						break
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func positionID(p domain.Position) int {
+	for id := 0; id < 30; id++ {
+		if q, ok := domain.PositionFromID(id); ok && q == p {
+			return id
+		}
+	}
+	return -1
 }
 
 // PlayerFilter delimita quais cartas do mercado interessam. Puxar o
@@ -480,6 +566,9 @@ func (c *Client) ActiveSquad(ctx context.Context, gamerTag string, roster []doma
 	}
 
 	sq := domain.Squad{Name: data.str("title", "name")}
+	if id := data.str("activeFormationId"); id != "" {
+		sq.Formation = formationByID[id]
+	}
 	chem := 0
 	for _, gp := range data.nodes("activeGroupPositions") {
 		if gp.str("group") != "FIELD" {

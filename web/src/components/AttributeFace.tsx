@@ -30,6 +30,8 @@ const GOALKEEPER = [
 
 export default function AttributeFace({ attributes, position }: AttributeFaceProps) {
   const cols = position === "GK" ? GOALKEEPER : OUTFIELD;
+  const hasValues = cols.some((c) => attributes[c.key] > 0);
+  if (!hasValues) return <div className="empty">A fonte não trouxe os atributos desta carta na última coleta.</div>;
   return (
     <div className="attr-face">
       {cols.map((c) => {

@@ -175,6 +175,7 @@ type Snapshot struct {
 	MarketFunnel analyze.UpgradeFunnel `json:"market_funnel"`
 	EvoMatches   []analyze.EvoMatch    `json:"evo_matches"`
 	SquadSwaps   []analyze.SquadSwap   `json:"squad_swaps"`
+	SquadPlan    analyze.SquadPlan     `json:"squad_plan"`
 	Trends       map[int64]PriceTrend  `json:"trends"`
 	SquadScore   float64               `json:"squad_score"`
 

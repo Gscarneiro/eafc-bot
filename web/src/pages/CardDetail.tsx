@@ -72,7 +72,6 @@ export default function CardDetail() {
               {altPositions.length > 0 ? ` (${altPositions.join(", ")})` : ""}
             </Chip>
             {p.gg_rating ? <Chip tone="flat">GG Rating {p.gg_rating.toFixed(1)}</Chip> : null}
-            {p.play_styles && p.play_styles.length > 0 && <Chip tone="flat">{styleNames(p.play_styles)}</Chip>}
           </div>
         </div>
       </div>
@@ -85,6 +84,15 @@ export default function CardDetail() {
           <span>pé fraco {p.weak_foot}/5</span>
           <span>habilidades {p.skill_moves}/5</span>
         </div>
+      </section>
+
+      <section>
+        <h2>PlayStyles</h2>
+        {p.play_styles && p.play_styles.length > 0 ? (
+          <div className="playstyle-grid">
+            {p.play_styles.map((style) => <Chip key={`${style.name}-${style.plus}`} tone={style.plus ? "gain" : "flat"}>{styleNames([style])}</Chip>)}
+          </div>
+        ) : <div className="empty">Esta carta não tem PlayStyles informados na última coleta.</div>}
       </section>
 
       {priceSeries.length > 1 && (

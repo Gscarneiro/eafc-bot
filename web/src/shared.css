@@ -344,3 +344,16 @@ th.num {
   font-size: 12.5px;
   color: var(--ink-2);
 }
+
+.section-title-row { display: flex; align-items: end; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
+.section-title-row h2 { margin-bottom: 3px; }
+.section-note, .count-label { margin: 0; color: var(--ink-3); font: 12px var(--font-mono); }
+.count-label { white-space: nowrap; }
+.roster-filters { display: flex; align-items: end; gap: var(--space-3); margin-bottom: var(--space-3); padding: var(--space-3); background: var(--sunk); border: 1px solid var(--rule); border-radius: var(--radius-md); }
+.roster-filters label { display: grid; gap: 5px; min-width: 130px; color: var(--ink-3); font: 11px var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
+.roster-filters input, .roster-filters select { min-height: 34px; padding: 6px 9px; border: 1px solid var(--rule-strong); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); font: 14px var(--font-body); text-transform: none; letter-spacing: normal; }
+.roster-filters label:first-child { flex: 1; min-width: 190px; }
+.pagination { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: var(--space-3); color: var(--ink-3); font: 12px var(--font-mono); }
+.pagination button { min-height: 32px; padding: 5px 10px; border: 1px solid var(--rule-strong); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); cursor: pointer; font: 12px var(--font-mono); }
+.pagination button:disabled { opacity: .45; cursor: default; }
+@media (max-width: 620px) { .section-title-row { align-items: start; flex-direction: column; } .roster-filters { align-items: stretch; flex-direction: column; } .roster-filters label, .roster-filters label:first-child { min-width: 0; } .pagination { justify-content: space-between; } }

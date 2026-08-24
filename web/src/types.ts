@@ -243,6 +243,7 @@ export interface RosterCard {
 
 export interface StarterCard extends RosterCard {
   index: number;
+  position_gg_rating?: number;
   position: Position; // slot físico — pode divergir da posição natural da carta
 }
 
@@ -250,7 +251,15 @@ export interface TimeResponse {
   formation: string;
   starters: StarterCard[] | null;
   bench: RosterCard[] | null;
+  bench_page: number;
+  bench_page_size: number;
+  bench_total: number;
+  optimization: SquadOptimization;
 }
+
+export interface SquadMoveView { index:number; position:Position; current:StarterCard; suggested:StarterCard; current_gg_rating:number; suggested_gg_rating:number; gain:number }
+export interface SquadAlternativeView { index:number; position:Position; players:StarterCard[] }
+export interface SquadOptimization { status:string; reason?:string; current_average:number; suggested_average:number; gain:number; moves:SquadMoveView[]; alternatives:SquadAlternativeView[]; chemistry_warning:string }
 
 export interface Upgrade {
   slot: Position;

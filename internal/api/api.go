@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +27,12 @@ import (
 // trás — o mesmo teto que a retenção de snapshot usa, para o front nunca
 // pedir mais histórico do que existe.
 const priceSeriesWindow = 30 * 24 * time.Hour
+
+const (
+	benchMinimumRating   = 88
+	benchDefaultPageSize = 24
+	benchMaximumPageSize = 48
+)
 
 // JobStatus é o estado do job diário de coleta+análise, para a UI mostrar
 // "rodando" / "última coleta às X" / "falhou às X" e o botão de atualizar
@@ -309,15 +316,45 @@ type RosterCard struct {
 // report.SquadCard sobre por que isso não é a posição natural da carta.
 type StarterCard struct {
 	RosterCard
-	Index    int             `json:"index"`
-	Position domain.Position `json:"position"`
+	Index            int             `json:"index"`
+	Position         domain.Position `json:"position"`
+	PositionGGRating float64         `json:"position_gg_rating,omitempty"`
 }
 
 // TimeResponse é o elenco: os titulares na ordem do fut.gg, e o banco.
 type TimeResponse struct {
-	Formation string        `json:"formation"`
-	Starters  []StarterCard `json:"starters"`
-	Bench     []RosterCard  `json:"bench"`
+	Formation     string            `json:"formation"`
+	Starters      []StarterCard     `json:"starters"`
+	Bench         []RosterCard      `json:"bench"`
+	BenchPage     int               `json:"bench_page"`
+	BenchPageSize int               `json:"bench_page_size"`
+	BenchTotal    int               `json:"bench_total"`
+	Optimization  SquadOptimization `json:"optimization"`
+}
+
+type SquadOptimization struct {
+	Status           string                 `json:"status"`
+	Reason           string                 `json:"reason,omitempty"`
+	CurrentAverage   float64                `json:"current_average"`
+	SuggestedAverage float64                `json:"suggested_average"`
+	Gain             float64                `json:"gain"`
+	Moves            []SquadMoveView        `json:"moves"`
+	Alternatives     []SquadAlternativeView `json:"alternatives"`
+	ChemistryWarning string                 `json:"chemistry_warning"`
+}
+type SquadMoveView struct {
+	Index             int             `json:"index"`
+	Position          domain.Position `json:"position"`
+	Current           StarterCard     `json:"current"`
+	Suggested         StarterCard     `json:"suggested"`
+	CurrentGGRating   float64         `json:"current_gg_rating"`
+	SuggestedGGRating float64         `json:"suggested_gg_rating"`
+	Gain              float64         `json:"gain"`
+}
+type SquadAlternativeView struct {
+	Index    int             `json:"index"`
+	Position domain.Position `json:"position"`
+	Players  []StarterCard   `json:"players"`
 }
 
 func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
@@ -336,25 +373,124 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 	inSquad := make(map[int64]bool, len(main))
 	for i, c := range main {
 		starters[i] = StarterCard{
-			RosterCard: RosterCard{Player: c.Player, CardSlug: slugByID[c.Player.ID]},
-			Index:      c.Index,
-			Position:   c.Position,
+			RosterCard:       RosterCard{Player: c.Player, CardSlug: slugByID[c.Player.ID]},
+			Index:            c.Index,
+			Position:         c.Position,
+			PositionGGRating: func() float64 { v, _ := c.Player.GGRatingAt(c.Position); return v }(),
 		}
 		inSquad[c.Player.ID] = true
 	}
 
-	var bench []RosterCard
-	for _, p := range snap.Club.Players {
-		if !inSquad[p.ID] {
-			bench = append(bench, RosterCard{Player: p, CardSlug: slugByID[p.ID]})
-		}
+	benchPlayers := filteredBench(snap.Club.Players, inSquad, r)
+	page, pageSize := benchPage(r)
+	total := len(benchPlayers)
+	from := (page - 1) * pageSize
+	if from > total {
+		from = total
+	}
+	to := from + pageSize
+	if to > total {
+		to = total
+	}
+	bench := make([]RosterCard, 0, to-from)
+	for _, p := range benchPlayers[from:to] {
+		bench = append(bench, RosterCard{Player: p, CardSlug: slugByID[p.ID]})
 	}
 
+	opt := SquadOptimization{Status: snap.SquadPlan.Status, Reason: snap.SquadPlan.Reason, CurrentAverage: snap.SquadPlan.CurrentAverage, SuggestedAverage: snap.SquadPlan.SuggestedAverage, Gain: snap.SquadPlan.Gain, ChemistryWarning: "A química da escalação não é simulada; valide-a antes de aplicar."}
+	toCard := func(a analyze.SquadAssignment) StarterCard {
+		return StarterCard{RosterCard: RosterCard{Player: a.Player, CardSlug: slugByID[a.Player.ID]}, Index: a.Index, Position: a.Position, PositionGGRating: a.Rating}
+	}
+	for _, m := range snap.SquadPlan.Moves {
+		cur := StarterCard{RosterCard: RosterCard{Player: m.Current, CardSlug: slugByID[m.Current.ID]}, Index: m.Index, Position: m.Position, PositionGGRating: m.CurrentRating}
+		opt.Moves = append(opt.Moves, SquadMoveView{m.Index, m.Position, cur, toCard(analyze.SquadAssignment{Index: m.Index, Position: m.Position, Player: m.Suggested, Rating: m.SuggestedRating}), m.CurrentRating, m.SuggestedRating, m.Gain})
+	}
+	for _, a := range snap.SquadPlan.Alternatives {
+		av := SquadAlternativeView{Index: a.Index, Position: a.Position}
+		for _, p := range a.Players {
+			av.Players = append(av.Players, toCard(p))
+		}
+		opt.Alternatives = append(opt.Alternatives, av)
+	}
+	formation := snap.Club.Squad.Formation
+	if formation == "" {
+		formation = inferFormation(snap.Club.Squad.Starters)
+	}
 	writeJSON(w, TimeResponse{
-		Formation: snap.Club.Squad.Formation,
-		Starters:  starters,
-		Bench:     bench,
+		Formation:     formation,
+		Starters:      starters,
+		Bench:         bench,
+		BenchPage:     page,
+		BenchPageSize: pageSize,
+		BenchTotal:    total,
+		Optimization:  opt,
 	})
+}
+
+func benchPage(r *http.Request) (int, int) {
+	page, _ := strconv.Atoi(r.URL.Query().Get("bench_page"))
+	if page < 1 {
+		page = 1
+	}
+	size, _ := strconv.Atoi(r.URL.Query().Get("bench_size"))
+	if size <= 0 {
+		size = benchDefaultPageSize
+	}
+	if size > benchMaximumPageSize {
+		size = benchMaximumPageSize
+	}
+	return page, size
+}
+
+func filteredBench(players []domain.ClubPlayer, starters map[int64]bool, r *http.Request) []domain.ClubPlayer {
+	q := r.URL.Query()
+	search := strings.ToLower(strings.TrimSpace(q.Get("bench_search")))
+	position := domain.Position(strings.ToUpper(strings.TrimSpace(q.Get("bench_position"))))
+	tradeable := q.Get("bench_tradeable")
+	out := make([]domain.ClubPlayer, 0)
+	for _, p := range players {
+		if starters[p.ID] || p.Rating < benchMinimumRating {
+			continue
+		}
+		if search != "" && !strings.Contains(strings.ToLower(p.Display()), search) {
+			continue
+		}
+		if position != "" && !p.PlaysAt(position) {
+			continue
+		}
+		if tradeable == "tradeable" && p.Untradeable {
+			continue
+		}
+		if tradeable == "untradeable" && !p.Untradeable {
+			continue
+		}
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].GGRating != out[j].GGRating {
+			return out[i].GGRating > out[j].GGRating
+		}
+		if out[i].Rating != out[j].Rating {
+			return out[i].Rating > out[j].Rating
+		}
+		return out[i].Display() < out[j].Display()
+	})
+	return out
+}
+
+func inferFormation(slots []domain.SquadSlot) string {
+	if len(slots) != 11 {
+		return ""
+	}
+	copySlots := append([]domain.SquadSlot(nil), slots...)
+	sort.Slice(copySlots, func(i, j int) bool { return copySlots[i].Index < copySlots[j].Index })
+	want := []domain.Position{domain.GK, domain.RB, domain.CB, domain.CB, domain.LB, domain.RM, domain.CM, domain.CM, domain.LM, domain.CAM, domain.ST}
+	for i, pos := range want {
+		if copySlots[i].Position != pos {
+			return ""
+		}
+	}
+	return "4-4-1-1"
 }
 
 // CardDetailResponse é a análise "atual x potencial" de uma carta, mais a

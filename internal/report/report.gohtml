@@ -261,6 +261,17 @@ footer{
 </section>
 {{end}}
 
+{{if eq .SquadPlan.Status "improved"}}
+<section>
+  <div class="sec-head"><h2>Melhor encaixe do clube</h2><span class="count">+{{printf "%.1f" .SquadPlan.Gain}} GG por slot</span></div>
+  <p class="sec-note">O cálculo considera todas as cartas do clube e mantém a formação atual. A química não é simulada; valide-a antes de aplicar.</p>
+  {{range .SquadPlan.Moves}}
+  <div class="row"><div class="slot">{{.Position}}</div><div class="swap"><span class="out">{{.Current.Display}} <span class="chip flat">GG {{printf "%.1f" .CurrentRating}}</span></span><span class="arrow">&rarr;</span><span class="in">{{.Suggested.Display}} <span class="chip gain">GG {{printf "%.1f" .SuggestedRating}}</span></span></div></div>
+  {{end}}
+  {{range .SquadPlan.Alternatives}}<details><summary>{{.Position}}: ver alternativas</summary>{{range .Players}}<div class="why">{{.Player.Display}} · GG {{printf "%.1f" .Rating}}</div>{{end}}</details>{{end}}
+</section>
+{{end}}
+
 {{if .SquadSwaps}}
 <section>
   <div class="sec-head">

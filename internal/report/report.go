@@ -54,6 +54,7 @@ type Data struct {
 	// SquadSwaps são trocas de custo zero: alguém que já está no seu
 	// elenco, na mesma posição, com GG Rating maior que o titular atual.
 	SquadSwaps []analyze.SquadSwap
+	SquadPlan  analyze.SquadPlan
 	// MainSquad é o XI titular, na ordem que o fut.gg usa (0 = goleiro,
 	// crescendo em direção ao ataque) — o "elenco principal" que fecha o
 	// relatório, com a arte da carta de cada um.
@@ -153,6 +154,7 @@ func Build(in Input) Data {
 	}
 
 	d.SquadScore, d.WeakestSlot, d.WeakestName, d.WeakestGGRating = SquadSummary(club)
+	d.SquadPlan = analyze.OptimizeSquad(club)
 	d.SquadSwaps = analyze.FindSquadSwaps(club)
 	d.MainSquad = MainSquad(club)
 	d.SBCs, d.Objectives = RankChallenges(snap.SBCs, snap.Objectives)

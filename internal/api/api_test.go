@@ -286,7 +286,10 @@ func TestHandleInvestimentosUsaOMomentumMaisRecenteDoStore(t *testing.T) {
 }
 
 func TestHandleTime(t *testing.T) {
-	srv, _ := newTestServer(t)
+	snap := fixtureSnapshot()
+	snap.Club.Players[1].Rating = 89
+	snap.Club.Players[1].GGRating = 89
+	srv, _ := newTestServerWithSnapshot(t, snap)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/time", nil))
 
@@ -307,6 +310,39 @@ func TestHandleTime(t *testing.T) {
 	}
 	if got.Bench[0].CardSlug != "" {
 		t.Errorf("Bench[0].CardSlug = %q, esperava vazio (sem CardReport nesse jogador)", got.Bench[0].CardSlug)
+	}
+}
+
+func TestHandleTimePaginaEFiltraReservasAcimaDoPiso(t *testing.T) {
+	snap := fixtureSnapshot()
+	snap.Club.Players = append(snap.Club.Players,
+		domain.ClubPlayer{Player: domain.Player{ID: 3, Name: "Baixa", Rating: 87, Position: domain.CM}},
+		domain.ClubPlayer{Player: domain.Player{ID: 4, Name: "Lateral negociável", Rating: 91, Position: domain.RB, GGRating: 92}},
+		domain.ClubPlayer{Player: domain.Player{ID: 5, Name: "Lateral inegociável", Rating: 90, Position: domain.RB, GGRating: 93}, Untradeable: true},
+	)
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/time?bench_position=RB&bench_tradeable=tradeable&bench_size=1", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[TimeResponse](t, w)
+	if got.BenchTotal != 1 || len(got.Bench) != 1 || got.Bench[0].Player.ID != 4 {
+		t.Fatalf("reservas filtradas = total %d, cartas %+v", got.BenchTotal, got.Bench)
+	}
+	if got.BenchPage != 1 || got.BenchPageSize != 1 {
+		t.Errorf("página = %d, tamanho = %d", got.BenchPage, got.BenchPageSize)
+	}
+}
+
+func TestInferFormationReconheceSnapshotAntigo4411(t *testing.T) {
+	positions := []domain.Position{domain.GK, domain.RB, domain.CB, domain.CB, domain.LB, domain.RM, domain.CM, domain.CM, domain.LM, domain.CAM, domain.ST}
+	slots := make([]domain.SquadSlot, len(positions))
+	for i, position := range positions {
+		slots[i] = domain.SquadSlot{Index: i, Position: position}
+	}
+	if got := inferFormation(slots); got != "4-4-1-1" {
+		t.Errorf("inferFormation = %q, esperava 4-4-1-1", got)
 	}
 }
 

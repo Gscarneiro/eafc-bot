@@ -16,7 +16,14 @@ const VIEW_KEY = "eafc-bot:time-view";
 // O titular padrão é o campo desenhado na formação de verdade; a tabela
 // continua disponível pelo toggle — melhor pra varrer números em série.
 export default function Time() {
-  const { data, error, loading, refetch } = useData(fetchTime, []);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [position, setPosition] = useState("");
+  const [tradeable, setTradeable] = useState<"all" | "tradeable" | "untradeable">("all");
+  const { data, error, loading, refetch } = useData(
+    () => fetchTime({ page, search, position, tradeable }),
+    [page, search, position, tradeable],
+  );
   const gate = asyncGate(loading, error, !!data, refetch);
 
   const [view, setView] = useState<"campo" | "tabela">(() => {
@@ -26,6 +33,7 @@ export default function Time() {
       return "campo";
     }
   });
+  const [lineup, setLineup] = useState<"atual" | "sugerida">("atual");
   useEffect(() => {
     try {
       localStorage.setItem(VIEW_KEY, view);
@@ -39,6 +47,8 @@ export default function Time() {
   if (!data) return null;
 
   const starters = data.starters ?? [];
+  const suggested = data.optimization?.moves?.length ? starters.map((s) => data.optimization.moves.find((m) => m.index === s.index)?.suggested ?? s) : starters;
+  const displayedStarters = lineup === "sugerida" ? suggested : starters;
   const bench = data.bench ?? [];
   const pitchOK = canDrawPitch(data.formation || "", starters.length);
   const showPitch = pitchOK && view === "campo";
@@ -50,36 +60,51 @@ export default function Time() {
         title="Meu time"
         meta={`${starters.length} titulares · ${bench.length} reservas`}
         actions={
-          pitchOK ? (
-            <div className="toggle">
-              <button className={view === "campo" ? "active" : ""} onClick={() => setView("campo")}>
-                escalação
-              </button>
-              <button className={view === "tabela" ? "active" : ""} onClick={() => setView("tabela")}>
-                tabela
-              </button>
-            </div>
-          ) : undefined
+          <div className="toggle">
+            <button className={view === "campo" ? "active" : ""} onClick={() => pitchOK && setView("campo")} disabled={!pitchOK} title={!pitchOK ? "A formação ainda não tem 11 slots reconhecidos para desenhar o campo" : undefined}>
+              campo{!pitchOK ? " indisponível" : ""}
+            </button>
+            <button className={view === "tabela" ? "active" : ""} onClick={() => setView("tabela")}>
+              tabela
+            </button>
+            {data.optimization?.status === "improved" && <button className={lineup === "sugerida" ? "active" : ""} onClick={() => setLineup(lineup === "sugerida" ? "atual" : "sugerida")}>melhor encaixe</button>}
+          </div>
         }
       />
 
       <section>
         <h2>Titulares</h2>
         {showPitch ? (
-          <Pitch formation={data.formation} starters={starters} />
+          <Pitch formation={data.formation} starters={displayedStarters} />
         ) : (
-          <RosterTable rows={starters.map((s) => ({ player: s.player, cardSlug: s.card_slug, position: s.position }))} />
+          <RosterTable rows={displayedStarters.map((s) => ({ player: s.player, cardSlug: s.card_slug, position: s.position }))} />
         )}
+        {data.optimization?.status === "improved" && <div className="notice"><strong>Melhor encaixe: +{data.optimization.gain.toFixed(1)} GG</strong><br />{data.optimization.chemistry_warning}</div>}
       </section>
 
-      {bench.length > 0 && (
+      {(data.bench_total > 0 || search || position || tradeable !== "all") && (
         <section>
-          <h2>Reservas</h2>
+          <div className="section-title-row">
+            <div><h2>Reservas</h2><p className="section-note">Cartas 88+ do clube, ordenadas por GG Rating.</p></div>
+            <span className="count-label">{data.bench_total} encontradas</span>
+          </div>
+          <div className="roster-filters" aria-label="Filtrar reservas">
+            <label><span>Buscar</span><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Nome da carta" /></label>
+            <label><span>Posição</span><select value={position} onChange={(e) => { setPosition(e.target.value); setPage(1); }}><option value="">Todas</option>{["GK", "RB", "CB", "LB", "RWB", "LWB", "CDM", "CM", "CAM", "RM", "LM", "RW", "LW", "CF", "ST"].map((p) => <option key={p}>{p}</option>)}</select></label>
+            <label><span>Status</span><select value={tradeable} onChange={(e) => { setTradeable(e.target.value as typeof tradeable); setPage(1); }}><option value="all">Todas</option><option value="tradeable">Negociáveis</option><option value="untradeable">Inegociáveis</option></select></label>
+          </div>
           <RosterTable rows={bench.map((b) => ({ player: b.player, cardSlug: b.card_slug }))} />
+          <Pagination page={data.bench_page} pageSize={data.bench_page_size} total={data.bench_total} onPage={setPage} />
         </section>
       )}
     </div>
   );
+}
+
+function Pagination({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (next: number) => void }) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  if (pages <= 1) return null;
+  return <nav className="pagination" aria-label="Paginação de reservas"><span>Página {page} de {pages}</span><button disabled={page <= 1} onClick={() => onPage(page - 1)}>Anterior</button><button disabled={page >= pages} onClick={() => onPage(page + 1)}>Próxima</button></nav>;
 }
 
 interface Row {

@@ -168,6 +168,9 @@ type Player struct {
 	// — o número que você já conhece do site, e que nunca estoura a escala.
 	GGRating    float64  `json:"gg_rating,omitempty"`
 	GGRatingPos Position `json:"gg_rating_pos,omitempty"`
+	// GGRatings guarda a nota do fut.gg em cada posição elegível. A nota
+	// escalar acima continua para compatibilidade com snapshots antigos.
+	GGRatings map[Position]float64 `json:"gg_ratings,omitempty"`
 
 	// ImageURL é a arte da carta, pronta pra usar num <img> — o fut.gg já
 	// devolve a URL final, redimensionada pelo CDN deles.
@@ -198,6 +201,17 @@ type Player struct {
 	// zero significa "esta fonte não trouxe" (só a rota de momentum manda
 	// esse campo — o mesmo convênio de GGRating).
 	MomentumPct float64 `json:"momentum_pct,omitempty"`
+}
+
+// GGRatingAt devolve a nota exata para o lugar físico da escalação.
+func (p Player) GGRatingAt(pos Position) (float64, bool) {
+	if v, ok := p.GGRatings[pos]; ok && v > 0 {
+		return v, true
+	}
+	if p.GGRating > 0 && p.GGRatingPos == pos {
+		return p.GGRating, true
+	}
+	return 0, false
 }
 
 // Display devolve o nome mais curto e reconhecível da carta.

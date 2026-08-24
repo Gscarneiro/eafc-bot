@@ -22,18 +22,19 @@
   gap: 24px;
   padding: clamp(20px, 4vw, 36px);
   margin-bottom: 20px;
-  color: #f8f5ec;
-  background: linear-gradient(112deg, #172423 0%, #203d38 58%, #425b38 100%);
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-lg);
-  box-shadow: 0 18px 44px rgba(21, 39, 34, .18);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
   position: relative;
 }
-.evo-hero::after { content: ""; position: absolute; width: 210px; height: 210px; right: 8%; bottom: -125px; border: 1px solid rgba(242, 190, 89, .44); border-radius: 50%; box-shadow: 0 0 0 22px rgba(242, 190, 89, .08), 0 0 0 44px rgba(242, 190, 89, .05); }
+.evo-hero::after { content: ""; position: absolute; width: 150px; height: 150px; right: 8%; bottom: -105px; border: 1px solid var(--turf-bg); border-radius: 50%; }
 .evo-hero h2 { max-width: 590px; margin: 8px 0 7px; font-family: var(--font-display); font-size: clamp(28px, 4vw, 44px); font-weight: 400; letter-spacing: -.025em; }
-.evo-hero p { max-width: 620px; margin: 0; color: rgba(248, 245, 236, .74); font-size: 14px; }
-.evo-hero-kicker, .evo-path-kicker { color: #f2be59; font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: .12em; }
-.evo-hero-mark { z-index: 1; color: #f2be59; font: 72px/1 var(--font-display); transform: rotate(-8deg); }
+.evo-hero p { max-width: 620px; margin: 0; color: var(--ink-2); font-size: 14px; }
+.evo-hero-kicker, .evo-path-kicker { color: var(--turf); font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: .12em; }
+.evo-hero-mark { z-index: 1; color: var(--turf); font: 72px/1 var(--font-display); transform: rotate(-8deg); }
 .evo-stat-grid { margin-bottom: 14px; }
 .evo-stat-grid .stat-tile { min-height: 112px; }
 .evo-acquisition-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 48px; margin: 0 0 4px; padding: 10px 0; border-bottom: 1px solid var(--rule); }
@@ -68,7 +69,7 @@
 .evo-objectives-label { flex-basis: 100%; }
 .evo-objective { padding: 5px 8px; border: 1px solid var(--rule); border-radius: var(--radius-sm); color: var(--ink-2); background: var(--sunk); font-size: 12px; }
 .evo-detail-path { grid-column: 1 / -1; padding-top: 16px; border-top: 1px solid var(--rule); }
-.evo-path { padding: 14px; border: 1px solid rgba(59, 127, 119, .3); border-radius: var(--radius-md); background: linear-gradient(120deg, var(--turf-bg), var(--panel)); }
+.evo-path { padding: 14px; border: 1px solid var(--rule); border-radius: var(--radius-md); background: var(--sunk); }
 .evo-path-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; color: var(--ink-3); font: 11px var(--font-mono); }
 .evo-timeline { display: flex; align-items: center; gap: 7px; overflow-x: auto; padding: 14px 0 4px; }
 .evo-step { position: relative; display: flex; align-items: center; gap: 7px; min-width: 122px; }

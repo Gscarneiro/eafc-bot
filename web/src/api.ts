@@ -31,7 +31,16 @@ async function getJSON<T>(path: string): Promise<T> {
 }
 
 export const fetchStatus = () => getJSON<StatusResponse>("/api/status");
-export const fetchTime = () => getJSON<TimeResponse>("/api/time");
+export interface TimeQuery { page?: number; search?: string; position?: string; tradeable?: "all" | "tradeable" | "untradeable" }
+export const fetchTime = (query: TimeQuery = {}) => {
+  const params = new URLSearchParams();
+  if (query.page && query.page > 1) params.set("bench_page", String(query.page));
+  if (query.search) params.set("bench_search", query.search);
+  if (query.position) params.set("bench_position", query.position);
+  if (query.tradeable && query.tradeable !== "all") params.set("bench_tradeable", query.tradeable);
+  const suffix = params.toString();
+  return getJSON<TimeResponse>(`/api/time${suffix ? `?${suffix}` : ""}`);
+};
 export const fetchCard = (slug: string) => getJSON<CardDetailResponse>(`/api/time/${encodeURIComponent(slug)}`);
 export const fetchMercado = () => getJSON<MercadoResponse>("/api/mercado");
 export const fetchEvolucoes = (query = "") => getJSON<EvolucoesResponse>(`/api/evolucoes${query ? `?${query}` : ""}`);

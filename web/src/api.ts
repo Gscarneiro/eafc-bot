@@ -1,15 +1,14 @@
 import type {
   CardDetailResponse,
   ConfigResponse,
-  EvolucoesResponse,
   EvolutionFavoritesResponse,
-  InvestimentosResponse,
   JobStatus,
-  MercadoResponse,
   StatusResponse,
   TimeResponse,
   UISettings,
+  ODataPage,
 } from "./types";
+import { toSearchParams, type ODataQuery } from "./odata";
 
 // ApiError carrega o status HTTP para as telas distinguirem "ainda não
 // coletou nada" (503, normal na primeira subida) de um erro de verdade.
@@ -30,27 +29,20 @@ async function getJSON<T>(path: string): Promise<T> {
   return res.json();
 }
 
-export const fetchStatus = () => getJSON<StatusResponse>("/api/status");
-export interface TimeQuery { page?: number; search?: string; position?: string; tradeable?: "all" | "tradeable" | "untradeable" }
-export const fetchTime = (query: TimeQuery = {}) => {
-  const params = new URLSearchParams();
-  if (query.page && query.page > 1) params.set("bench_page", String(query.page));
-  if (query.search) params.set("bench_search", query.search);
-  if (query.position) params.set("bench_position", query.position);
-  if (query.tradeable && query.tradeable !== "all") params.set("bench_tradeable", query.tradeable);
-  const suffix = params.toString();
-  return getJSON<TimeResponse>(`/api/time${suffix ? `?${suffix}` : ""}`);
+export const fetchCollection = <T,>(path: string, query: ODataQuery = {}) => {
+  const params = toSearchParams(query).toString();
+  return getJSON<ODataPage<T>>(`${path}${params ? `?${params}` : ""}`);
 };
+
+export const fetchStatus = () => getJSON<StatusResponse>("/api/status");
+export const fetchTime = () => getJSON<TimeResponse>("/api/time");
 export const fetchCard = (slug: string) => getJSON<CardDetailResponse>(`/api/time/${encodeURIComponent(slug)}`);
-export const fetchMercado = () => getJSON<MercadoResponse>("/api/mercado");
-export const fetchEvolucoes = (query = "") => getJSON<EvolucoesResponse>(`/api/evolucoes${query ? `?${query}` : ""}`);
 export const fetchEvolutionFavorites = () => getJSON<EvolutionFavoritesResponse>("/api/evolucoes/favoritos");
 export async function saveEvolutionFavorites(favorites: string[]): Promise<EvolutionFavoritesResponse> {
   const res = await fetch("/api/evolucoes/favoritos", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ favorites }) });
   if (!res.ok) throw new ApiError(res.status, `PUT /api/evolucoes/favoritos devolveu ${res.status}`);
   return res.json();
 }
-export const fetchInvestimentos = () => getJSON<InvestimentosResponse>("/api/investimentos");
 export const fetchJob = () => getJSON<JobStatus>("/api/job");
 export const fetchConfig = () => getJSON<ConfigResponse>("/api/config");
 

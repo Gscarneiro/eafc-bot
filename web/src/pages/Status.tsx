@@ -7,6 +7,8 @@ import StatTile from "../components/StatTile";
 import TrendChart from "../components/TrendChart";
 import { formatCoins, formatDate, formatDateTime, formatSigned } from "../format";
 import { useData } from "../useData";
+import { useCollection } from "../useCollection";
+import type { NewsItem, Objective, Player, SBC, SnapshotSummary } from "../types";
 import "../shared.css";
 import "./Status.css";
 
@@ -18,21 +20,27 @@ import "./Status.css";
 // últimos 30 dias.
 export default function Status() {
   const { data, error, loading, refetch } = useData(fetchStatus, []);
+  const historyCollection = useCollection<SnapshotSummary>("/api/historico", { pageSize: 30, enabled: data !== null });
+  const newCardsCollection = useCollection<Player>("/api/hoje/novidades", { pageSize: 5, enabled: data !== null });
+  const newsCollection = useCollection<NewsItem>("/api/hoje/noticias", { pageSize: 5, enabled: data !== null });
+  const sbcCollection = useCollection<SBC>("/api/hoje/sbcs", { pageSize: 5, enabled: data !== null });
+  const objectiveCollection = useCollection<Objective>("/api/hoje/objetivos", { pageSize: 5, enabled: data !== null });
   const gate = asyncGate(loading, error, !!data, refetch);
   if (gate) return gate;
   if (!data) return null;
 
-  const scoreHistory = (data.history ?? []).map((h) => ({ label: formatDate(h.date), value: h.squad_score }));
-  const coinsHistory = (data.history ?? []).map((h) => ({ label: formatDate(h.date), value: h.coins }));
+  const history = historyCollection.raw ? historyCollection.rows : (data.history ?? []);
+  const scoreHistory = history.map((h) => ({ label: formatDate(h.date), value: h.squad_score }));
+  const coinsHistory = history.map((h) => ({ label: formatDate(h.date), value: h.coins }));
   const scoreDelta =
     scoreHistory.length >= 2 ? scoreHistory[scoreHistory.length - 1].value - scoreHistory[scoreHistory.length - 2].value : null;
 
   const added = data.diff.added ?? [];
   const removed = data.diff.removed ?? [];
-  const newCards = data.new_cards ?? [];
-  const news = data.news ?? [];
-  const sbcs = data.sbcs ?? [];
-  const objectives = data.objectives ?? [];
+  const newCards = newCardsCollection.raw ? newCardsCollection.rows : (data.new_cards ?? []);
+  const news = newsCollection.raw ? newsCollection.rows : (data.news ?? []);
+  const sbcs = sbcCollection.raw ? sbcCollection.rows : (data.sbcs ?? []);
+  const objectives = objectiveCollection.raw ? objectiveCollection.rows : (data.objectives ?? []);
   const errors = data.errors ?? [];
   const changed = added.length > 0 || removed.length > 0 || data.diff.coins_delta !== 0;
   const move = data.top_move;

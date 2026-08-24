@@ -109,7 +109,7 @@ montando os envelopes JSON de cada rota por cima.
 
 `report.Data` (e `report.SquadCard`) **não têm tag JSON** — são structs de
 `html/template`, não contrato HTTP. `internal/api` define os próprios tipos
-tagueados (`api.SquadCard`, `api.RosterCard`...) em volta de
+tagueados (`api.RosterCard`, `api.StarterCard`...) em volta de
 `domain.*`/`analyze.*`/`cards.CardReport`, que já são tagueados.
 
 Um snapshot com clube vazio **nunca** sobrescreve um snapshot bom — a trava
@@ -260,6 +260,20 @@ de pista de nome — que é exatamente a situação do FC 27.
   slug CERTO em `RosterCard.CardSlug` (vazio quando a carta está abaixo do
   `cards_min_rating` e não tem `CardReport`). Linkar direto com
   `player.slug` produz link quebrado ou pra carta errada.
+
+### Camada de listagens OData
+
+As coleções HTTP usam `internal/query` (subconjunto escrito à mão, sem
+dependências externas). Cada rota declara um `query.Schema` explícito; filtros
+`$filter`, busca `$search`, `$orderby`, `$top` e `$skip` são aplicados no
+servidor e respondem com `value`, `@odata.count`, `@eafc.skip`, `@eafc.top` e
+facetas em `@eafc.facets`. As coleções são separadas por responsabilidade:
+`/api/mercado`, `/api/evolucoes`, `/api/elenco/titulares`,
+`/api/elenco/reservas`, `/api/capital/{investimentos,vendas,sbcs}` e
+`/api/hoje/{novidades,noticias,sbcs,objetivos,movimentacao}`, além de
+`/api/historico`. Status, job, configuração, favoritos e detalhe de carta
+continuam sendo respostas escalares. O cache da API é curto e invalida quando
+`Status().LastSuccess` muda.
 
 ## Agent skills
 

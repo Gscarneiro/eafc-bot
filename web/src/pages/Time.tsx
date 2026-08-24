@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchTime } from "../api";
+import { fetchCollection, fetchTime } from "../api";
 import { asyncGate } from "../components/asyncGate";
 import Chip from "../components/Chip";
 import PageHeader from "../components/PageHeader";
 import Pitch, { canDrawPitch } from "../components/Pitch";
 import { useData } from "../useData";
-import type { ClubPlayer, Position } from "../types";
+import { useCollection } from "../useCollection";
+import type { ClubPlayer, Position, RosterCard, StarterCard } from "../types";
 import "../shared.css";
 
 const VIEW_KEY = "eafc-bot:time-view";
@@ -16,15 +17,14 @@ const VIEW_KEY = "eafc-bot:time-view";
 // O titular padrão é o campo desenhado na formação de verdade; a tabela
 // continua disponível pelo toggle — melhor pra varrer números em série.
 export default function Time() {
-  const [page, setPage] = useState(1);
+  const [, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [position, setPosition] = useState("");
   const [tradeable, setTradeable] = useState<"all" | "tradeable" | "untradeable">("all");
-  const { data, error, loading, refetch } = useData(
-    () => fetchTime({ page, search, position, tradeable }),
-    [page, search, position, tradeable],
-  );
-  const gate = asyncGate(loading, error, !!data, refetch);
+  const { data, error, loading, refetch } = useData(fetchTime, []);
+  const startersData = useData(() => fetchCollection<StarterCard>("/api/elenco/titulares", { top: 50 }), []);
+  const benchCollection = useCollection<RosterCard>("/api/elenco/reservas", { pageSize: 24 });
+  const gate = asyncGate(loading || startersData.loading || benchCollection.loading, error ?? startersData.error ?? benchCollection.error, !!data && !!startersData.data, () => { refetch(); startersData.refetch(); benchCollection.refetch(); });
 
   const [view, setView] = useState<"campo" | "tabela">(() => {
     try {
@@ -46,10 +46,10 @@ export default function Time() {
   if (gate) return gate;
   if (!data) return null;
 
-  const starters = data.starters ?? [];
+  const starters = startersData.data?.value ?? [];
   const suggested = data.optimization?.moves?.length ? starters.map((s) => data.optimization.moves.find((m) => m.index === s.index)?.suggested ?? s) : starters;
   const displayedStarters = lineup === "sugerida" ? suggested : starters;
-  const bench = data.bench ?? [];
+  const bench = benchCollection.rows;
   const pitchOK = canDrawPitch(data.formation || "", starters.length);
   const showPitch = pitchOK && view === "campo";
 
@@ -82,27 +82,26 @@ export default function Time() {
         {data.optimization?.status === "improved" && <div className="notice"><strong>Melhor encaixe: +{data.optimization.gain.toFixed(1)} GG</strong><br />{data.optimization.chemistry_warning}</div>}
       </section>
 
-      {(data.bench_total > 0 || search || position || tradeable !== "all") && (
+      {(benchCollection.count > 0 || search || position || tradeable !== "all") && (
         <section>
           <div className="section-title-row">
             <div><h2>Reservas</h2><p className="section-note">Cartas 88+ do clube, ordenadas por GG Rating.</p></div>
-            <span className="count-label">{data.bench_total} encontradas</span>
+            <span className="count-label">{benchCollection.count} encontradas</span>
           </div>
           <div className="roster-filters" aria-label="Filtrar reservas">
-            <label><span>Buscar</span><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Nome da carta" /></label>
+            <label><span>Buscar</span><input value={search} onChange={(e) => { const value = e.target.value; setSearch(value); benchCollection.setSearch(value); setPage(1); }} placeholder="Nome da carta" /></label>
             <label><span>Posição</span><select value={position} onChange={(e) => { setPosition(e.target.value); setPage(1); }}><option value="">Todas</option>{["GK", "RB", "CB", "LB", "RWB", "LWB", "CDM", "CM", "CAM", "RM", "LM", "RW", "LW", "CF", "ST"].map((p) => <option key={p}>{p}</option>)}</select></label>
             <label><span>Status</span><select value={tradeable} onChange={(e) => { setTradeable(e.target.value as typeof tradeable); setPage(1); }}><option value="all">Todas</option><option value="tradeable">Negociáveis</option><option value="untradeable">Inegociáveis</option></select></label>
           </div>
           <RosterTable rows={bench.map((b) => ({ player: b.player, cardSlug: b.card_slug }))} />
-          <Pagination page={data.bench_page} pageSize={data.bench_page_size} total={data.bench_total} onPage={setPage} />
+          <Pagination page={benchCollection.page} pages={benchCollection.pages} onPage={benchCollection.setPage} />
         </section>
       )}
     </div>
   );
 }
 
-function Pagination({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (next: number) => void }) {
-  const pages = Math.max(1, Math.ceil(total / pageSize));
+function Pagination({ page, pages, onPage }: { page: number; pages: number; onPage: (next: number) => void }) {
   if (pages <= 1) return null;
   return <nav className="pagination" aria-label="Paginação de reservas"><span>Página {page} de {pages}</span><button disabled={page <= 1} onClick={() => onPage(page - 1)}>Anterior</button><button disabled={page >= pages} onClick={() => onPage(page + 1)}>Próxima</button></nav>;
 }

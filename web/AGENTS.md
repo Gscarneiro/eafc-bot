@@ -17,6 +17,12 @@ fundo `paper`, superfícies `panel`, bordas `rule`, texto e métricas em
    horizontal, exceto linhas do tempo e tabelas de dados densos.
 4. Respeite `prefers-reduced-motion` e nunca esconda uma ação apenas no hover.
 
+Listagens usam `useCollection` e o subconjunto OData (`$search`, `$filter`,
+`$orderby`, `$top` e `$skip`) antes de criar estado local. `DataList` concentra
+cabeçalhos ordenáveis e expansão; `Pagination` e `SearchInput` mantêm a
+paginação e a busca na URL. `useData` continua reservado para respostas
+escalares, como status, configuração e detalhe de carta.
+
 ## Campo
 
 O campo é a assinatura visual da aplicação. Cada linha é espelhada para a

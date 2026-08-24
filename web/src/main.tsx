@@ -25,6 +25,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="capital/sbcs" element={<Investimentos section="sbcs" />} />
           <Route path="investimentos" element={<Navigate to="/capital/investimentos" replace />} />
           <Route path="configuracoes" element={<Configuracoes />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

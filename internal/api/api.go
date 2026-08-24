@@ -61,6 +61,11 @@ type Server struct {
 	// disponibilidade usar o mesmo orçamento do job, sem reaproveitar a
 	// estimativa de analyze.EvoMatch.
 	EvolutionExtraBudget int
+	// CacheTTL evita reler snapshots grandes a cada chamada da UI. Zero mantém
+	// o comportamento sem cache e é útil para testes que trocam o store entre
+	// requisições.
+	CacheTTL time.Duration
+	cache    snapshotCache
 
 	Trigger func()
 	Status  func() JobStatus
@@ -91,6 +96,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/mercado", s.handleMercado)
 	mux.HandleFunc("GET /api/evolucoes", s.handleEvolucoes)
 	mux.HandleFunc("GET /api/investimentos", s.handleInvestimentos)
+	mux.HandleFunc("GET /api/elenco/titulares", s.handleTitulares)
+	mux.HandleFunc("GET /api/elenco/reservas", s.handleReservas)
+	mux.HandleFunc("GET /api/capital/investimentos", s.handleCapitalInvestimentos)
+	mux.HandleFunc("GET /api/capital/vendas", s.handleCapitalVendas)
+	mux.HandleFunc("GET /api/capital/sbcs", s.handleCapitalSBCs)
+	mux.HandleFunc("GET /api/hoje/novidades", s.handleHojeNovidades)
+	mux.HandleFunc("GET /api/hoje/noticias", s.handleHojeNoticias)
+	mux.HandleFunc("GET /api/hoje/sbcs", s.handleHojeSBCs)
+	mux.HandleFunc("GET /api/hoje/objetivos", s.handleHojeObjetivos)
+	mux.HandleFunc("GET /api/hoje/movimentacao", s.handleHojeMovimentacao)
+	mux.HandleFunc("GET /api/historico", s.handleHistorico)
 	mux.HandleFunc("GET /api/job", s.handleJobStatus)
 	mux.HandleFunc("POST /api/job", s.handleJobTrigger)
 	if s.Config != nil {
@@ -180,7 +196,7 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 // quando não há nenhum ainda — estado normal na primeira subida, antes da
 // primeira coleta terminar.
 func (s *Server) load(w http.ResponseWriter, r *http.Request) (store.Snapshot, bool) {
-	snap, ok, err := s.Store.LatestSnapshot(r.Context(), s.Cycle)
+	snap, ok, err := s.loadSnapshot(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return store.Snapshot{}, false
@@ -535,7 +551,7 @@ type MercadoResponse struct {
 	PriceSeries map[int64][]store.PricePoint `json:"price_series"`
 }
 
-func (s *Server) handleMercado(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleMercadoLegacy(w http.ResponseWriter, r *http.Request) {
 	snap, ok := s.load(w, r)
 	if !ok {
 		return
@@ -818,7 +834,7 @@ type EvolucoesResponse struct {
 	Filters  EvolucoesFilters `json:"filters"`
 }
 
-func (s *Server) handleEvolucoes(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleEvolucoesLegacy(w http.ResponseWriter, r *http.Request) {
 	snap, ok := s.load(w, r)
 	if !ok {
 		return

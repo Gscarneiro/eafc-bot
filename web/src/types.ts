@@ -294,7 +294,7 @@ export interface UpgradeFunnel {
   suggested: number;
   min_gain: number;
   best_gain: number;
-  best_slot: Position;
+  best_slot: Position | "";
   best_name: string;
   has_best: boolean;
 }
@@ -306,6 +306,25 @@ export interface MercadoResponse {
   // e chave de objeto JSON é sempre string.
   price_series: Record<string, PricePoint[]> | null;
 }
+
+export interface Facet { value: string; count: number; }
+export interface ODataPage<T> {
+  value: T[];
+  "@odata.count": number;
+  "@eafc.skip": number;
+  "@eafc.top": number;
+  "@eafc.facets"?: Record<string, Facet[]>;
+}
+
+export interface MercadoCollection extends ODataPage<Upgrade> {
+  "@eafc.funnel": UpgradeFunnel;
+  "@eafc.price_series": Record<string, PricePoint[]> | null;
+}
+export interface EvolucoesCollection extends ODataPage<EvoMatch> { "@eafc.summary": EvolucoesSummary; }
+
+export interface InvestimentosCollection extends ODataPage<Investment> { "@eafc.funnel": InvestmentFunnel; }
+export interface VendasCollection extends ODataPage<SellCandidate> { "@eafc.funnel": SellFunnel; }
+export interface FodderCollection extends ODataPage<FodderSignal> {}
 
 export interface EvoRequirement {
   kind: string;

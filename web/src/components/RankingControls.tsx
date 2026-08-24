@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { Facet } from "../types";
 
 export interface SortOption { value: string; label: string; }
 
@@ -10,6 +11,7 @@ export default function RankingControls({ count, sort, onSort, options, children
   children?: ReactNode;
   onClear?: () => void;
   hasFilters?: boolean;
+  facets?: Record<string, Facet[]>;
 }) {
   return (
     <div className="ranking-controls" aria-label="Controles da lista">

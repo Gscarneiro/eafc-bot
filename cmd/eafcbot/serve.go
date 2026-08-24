@@ -96,8 +96,9 @@ func cmdServe(ctx context.Context, args []string) error {
 	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,
 		EvolutionMinRating: cfg.Serve.CardsMinRating, EvolutionExtraBudget: cfg.Market.ExtraBudget,
-		Trigger: func() { go d.run(context.Background()) },
-		Status:  d.status,
+		CacheTTL: 10 * time.Second,
+		Trigger:  func() { go d.run(context.Background()) },
+		Status:   d.status,
 	}
 	apiSrv.Config = &api.ConfigEditor{
 		Get:          func() config.UISettings { return d.config().Editable() },
@@ -199,8 +200,9 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,
 		EvolutionMinRating: cfg.Serve.CardsMinRating, EvolutionExtraBudget: cfg.Market.ExtraBudget,
-		Trigger: func() {}, // não há job de verdade para acionar no demo
-		Status:  func() api.JobStatus { return api.JobStatus{} },
+		CacheTTL: 10 * time.Second,
+		Trigger:  func() {}, // não há job de verdade para acionar no demo
+		Status:   func() api.JobStatus { return api.JobStatus{} },
 	}
 	apiSrv.Config = &api.ConfigEditor{
 		Get:          func() config.UISettings { return demoCfg.Editable() },

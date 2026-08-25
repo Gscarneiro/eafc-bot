@@ -17,6 +17,7 @@ import (
 
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/cards"
+	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/report"
@@ -61,6 +62,10 @@ type Server struct {
 	// disponibilidade usar o mesmo orçamento do job, sem reaproveitar a
 	// estimativa de analyze.EvoMatch.
 	EvolutionExtraBudget int
+	// ChemistryModel espelha chemistry.model. Zero-valor (Nome=="") cai no
+	// modelo padrão via resolveChemistryModel — mantém compatibilidade com
+	// servidores de teste que não configuram isto.
+	ChemistryModel chemistry.Modelo
 	// CacheTTL evita reler snapshots grandes a cada chamada da UI. Zero mantém
 	// o comportamento sem cache e é útil para testes que trocam o store entre
 	// requisições.
@@ -70,6 +75,16 @@ type Server struct {
 	Trigger func()
 	Status  func() JobStatus
 	Config  *ConfigEditor
+}
+
+// resolveChemistryModel cai no modelo padrão quando o Server não configurou
+// um (Nome vazio é o zero-valor de chemistry.Modelo, que não tem limiar
+// nenhum preenchido — usar ele cru daria química sempre zero, não "padrão").
+func (s *Server) resolveChemistryModel() chemistry.Modelo {
+	if s.ChemistryModel.Nome == "" {
+		return chemistry.ModeloPadrao()
+	}
+	return s.ChemistryModel
 }
 
 // ConfigEditor expõe somente o subconjunto de preferências que a UI pode
@@ -93,6 +108,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/time", s.handleTime)
 	mux.HandleFunc("GET /api/time/{slug}", s.handleTimeSlug)
+	mux.HandleFunc("GET /api/gauntlet", s.handleGauntlet)
 	mux.HandleFunc("GET /api/mercado", s.handleMercado)
 	mux.HandleFunc("GET /api/evolucoes", s.handleEvolucoes)
 	mux.HandleFunc("GET /api/investimentos", s.handleInvestimentos)
@@ -335,17 +351,22 @@ type StarterCard struct {
 	Index            int             `json:"index"`
 	Position         domain.Position `json:"position"`
 	PositionGGRating float64         `json:"position_gg_rating,omitempty"`
+	// Quimica é o entrosamento efetivo desta carta no XI ativo — nil quando
+	// não há entrosamento calculado para o snapshot (ver
+	// store.Snapshot.Quimica).
+	Quimica *chemistry.Jogador `json:"chemistry,omitempty"`
 }
 
 // TimeResponse é o elenco: os titulares na ordem do fut.gg, e o banco.
 type TimeResponse struct {
-	Formation     string            `json:"formation"`
-	Starters      []StarterCard     `json:"starters"`
-	Bench         []RosterCard      `json:"bench"`
-	BenchPage     int               `json:"bench_page"`
-	BenchPageSize int               `json:"bench_page_size"`
-	BenchTotal    int               `json:"bench_total"`
-	Optimization  SquadOptimization `json:"optimization"`
+	Formation     string               `json:"formation"`
+	Starters      []StarterCard        `json:"starters"`
+	Bench         []RosterCard         `json:"bench"`
+	BenchPage     int                  `json:"bench_page"`
+	BenchPageSize int                  `json:"bench_page_size"`
+	BenchTotal    int                  `json:"bench_total"`
+	Optimization  SquadOptimization    `json:"optimization"`
+	Quimica       *chemistry.Resultado `json:"chemistry,omitempty"`
 }
 
 type SquadOptimization struct {
@@ -356,7 +377,11 @@ type SquadOptimization struct {
 	Gain             float64                `json:"gain"`
 	Moves            []SquadMoveView        `json:"moves"`
 	Alternatives     []SquadAlternativeView `json:"alternatives"`
-	ChemistryWarning string                 `json:"chemistry_warning"`
+	// ChemistryNote explica o entrosamento da sugestão em texto pronto pra
+	// tela — ver chemistryNote. Substitui o antigo aviso fixo "a química não
+	// é simulada": agora ela É calculada, e o texto muda com o resultado.
+	ChemistryNote string               `json:"chemistry_note"`
+	Quimica       *chemistry.Resultado `json:"chemistry,omitempty"`
 }
 type SquadMoveView struct {
 	Index             int             `json:"index"`
@@ -373,6 +398,58 @@ type SquadAlternativeView struct {
 	Players  []StarterCard   `json:"players"`
 }
 
+// currentChemistry devolve o entrosamento do XI ativo do snapshot. Usa o
+// valor persistido quando existe (o normal); recalcula só para snapshot
+// gravado antes deste campo existir (ponteiro nil) — mesmo padrão de
+// snap.GauntletPlan.Status=="".
+func (s *Server) currentChemistry(snap store.Snapshot) *chemistry.Resultado {
+	if snap.Quimica != nil {
+		return snap.Quimica
+	}
+	return chemistry.Avaliar(s.resolveChemistryModel(), snap.Club)
+}
+
+// chemistryByPlayer indexa um Resultado por carta, para popular
+// StarterCard.Quimica sem busca linear por titular.
+func chemistryByPlayer(res *chemistry.Resultado) map[int64]chemistry.Jogador {
+	if res == nil {
+		return nil
+	}
+	m := make(map[int64]chemistry.Jogador, len(res.Jogadores))
+	for _, j := range res.Jogadores {
+		m[j.PlayerID] = j
+	}
+	return m
+}
+
+// chemistryNote explica em texto pronto pra tela como a química da sugestão
+// se compara com a do XI atual — três frases possíveis, na ordem em que
+// fazem sentido pro usuário decidir se aplica a sugestão.
+func chemistryNote(current, suggested *chemistry.Resultado) string {
+	if current != nil && !current.Verificacao.Confiavel() {
+		if current.Verificacao.Status == chemistry.StatusSemOraculo {
+			return "O jogo ainda não confirmou o entrosamento desta coleta — mostrando só o calculado."
+		}
+		return fmt.Sprintf(
+			"O modelo de química não confere com o jogo (calculado %d, o jogo reporta %d) — a sugestão foi feita só por GG Rating. Rode `eafcbot quimica -calibrar`.",
+			current.Verificacao.Calculado, current.Verificacao.Observado)
+	}
+	if current == nil || suggested == nil {
+		return ""
+	}
+	if suggested.Total == current.Total {
+		return fmt.Sprintf("Química da sugestão: %d/%d, igual à atual.", suggested.Total, suggested.Maximo)
+	}
+	return fmt.Sprintf("Química: %d → %d (%s)", current.Total, suggested.Total, formatDeltaInt(suggested.Total-current.Total))
+}
+
+func formatDeltaInt(v int) string {
+	if v >= 0 {
+		return fmt.Sprintf("+%d", v)
+	}
+	return fmt.Sprintf("%d", v)
+}
+
 func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 	snap, ok := s.load(w, r)
 	if !ok {
@@ -384,15 +461,22 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 		slugByID[c.Player.ID] = c.Slug
 	}
 
+	quimicaAtual := s.currentChemistry(snap)
+	quimicaPorCarta := chemistryByPlayer(quimicaAtual)
+
 	main := report.MainSquad(snap.Club)
 	starters := make([]StarterCard, len(main))
 	inSquad := make(map[int64]bool, len(main))
 	for i, c := range main {
+		j, temQuimica := quimicaPorCarta[c.Player.ID]
 		starters[i] = StarterCard{
 			RosterCard:       RosterCard{Player: c.Player, CardSlug: slugByID[c.Player.ID]},
 			Index:            c.Index,
 			Position:         c.Position,
 			PositionGGRating: func() float64 { v, _ := c.Player.GGRatingAt(c.Position); return v }(),
+		}
+		if temQuimica {
+			starters[i].Quimica = &j
 		}
 		inSquad[c.Player.ID] = true
 	}
@@ -413,15 +497,28 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 		bench = append(bench, RosterCard{Player: p, CardSlug: slugByID[p.ID]})
 	}
 
-	opt := SquadOptimization{Status: snap.SquadPlan.Status, Reason: snap.SquadPlan.Reason, CurrentAverage: snap.SquadPlan.CurrentAverage, SuggestedAverage: snap.SquadPlan.SuggestedAverage, Gain: snap.SquadPlan.Gain, ChemistryWarning: "A química da escalação não é simulada; valide-a antes de aplicar."}
+	// snap.SquadPlan.Quimica nil é o sentinela de snapshot gravado antes
+	// deste campo existir (mesmo padrão de GauntletPlan.Status=="") —
+	// recompõe o plano inteiro, sem tocar rede: OptimizeSquad é puro.
+	squadPlan := snap.SquadPlan
+	if squadPlan.Quimica == nil {
+		squadPlan = analyze.OptimizeSquadWithOptions(snap.Club, analyze.SquadOptions{ChemistryModel: s.resolveChemistryModel()})
+	}
+
+	opt := SquadOptimization{
+		Status: squadPlan.Status, Reason: squadPlan.Reason,
+		CurrentAverage: squadPlan.CurrentAverage, SuggestedAverage: squadPlan.SuggestedAverage, Gain: squadPlan.Gain,
+		ChemistryNote: chemistryNote(squadPlan.CurrentQuimica, squadPlan.Quimica),
+		Quimica:       squadPlan.Quimica,
+	}
 	toCard := func(a analyze.SquadAssignment) StarterCard {
 		return StarterCard{RosterCard: RosterCard{Player: a.Player, CardSlug: slugByID[a.Player.ID]}, Index: a.Index, Position: a.Position, PositionGGRating: a.Rating}
 	}
-	for _, m := range snap.SquadPlan.Moves {
+	for _, m := range squadPlan.Moves {
 		cur := StarterCard{RosterCard: RosterCard{Player: m.Current, CardSlug: slugByID[m.Current.ID]}, Index: m.Index, Position: m.Position, PositionGGRating: m.CurrentRating}
 		opt.Moves = append(opt.Moves, SquadMoveView{m.Index, m.Position, cur, toCard(analyze.SquadAssignment{Index: m.Index, Position: m.Position, Player: m.Suggested, Rating: m.SuggestedRating}), m.CurrentRating, m.SuggestedRating, m.Gain})
 	}
-	for _, a := range snap.SquadPlan.Alternatives {
+	for _, a := range squadPlan.Alternatives {
 		av := SquadAlternativeView{Index: a.Index, Position: a.Position}
 		for _, p := range a.Players {
 			av.Players = append(av.Players, toCard(p))
@@ -440,6 +537,7 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 		BenchPageSize: pageSize,
 		BenchTotal:    total,
 		Optimization:  opt,
+		Quimica:       quimicaAtual,
 	})
 }
 
@@ -536,6 +634,184 @@ func (s *Server) handleTimeSlug(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.NotFound(w, r)
+}
+
+// gauntletRulesText explica a regra oficial que motiva a tela: elenco
+// inteiramente diferente, banco incluso, a cada uma das 4 rodadas (ver EA FC
+// 26 FUT Deep Dive, pitch notes). Texto fixo, não é dado do fut.gg — por
+// isso mora aqui, no envelope da API, e não em internal/analyze junto do
+// plano calculado.
+const gauntletRulesText = "O Gauntlet exige um elenco de 18 jogadores (11 titulares + 7 reservas) " +
+	"inteiramente diferente a cada uma das 4 partidas — nenhuma carta pode repetir, nem no banco. " +
+	"Ver EA FC 26 FUT Deep Dive: https://www.ea.com/games/ea-sports-fc/fc-26/news/pitch-notes-fc26-fut-deep-dive"
+
+// GauntletStarterView é um titular do Gauntlet pronto pra tela: a carta, o
+// slot físico que ocupa naquela rodada, e os potenciais de evolução
+// confirmados pelo fut.gg PARA AQUELA POSIÇÃO (ver gauntletPotentials) —
+// omitido quando não há caminho confirmado, mesma convenção de
+// CardReport.Best/CardDetailResponse.
+type GauntletStarterView struct {
+	Index      int                  `json:"index"`
+	Position   domain.Position      `json:"position"`
+	Player     domain.ClubPlayer    `json:"player"`
+	Rating     float64              `json:"rating"`
+	CardSlug   string               `json:"card_slug,omitempty"`
+	Potentials []cards.EvoPotential `json:"potentials,omitempty"`
+}
+
+// GauntletRoundView é uma das 4 rodadas do Gauntlet, pronta pra tela.
+type GauntletRoundView struct {
+	Round         int                   `json:"round"`
+	Starters      []GauntletStarterView `json:"starters"`
+	Bench         []RosterCard          `json:"bench"`
+	TotalRating   float64               `json:"total_rating"`
+	AverageRating float64               `json:"average_rating"`
+	Quimica       *chemistry.Resultado  `json:"chemistry,omitempty"`
+}
+
+// GauntletResponse é a tela inteira do Gauntlet: as 4 rodadas, mais o que
+// motivou o plano (regras, avisos) e os objetivos ativos relacionados.
+type GauntletResponse struct {
+	GeneratedAt time.Time           `json:"generated_at"`
+	Formation   string              `json:"formation"`
+	Status      string              `json:"status"`
+	Reason      string              `json:"reason,omitempty"`
+	Rules       string              `json:"rules"`
+	Strategy    string              `json:"strategy,omitempty"`
+	Warnings    []string            `json:"warnings,omitempty"`
+	Objectives  []domain.Objective  `json:"objectives"`
+	Rounds      []GauntletRoundView `json:"rounds"`
+}
+
+func (s *Server) handleGauntlet(w http.ResponseWriter, r *http.Request) {
+	snap, ok := s.load(w, r)
+	if !ok {
+		return
+	}
+
+	// Snapshot antigo gravado antes deste campo existir: Status vazio é o
+	// sentinela (ver o comentário de store.Snapshot.GauntletPlan) — recompõe
+	// direto do clube já carregado, sem tocar rede.
+	plan := snap.GauntletPlan
+	if plan.Status == "" {
+		plan = analyze.BuildGauntletPlanWithOptions(snap.Club, analyze.GauntletOptions{ChemistryModel: s.resolveChemistryModel()})
+	}
+
+	slugByID := make(map[int64]string, len(snap.Cards))
+	cardByID := make(map[int64]cards.CardReport, len(snap.Cards))
+	for _, c := range snap.Cards {
+		slugByID[c.Player.ID] = c.Slug
+		cardByID[c.Player.ID] = c
+	}
+
+	resp := GauntletResponse{
+		GeneratedAt: snap.GeneratedAt,
+		Formation:   plan.Formation,
+		Status:      plan.Status,
+		Reason:      plan.Reason,
+		Rules:       gauntletRulesText,
+		Strategy:    plan.Strategy,
+		Warnings:    plan.Warnings,
+		Objectives:  gauntletObjectives(snap.Objectives),
+		Rounds:      make([]GauntletRoundView, 0, len(plan.Rounds)),
+	}
+	for _, round := range plan.Rounds {
+		rv := GauntletRoundView{
+			Round:       round.Round,
+			TotalRating: round.TotalRating, AverageRating: round.AverageRating,
+			Quimica:  round.Quimica,
+			Starters: make([]GauntletStarterView, 0, len(round.Starters)),
+			Bench:    make([]RosterCard, 0, len(round.Bench)),
+		}
+		for _, a := range round.Starters {
+			sv := GauntletStarterView{
+				Index: a.Index, Position: a.Position, Player: a.Player, Rating: a.Rating,
+				CardSlug: slugByID[a.Player.ID],
+			}
+			if report, ok := cardByID[a.Player.ID]; ok {
+				sv.Potentials = gauntletPotentials(report, a.Position)
+			}
+			rv.Starters = append(rv.Starters, sv)
+		}
+		for _, b := range round.Bench {
+			rv.Bench = append(rv.Bench, RosterCard{Player: b, CardSlug: slugByID[b.ID]})
+		}
+		resp.Rounds = append(resp.Rounds, rv)
+	}
+	writeJSON(w, resp)
+}
+
+// gauntletObjectives filtra os objetivos ativos cujo grupo, nome ou alguma
+// tarefa mencione "Gauntlet" — pra tela abrir já sabendo se há objetivo
+// ligado ao modo, sem o usuário caçar na lista geral de objetivos.
+func gauntletObjectives(objs []domain.Objective) []domain.Objective {
+	out := make([]domain.Objective, 0)
+	for _, o := range objs {
+		if containsFold(o.Group, "gauntlet") || containsFold(o.Name, "gauntlet") {
+			out = append(out, o)
+			continue
+		}
+		for _, task := range o.Tasks {
+			if containsFold(task, "gauntlet") {
+				out = append(out, o)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func containsFold(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+// gauntletPotentials filtra os EvoPotential de uma carta aos que preservam a
+// posição do SLOT que ela ocupa no Gauntlet (não a posição natural da carta
+// — ver CLAUDE.md sobre SquadSlot) e reduz a lista a um representante por
+// combinação de PlayStyle ganho, mantendo sempre a melhor nota final
+// confirmada — evita mostrar vários caminhos quase idênticos que só mudam
+// o PlayStyle "de brinde" por um GG Rating final um pouco maior ou menor.
+func gauntletPotentials(report cards.CardReport, slotPosition domain.Position) []cards.EvoPotential {
+	all := make([]cards.EvoPotential, 0, 1+len(report.Alternates))
+	if report.Best != nil {
+		all = append(all, *report.Best)
+	}
+	all = append(all, report.Alternates...)
+
+	bestByStyles := map[string]cards.EvoPotential{}
+	var order []string
+	for _, potential := range all {
+		if potential.Path.Final().GGRatingPos != slotPosition {
+			continue
+		}
+		key := gainedPlayStyleKey(potential.GainedPlayStyles)
+		current, seen := bestByStyles[key]
+		if !seen {
+			order = append(order, key)
+			bestByStyles[key] = potential
+			continue
+		}
+		if potential.FinalGGRating > current.FinalGGRating ||
+			(potential.FinalGGRating == current.FinalGGRating && potential.CoinsCost < current.CoinsCost) {
+			bestByStyles[key] = potential
+		}
+	}
+
+	out := make([]cards.EvoPotential, 0, len(order))
+	for _, key := range order {
+		out = append(out, bestByStyles[key])
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].FinalGGRating > out[j].FinalGGRating })
+	return out
+}
+
+func gainedPlayStyleKey(styles []domain.PlayStyle) string {
+	names := make([]string, len(styles))
+	for i, s := range styles {
+		names[i] = s.String()
+	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
 }
 
 // MercadoResponse são as oportunidades de mercado — os upgrades já

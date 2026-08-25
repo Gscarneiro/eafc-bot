@@ -24,6 +24,7 @@ import (
 
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/cards"
+	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/futgg"
@@ -65,6 +66,8 @@ func run() error {
 		return cmdServe(ctx, args)
 	case "demo":
 		return cmdDemo(args)
+	case "quimica":
+		return cmdQuimica(ctx, args)
 	case "help", "-h", "--help":
 		usage()
 		return nil
@@ -94,6 +97,10 @@ func usage() {
                          sem rede nem scheduler; -open=false não abre o
                          navegador sozinho)
   demo                   gera um relatório de exemplo com dados fictícios
+  quimica                mostra o entrosamento do XI de hoje, carta a carta
+                         (-modelo escolhe outro modelo; -calibrar reproduz o
+                         modelo contra os snapshots guardados, -dias limita
+                         quantos)
 
 Variáveis de ambiente:
   EAFC_GAMERTAG      o nome do seu perfil no fut.gg (não o EA ID)
@@ -283,15 +290,21 @@ func runJob(ctx context.Context, cfg config.Config, st store.Store, outPath stri
 		}
 	}
 
+	// Calculado logo após a coleta do clube, antes da análise carta-a-carta:
+	// os titulares que ele escolhe entram em requiredIDs abaixo, para
+	// forçar CardReport deles mesmo abaixo do corte normal de rating.
+	chemModel := cfg.ChemistryModel()
+	gauntletPlan := analyze.BuildGauntletPlanWithOptions(snap.Club, analyze.GauntletOptions{ChemistryModel: chemModel})
+
 	var cardReports []cards.CardReport
 	if !dryRun && len(snap.Club.Players) > 0 {
 		fmt.Printf("analisando cartas a partir de %d de overall (atual x potencial)...\n", cfg.Serve.CardsMinRating)
-		if cardReports, err = cards.BuildReports(ctx, client, snap.Club, cfg.Serve.CardsMinRating); err != nil {
+		if cardReports, err = cards.BuildReports(ctx, client, snap.Club, cfg.Serve.CardsMinRating, gauntletPlan.StarterIDs()); err != nil {
 			snap.Errors = append(snap.Errors, "análise carta-a-carta: "+err.Error())
 		}
 	}
 
-	data, err := analyzeAndBuild(ctx, cfg, st, snap, started, dryRun, cardReports)
+	data, err := analyzeAndBuild(ctx, cfg, st, snap, started, dryRun, cardReports, gauntletPlan)
 	if err != nil {
 		return report.Data{}, err
 	}
@@ -316,7 +329,8 @@ func runJob(ctx context.Context, cfg config.Config, st store.Store, outPath stri
 
 // analyzeAndBuild é o miolo compartilhado entre runJob e `demo`.
 func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
-	snap *futgg.Snapshot, started time.Time, dryRun bool, cardReports []cards.CardReport) (report.Data, error) {
+	snap *futgg.Snapshot, started time.Time, dryRun bool, cardReports []cards.CardReport,
+	gauntletPlan analyze.GauntletPlan) (report.Data, error) {
 
 	cash, raisable := snap.Club.Budget()
 	budget := cash + raisable + cfg.Market.ExtraBudget
@@ -385,20 +399,22 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 		freshNews = snap.News
 	}
 
+	chemModel := cfg.ChemistryModel()
 	data := report.Build(report.Input{
-		Snapshot:      snap,
-		NewCards:      newCards,
-		FreshNews:     freshNews,
-		Upgrades:      upgrades,
-		Evolutions:    evos,
-		Funnel:        upFunnel,
-		Trends:        trends,
-		TrendWindow:   window,
-		Started:       started,
-		MaxRows:       cfg.Report.MaxRows,
-		CardReports:   cardReports,
-		Momentum:      momentum,
-		SBCCostTrends: sbcCostTrends,
+		Snapshot:       snap,
+		NewCards:       newCards,
+		FreshNews:      freshNews,
+		Upgrades:       upgrades,
+		Evolutions:     evos,
+		Funnel:         upFunnel,
+		Trends:         trends,
+		TrendWindow:    window,
+		Started:        started,
+		MaxRows:        cfg.Report.MaxRows,
+		CardReports:    cardReports,
+		Momentum:       momentum,
+		SBCCostTrends:  sbcCostTrends,
+		ChemistryModel: chemModel,
 	})
 
 	if !dryRun && st != nil {
@@ -435,6 +451,8 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 				Trends:       trends,
 				SquadScore:   data.SquadScore,
 				Cards:        cardReports,
+				GauntletPlan: gauntletPlan,
+				Quimica:      chemistry.Avaliar(chemModel, snap.Club),
 			})
 			if err != nil {
 				data.Errors = append(data.Errors, "gravando snapshot: "+err.Error())

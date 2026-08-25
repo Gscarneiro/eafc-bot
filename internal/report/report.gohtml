@@ -222,8 +222,13 @@ footer{
   </div>
   <div class="stat">
     <dt>Química</dt>
-    <dd>{{.Club.Squad.Chemistry}}<span class="sub"> /33</span></dd>
-    <div class="sub">{{.Club.Squad.Formation}}</div>
+    {{if .SquadPlan.CurrentQuimica}}
+    <dd>{{.SquadPlan.CurrentQuimica.Total}}<span class="sub"> /{{.SquadPlan.CurrentQuimica.Maximo}}</span></dd>
+    <div class="sub">{{.Club.Squad.Formation}}{{if not .SquadPlan.CurrentQuimica.Verificacao.Confiavel}} · jogo reporta {{.SquadPlan.CurrentQuimica.Verificacao.Observado}}{{end}}</div>
+    {{else}}
+    <dd>—</dd>
+    <div class="sub">escalação não sincronizada</div>
+    {{end}}
   </div>
   <div class="stat">
     <dt>Elo mais fraco</dt>

@@ -2,6 +2,7 @@ import type {
   CardDetailResponse,
   ConfigResponse,
   EvolutionFavoritesResponse,
+  GauntletResponse,
   JobStatus,
   StatusResponse,
   TimeResponse,
@@ -36,6 +37,7 @@ export const fetchCollection = <T,>(path: string, query: ODataQuery = {}) => {
 
 export const fetchStatus = () => getJSON<StatusResponse>("/api/status");
 export const fetchTime = () => getJSON<TimeResponse>("/api/time");
+export const fetchGauntlet = () => getJSON<GauntletResponse>("/api/gauntlet");
 export const fetchCard = (slug: string) => getJSON<CardDetailResponse>(`/api/time/${encodeURIComponent(slug)}`);
 export const fetchEvolutionFavorites = () => getJSON<EvolutionFavoritesResponse>("/api/evolucoes/favoritos");
 export async function saveEvolutionFavorites(favorites: string[]): Promise<EvolutionFavoritesResponse> {

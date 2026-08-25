@@ -1,0 +1,230 @@
+/* A tela do Gauntlet reusa primitivas de shared.css (.banner, .chip,
+   .expand-icon, .chain, .card-list, .list-row, .rank-link) — só o que é
+   exclusivo do modo (trilha de rodadas, linha de titular com potencial,
+   grade de reservas) mora aqui. */
+
+.gauntlet-rules {
+  margin-bottom: var(--space-5);
+}
+
+.gauntlet-objectives {
+  margin-bottom: var(--space-6);
+}
+
+.gauntlet-round-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 var(--space-4);
+}
+.gauntlet-round-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 108px;
+  padding: 8px 14px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--duration) var(--ease), background-color var(--duration) var(--ease);
+}
+.gauntlet-round-tab:hover {
+  border-color: var(--turf);
+}
+.gauntlet-round-tab.active {
+  border-color: var(--turf);
+  background: var(--turf-bg);
+  color: var(--turf);
+}
+.gauntlet-round-tab-label {
+  font: 600 11px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.gauntlet-round-tab-value {
+  font: 700 15px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.gauntlet-round-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+.gauntlet-round-stats {
+  color: var(--ink-2);
+  font: 12.5px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.gauntlet-round-note {
+  color: var(--alert);
+  font-size: var(--text-xs);
+}
+
+.gauntlet-starter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gauntlet-starter-row {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  transition: border-color var(--duration) var(--ease);
+}
+.gauntlet-starter-row:hover,
+.gauntlet-starter-row.open {
+  border-color: var(--rule-strong);
+}
+.gauntlet-starter-main {
+  display: grid;
+  grid-template-columns: 44px minmax(160px, 1.5fr) auto 32px;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 60px;
+  padding: 8px 12px;
+}
+.gauntlet-starter-position {
+  color: var(--turf);
+  font: 700 11px var(--font-mono);
+  text-align: center;
+}
+.gauntlet-starter-player {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.gauntlet-starter-player img {
+  width: 34px;
+  height: 44px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+}
+.gauntlet-starter-player-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gauntlet-starter-player-text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gauntlet-starter-player-text span {
+  color: var(--ink-3);
+  font: 11px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.gauntlet-starter-main .rank-link {
+  white-space: nowrap;
+}
+.gauntlet-potential-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px 14px;
+  border-top: 1px solid var(--rule);
+}
+.gauntlet-potential {
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--sunk);
+}
+.gauntlet-potential-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--ink-3);
+  font: 11px var(--font-mono);
+}
+.gauntlet-potential-gain {
+  color: var(--gain);
+  font-weight: 700;
+}
+.gauntlet-potential-styles {
+  margin-top: 6px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.gauntlet-potential-cost {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.gauntlet-bench-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.gauntlet-bench-chit {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  overflow: hidden;
+}
+.gauntlet-bench-chit a,
+.gauntlet-bench-chit-static {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  color: inherit;
+  text-decoration: none;
+}
+.gauntlet-bench-chit a:hover {
+  background: var(--sunk);
+}
+.gauntlet-bench-chit img {
+  width: 28px;
+  height: 36px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.gauntlet-bench-chit-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gauntlet-bench-chit-text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+.gauntlet-bench-chit-text span {
+  color: var(--ink-3);
+  font: 10.5px var(--font-mono);
+}
+
+@media (max-width: 620px) {
+  .gauntlet-round-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .gauntlet-round-tab {
+    flex: 0 0 auto;
+  }
+  .gauntlet-starter-main {
+    grid-template-columns: 32px minmax(0, 1fr) 32px;
+  }
+  .gauntlet-starter-main .rank-link {
+    display: none;
+  }
+  .gauntlet-bench-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  }
+}

@@ -395,6 +395,43 @@ func (s *JSONStore) SnapshotHistory(ctx context.Context, cycle string, days int)
 	return hist, nil
 }
 
+// ClubHistory lê só o campo "club" de cada snapshot do período. Decodifica
+// num struct enxuto de propósito: o snapshot inteiro passa de 30 MB e o resto
+// (mercado, cartas) não interessa para calibrar entrosamento.
+func (s *JSONStore) ClubHistory(ctx context.Context, cycle string, days int) ([]domain.Club, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := s.path(snapshotsDir(cycle))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, nil // sem snapshot ainda não é erro
+	}
+	var nomes []string
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == "history.json" {
+			continue
+		}
+		nomes = append(nomes, e.Name())
+	}
+	sort.Strings(nomes) // a data no nome já ordena: mais antigo -> mais novo
+	if days > 0 && len(nomes) > days {
+		nomes = nomes[len(nomes)-days:]
+	}
+
+	out := make([]domain.Club, 0, len(nomes))
+	for _, nome := range nomes {
+		var envelope struct {
+			Club domain.Club `json:"club"`
+		}
+		if err := s.readJSON(filepath.Join(snapshotsDir(cycle), nome), &envelope); err != nil {
+			continue // um dia ilegível não derruba a calibração inteira
+		}
+		out = append(out, envelope.Club)
+	}
+	return out, nil
+}
+
 // PriceSeries é o mesmo histórico que Trends já lê, sem colapsar num resumo
 // — a série ponto a ponto que os gráficos de preço por carta precisam.
 func (s *JSONStore) PriceSeries(ctx context.Context, cycle string, eaIDs []int64, since time.Duration) (map[int64][]PricePoint, error) {

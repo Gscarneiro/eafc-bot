@@ -10,6 +10,7 @@ import (
 
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/cards"
+	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/store"
@@ -566,5 +567,117 @@ func TestHandleJobStatusETrigger(t *testing.T) {
 	}
 	if !triggered {
 		t.Error("POST /api/job não chamou Trigger")
+	}
+}
+
+// fixtureSnapshot só tem 2 cartas e 1 slot titular — bem menos que os 72
+// que o Gauntlet exige, então o recompute cai no ramo "escalação não
+// sincronizada" (1 slot, não 11). O que este teste prova é que a API
+// RECOMPUTA de verdade contra snap.Club (Formation ecoa "4-2-3-1", o valor
+// real da fixture) em vez de devolver uma resposta vazia/zero-valor.
+func TestHandleGauntletRecomputaPlanoDeSnapshotAntigo(t *testing.T) {
+	snap := fixtureSnapshot() // GauntletPlan não setado: Status == "" (sentinela)
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gauntlet", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[GauntletResponse](t, w)
+	if got.Formation != "4-2-3-1" {
+		t.Fatalf("Formation = %q, esperava 4-2-3-1 (ecoado do club.Squad recomputado)", got.Formation)
+	}
+	if got.Status != "unavailable" || got.Reason == "" {
+		t.Fatalf("status=%q reason=%q — esperava unavailable com motivo (fixture não tem 72 cartas elegíveis)", got.Status, got.Reason)
+	}
+	if got.Rules == "" {
+		t.Error("Rules vazio — a tela precisa da explicação da regra oficial mesmo sem plano completo")
+	}
+}
+
+// Quando o snapshot já traz um GauntletPlan calculado no momento da coleta,
+// a rota deve devolver exatamente ELE — não recalcular por cima. Formation
+// usa um valor sentinela que NUNCA sairia de um recompute contra
+// snap.Club (que tem Formation "4-2-3-1").
+func TestHandleGauntletUsaPlanoJaPersistidoSemRecomputar(t *testing.T) {
+	snap := fixtureSnapshot()
+	titular := snap.Club.Players[0]
+	// Total 17 é um sentinela: nenhum recompute real (11 titulares, teto 33)
+	// chegaria nesse número para uma única carta — ele só aparece na
+	// resposta se vier do valor PERSISTIDO, sem recalcular.
+	quimicaSentinela := chemistry.Resultado{Total: 17, Maximo: 33, Modelo: "sentinela"}
+	snap.GauntletPlan = analyze.GauntletPlan{
+		Status:    "ok",
+		Formation: "sentinela-9-9-9",
+		Rounds: []analyze.GauntletSquad{{
+			Round: 1,
+			Starters: []analyze.GauntletAssignment{
+				{Round: 1, Index: 0, Position: domain.CM, Player: titular, Rating: 88.5},
+			},
+			TotalRating: 88.5, AverageRating: 88.5, Quimica: &quimicaSentinela,
+		}},
+	}
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gauntlet", nil))
+	got := decodeJSON[GauntletResponse](t, w)
+	if got.Formation != "sentinela-9-9-9" {
+		t.Fatalf("Formation = %q, esperava o valor persistido (a rota recomputou por cima)", got.Formation)
+	}
+	if len(got.Rounds) != 1 || len(got.Rounds[0].Starters) != 1 {
+		t.Fatalf("rounds = %+v, esperava a rodada sentinela intacta", got.Rounds)
+	}
+	if got.Rounds[0].Quimica == nil || got.Rounds[0].Quimica.Total != 17 {
+		t.Errorf("chemistry = %+v, esperava a persistida (total 17)", got.Rounds[0].Quimica)
+	}
+	if got.Rounds[0].Starters[0].CardSlug != "26-1" {
+		t.Errorf("card_slug = %q, esperava cruzar com snap.Cards (26-1)", got.Rounds[0].Starters[0].CardSlug)
+	}
+}
+
+func evoPotential(pos domain.Position, finalGG float64, cost int, styles ...domain.PlayStyle) cards.EvoPotential {
+	return cards.EvoPotential{
+		Path:             domain.EvolutionPath{Steps: []domain.Player{{}, {GGRatingPos: pos, GGRating: finalGG}}},
+		FinalGGRating:    finalGG,
+		CoinsCost:        cost,
+		GainedPlayStyles: styles,
+	}
+}
+
+// Só caminhos cujo Final().GGRatingPos bate com a posição do SLOT titular
+// sobrevivem, e duas variações do mesmo PlayStyle ganho colapsam na de
+// melhor nota final.
+func TestGauntletPotentialsFiltraPorPosicaoEAgrupaPorPlayStyle(t *testing.T) {
+	anticipatePlus := domain.PlayStyle{Name: "Anticipate", Plus: true}
+	best := evoPotential(domain.CDM, 90.0, 20000, anticipatePlus)
+	report := cards.CardReport{
+		Best: &best,
+		Alternates: []cards.EvoPotential{
+			evoPotential(domain.CB, 92.0, 5000, domain.PlayStyle{Name: "Block"}),       // posição errada: descartado
+			evoPotential(domain.CDM, 88.0, 10000, anticipatePlus),                      // mesmo playstyle do Best, nota pior: descartado
+			evoPotential(domain.CDM, 95.0, 30000, domain.PlayStyle{Name: "Intercept"}), // playstyle diferente: mantido
+		},
+	}
+
+	out := gauntletPotentials(report, domain.CDM)
+	if len(out) != 2 {
+		t.Fatalf("gauntletPotentials devolveu %d, esperava 2 (posição errada fora, duplicata de playstyle reduzida): %+v", len(out), out)
+	}
+	if out[0].FinalGGRating != 95.0 || out[1].FinalGGRating != 90.0 {
+		t.Fatalf("ordem/valores = %+v, esperava [95.0, 90.0]", out)
+	}
+}
+
+// Sem nenhum caminho confirmado para a posição do slot, o potencial fica
+// vazio — omitido no JSON (omitempty), nunca uma estimativa inventada.
+func TestGauntletPotentialsSemCaminhoConfirmadoDevolveVazio(t *testing.T) {
+	if out := gauntletPotentials(cards.CardReport{}, domain.ST); len(out) != 0 {
+		t.Fatalf("esperava vazio sem Best/Alternates, veio %+v", out)
+	}
+	report := cards.CardReport{Alternates: []cards.EvoPotential{evoPotential(domain.CB, 92.0, 5000)}}
+	if out := gauntletPotentials(report, domain.ST); len(out) != 0 {
+		t.Fatalf("esperava vazio quando nenhum caminho bate a posição do slot, veio %+v", out)
 	}
 }

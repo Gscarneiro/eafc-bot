@@ -358,6 +358,38 @@ func (s *PostgresStore) SnapshotHistory(ctx context.Context, cycle string, days 
 	return out, rows.Err()
 }
 
+// ClubHistory extrai só o "club" de cada payload. Barato aqui, diferente do
+// JSONStore: o payload já é JSONB, então o banco devolve o sub-objeto sem o
+// cliente precisar ler o snapshot inteiro.
+func (s *PostgresStore) ClubHistory(ctx context.Context, cycle string, days int) ([]domain.Club, error) {
+	if days <= 0 {
+		days = snapshotRetention
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT club FROM (
+			SELECT day, payload->'club' AS club FROM snapshots
+			WHERE cycle = $1 ORDER BY day DESC LIMIT $2
+		) recent ORDER BY day ASC`, cycle, days)
+	if err != nil {
+		return nil, fmt.Errorf("consultando histórico de clubes: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.Club
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var club domain.Club
+		if err := json.Unmarshal(raw, &club); err != nil {
+			continue // um dia ilegível não derruba a calibração inteira
+		}
+		out = append(out, club)
+	}
+	return out, rows.Err()
+}
+
 // PriceSeries é o mesmo price_ticks que Trends já consulta, sem agregar num
 // resumo — a série ponto a ponto que os gráficos de preço por carta usam.
 func (s *PostgresStore) PriceSeries(ctx context.Context, cycle string, eaIDs []int64, since time.Duration) (map[int64][]PricePoint, error) {

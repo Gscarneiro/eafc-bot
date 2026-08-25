@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/api"
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/scheduler"
@@ -96,9 +97,10 @@ func cmdServe(ctx context.Context, args []string) error {
 	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,
 		EvolutionMinRating: cfg.Serve.CardsMinRating, EvolutionExtraBudget: cfg.Market.ExtraBudget,
-		CacheTTL: 10 * time.Second,
-		Trigger:  func() { go d.run(context.Background()) },
-		Status:   d.status,
+		ChemistryModel: cfg.ChemistryModel(),
+		CacheTTL:       10 * time.Second,
+		Trigger:        func() { go d.run(context.Background()) },
+		Status:         d.status,
 	}
 	apiSrv.Config = &api.ConfigEditor{
 		Get:          func() config.UISettings { return d.config().Editable() },
@@ -189,7 +191,8 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 		return err
 	}
 
-	if _, err := analyzeAndBuild(ctx, cfg, st, snap, time.Now(), false, demoCardReports(snap.Club)); err != nil {
+	gauntletPlan := analyze.BuildGauntletPlanWithOptions(snap.Club, analyze.GauntletOptions{ChemistryModel: cfg.ChemistryModel()})
+	if _, err := analyzeAndBuild(ctx, cfg, st, snap, time.Now(), false, demoCardReports(snap.Club), gauntletPlan); err != nil {
 		return err
 	}
 
@@ -200,9 +203,10 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,
 		EvolutionMinRating: cfg.Serve.CardsMinRating, EvolutionExtraBudget: cfg.Market.ExtraBudget,
-		CacheTTL: 10 * time.Second,
-		Trigger:  func() {}, // não há job de verdade para acionar no demo
-		Status:   func() api.JobStatus { return api.JobStatus{} },
+		ChemistryModel: cfg.ChemistryModel(),
+		CacheTTL:       10 * time.Second,
+		Trigger:        func() {}, // não há job de verdade para acionar no demo
+		Status:         func() api.JobStatus { return api.JobStatus{} },
 	}
 	apiSrv.Config = &api.ConfigEditor{
 		Get:          func() config.UISettings { return demoCfg.Editable() },

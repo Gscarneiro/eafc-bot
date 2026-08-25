@@ -46,7 +46,20 @@ type Squad struct {
 	Formation string      `json:"formation"` // "4-2-3-1", "4-3-3(4)"...
 	Starters  []SquadSlot `json:"starters"`
 	Chemistry int         `json:"chemistry"`
-	SyncedAt  time.Time   `json:"synced_at"`
+
+	// ChemistrySynced diz se Chemistry de fato veio do jogo nesta coleta.
+	// Existe porque zero é ambíguo: pode ser um XI sem vínculo nenhum, ou a
+	// rota active-squad tendo falhado (nesse caso o Squad inteiro é
+	// substituído e Chemistry vira 0 sem ninguém perceber). Química só serve
+	// de oráculo quando isto é verdadeiro — "na dúvida, não afirma" aplicado
+	// a um número que parece exato. Falso é o valor de snapshot antigo, e é
+	// o padrão conservador certo.
+	//
+	// É bandeira de PROVENIÊNCIA do dado, não regra de jogo: virar o ciclo
+	// não mexe aqui.
+	ChemistrySynced bool `json:"chemistry_synced"`
+
+	SyncedAt time.Time `json:"synced_at"`
 }
 
 // Club é o retrato do seu Ultimate Team num instante.

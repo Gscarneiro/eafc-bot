@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/futgg"
 )
 
@@ -21,14 +22,33 @@ type Config struct {
 	// perfil ao sincronizar o GG Club, e é esse nome que aparece na URL
 	// (fut.gg/gg-club/<nome>/). Pode colar a URL inteira aqui; ela é
 	// normalizada em Load().
-	GamerTag string       `json:"gamer_tag"`
-	Platform string       `json:"platform"`
-	DataDir  string       `json:"data_dir"`
-	Postgres PostgresConf `json:"postgres"`
-	FutGG    futgg.Config `json:"futgg"`
-	Market   MarketConf   `json:"market"`
-	Report   ReportConf   `json:"report"`
-	Serve    ServeConf    `json:"serve"`
+	GamerTag  string        `json:"gamer_tag"`
+	Platform  string        `json:"platform"`
+	DataDir   string        `json:"data_dir"`
+	Postgres  PostgresConf  `json:"postgres"`
+	FutGG     futgg.Config  `json:"futgg"`
+	Market    MarketConf    `json:"market"`
+	Report    ReportConf    `json:"report"`
+	Serve     ServeConf     `json:"serve"`
+	Chemistry ChemistryConf `json:"chemistry"`
+}
+
+// ChemistryConf é a regra de entrosamento que o bot usa para pontuar uma
+// escalação. Model é o NOME de um modelo de internal/chemistry, não uma
+// tabela de limiares: diferente dos endpoints (que o `autoconfig` DESCOBRE
+// da resposta do site), regra de química é inferida contra o que o próprio
+// jogo reporta — quem sabe os limiares é o bot, não o usuário. Por isso só
+// o nome mora aqui, e só Weight é editável pela UI.
+type ChemistryConf struct {
+	Model string `json:"model"`
+
+	// Weight é quantos pontos de GG Rating valem 1 ponto de entrosamento na
+	// hora de escolher a escalação. 0 = química só é exibida, nunca escolhe.
+	// O padrão 0.25 é equilibrado por construção: os 33 pontos inteiros
+	// valem 8,25 GG num XI que soma ~990, então a química arredonda a
+	// decisão entre cartas próximas e nunca justifica sentar uma carta
+	// claramente melhor.
+	Weight float64 `json:"weight"`
 }
 
 // ServeConf governa o `eafcbot serve`: a porta da API/UI e o scheduler que
@@ -98,9 +118,18 @@ type ReportConf struct {
 // deliberadamente fora deste contrato: a UI é um painel de decisão, não um
 // editor de infraestrutura.
 type UISettings struct {
-	Market UISettingsMarket `json:"market"`
-	Report UISettingsReport `json:"report"`
-	Serve  UISettingsServe  `json:"serve"`
+	Market    UISettingsMarket    `json:"market"`
+	Report    UISettingsReport    `json:"report"`
+	Serve     UISettingsServe     `json:"serve"`
+	Chemistry UISettingsChemistry `json:"chemistry"`
+}
+
+// UISettingsChemistry expõe só o PESO. O modelo (chemistry.model) fica de
+// fora de propósito: a UI é painel de decisão, não editor de regra de jogo —
+// e é justamente por só parte do bloco ser editável que SaveEditable precisa
+// mesclar por chave em vez de substituir o bloco inteiro.
+type UISettingsChemistry struct {
+	Weight float64 `json:"weight"`
 }
 
 type UISettingsMarket struct {
@@ -132,9 +161,10 @@ type UISettingsServe struct {
 // Editable devolve apenas os valores que a tela pode mostrar e alterar.
 func (c Config) Editable() UISettings {
 	return UISettings{
-		Market: UISettingsMarket{MinRating: c.Market.MinRating, MaxRating: c.Market.MaxRating, MaxPrice: c.Market.MaxPrice, Pages: c.Market.Pages, PerPage: c.Market.PerPage, ExtraBudget: c.Market.ExtraBudget},
-		Report: UISettingsReport{MinGain: c.Report.MinGain, TrendWindowHrs: c.Report.TrendWindowHrs, AllowOutOfPos: c.Report.AllowOutOfPos, AllowUnpriced: c.Report.AllowUnpriced},
-		Serve:  UISettingsServe{DailyAt: c.Serve.DailyAt, StaleAfterHours: c.Serve.StaleAfterHours, RetentionDays: c.Serve.RetentionDays, CardsMinRating: c.Serve.CardsMinRating, FastRefreshMinutes: c.Serve.FastRefreshMinutes, MomentumWindowHours: c.Serve.MomentumWindowHours, EvolutionFavorites: c.Serve.EvolutionFavorites},
+		Market:    UISettingsMarket{MinRating: c.Market.MinRating, MaxRating: c.Market.MaxRating, MaxPrice: c.Market.MaxPrice, Pages: c.Market.Pages, PerPage: c.Market.PerPage, ExtraBudget: c.Market.ExtraBudget},
+		Report:    UISettingsReport{MinGain: c.Report.MinGain, TrendWindowHrs: c.Report.TrendWindowHrs, AllowOutOfPos: c.Report.AllowOutOfPos, AllowUnpriced: c.Report.AllowUnpriced},
+		Serve:     UISettingsServe{DailyAt: c.Serve.DailyAt, StaleAfterHours: c.Serve.StaleAfterHours, RetentionDays: c.Serve.RetentionDays, CardsMinRating: c.Serve.CardsMinRating, FastRefreshMinutes: c.Serve.FastRefreshMinutes, MomentumWindowHours: c.Serve.MomentumWindowHours, EvolutionFavorites: c.Serve.EvolutionFavorites},
+		Chemistry: UISettingsChemistry{Weight: c.Chemistry.Weight},
 	}
 }
 
@@ -150,6 +180,7 @@ func (c *Config) ApplyEditable(v UISettings) error {
 	c.Serve.DailyAt, c.Serve.StaleAfterHours, c.Serve.RetentionDays = v.Serve.DailyAt, v.Serve.StaleAfterHours, v.Serve.RetentionDays
 	c.Serve.CardsMinRating, c.Serve.FastRefreshMinutes, c.Serve.MomentumWindowHours = v.Serve.CardsMinRating, v.Serve.FastRefreshMinutes, v.Serve.MomentumWindowHours
 	c.Serve.EvolutionFavorites = v.Serve.EvolutionFavorites
+	c.Chemistry.Weight = v.Chemistry.Weight
 	if err := c.Validate(); err != nil {
 		*c = previous
 		return err
@@ -204,6 +235,7 @@ func Default() Config {
 			FastRefreshMinutes:  60,
 			MomentumWindowHours: 24,
 		},
+		Chemistry: ChemistryConf{Model: chemistry.ModeloPadrao().Nome, Weight: 0.25},
 	}
 }
 
@@ -309,7 +341,24 @@ func (c Config) Validate() error {
 	if c.Serve.StaleAfterHours < 1 || c.Serve.RetentionDays < 1 || c.Serve.CardsMinRating < 1 || c.Serve.CardsMinRating > 99 || c.Serve.MomentumWindowHours < 1 || c.Serve.FastRefreshMinutes < 0 {
 		return fmt.Errorf("agenda inválida — retenção, atraso, overall de cartas e janela de momentum devem ser positivos")
 	}
+	if c.Chemistry.Weight < 0 || c.Chemistry.Weight > 5 {
+		return fmt.Errorf("chemistry.weight %.2f fora da faixa — use de 0 (química só exibida) a 5 (química manda)", c.Chemistry.Weight)
+	}
+	if _, err := chemistry.Escolher(c.Chemistry.Model); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ChemistryModel resolve o modelo configurado. Nome vazio (config antigo, ou
+// servidor de teste) cai no padrão em vez de falhar — Validate é quem recusa
+// nome inválido, na hora de carregar.
+func (c Config) ChemistryModel() chemistry.Modelo {
+	m, err := chemistry.Escolher(c.Chemistry.Model)
+	if err != nil {
+		return chemistry.ModeloPadrao()
+	}
+	return m
 }
 
 // Save grava a configuração formatada.
@@ -340,9 +389,16 @@ func (c Config) SaveEditable(path string, v UISettings) error {
 	if raw == nil {
 		raw = make(map[string]any)
 	}
-	raw["market"] = v.Market
-	raw["report"] = v.Report
-	raw["serve"] = v.Serve
+	// Merge por CHAVE, não substituição do bloco inteiro. `raw["report"] =
+	// v.Report` descartava toda chave do bloco que UISettings não carrega —
+	// report.output_dir já sumia assim, mascarado porque Default() recoloca o
+	// mesmo valor. Com um bloco onde só parte é editável (chemistry: weight
+	// pela UI, model não) isso deixaria de ser invisível e viraria perda de
+	// configuração de verdade.
+	mergeBloco(raw, "market", v.Market)
+	mergeBloco(raw, "report", v.Report)
+	mergeBloco(raw, "serve", v.Serve)
+	mergeBloco(raw, "chemistry", v.Chemistry)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -351,6 +407,30 @@ func (c Config) SaveEditable(path string, v UISettings) error {
 		return err
 	}
 	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
+// mergeBloco sobrepõe em raw[nome] só as chaves que `bloco` de fato carrega,
+// preservando as que já estavam no arquivo. Passa pelo JSON porque é ele que
+// define os nomes das chaves (as tags de UISettings*), e não os nomes dos
+// campos Go.
+func mergeBloco(raw map[string]any, nome string, bloco any) {
+	b, err := json.Marshal(bloco)
+	if err != nil {
+		return
+	}
+	var novo map[string]any
+	if err := json.Unmarshal(b, &novo); err != nil {
+		return
+	}
+	atual, _ := raw[nome].(map[string]any)
+	if atual == nil {
+		raw[nome] = novo
+		return
+	}
+	for k, v := range novo {
+		atual[k] = v
+	}
+	raw[nome] = atual
 }
 
 // DefaultPath é onde o bot procura a configuração: dentro do repo, não no

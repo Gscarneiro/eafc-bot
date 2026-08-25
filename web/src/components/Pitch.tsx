@@ -42,9 +42,19 @@ export default function Pitch({ formation, starters }: PitchProps) {
 function PlayerChit({ card }: { card: StarterCard }) {
   const player = card.player;
   const rating = card.position_gg_rating ?? player.gg_rating;
-  const label = `${player.common_name || player.name}, ${card.position}, ${rating ? `GG ${rating.toFixed(1)}` : "GG indisponível"}`;
+  const chem = card.chemistry;
+  // Fora de posição é a ÚNICA forma de perder entrosamento sob o modelo
+  // padrão (ver internal/chemistry) — é o dado mais acionável que existe
+  // aqui, então ganha destaque visual próprio, não só um número a mais.
+  const chemLabel = chem ? (chem.fora_de_posicao ? "fora de posição — sem entrosamento" : `entrosamento ${chem.pontos}/3`) : "";
+  const label = `${player.common_name || player.name}, ${card.position}, ${rating ? `GG ${rating.toFixed(1)}` : "GG indisponível"}${chemLabel ? `, ${chemLabel}` : ""}`;
   const content = <>
     {player.image_url && <img className="chit-image" src={player.image_url} alt="" loading="lazy" />}
+    {chem && (
+      <span className={`chit-chem${chem.fora_de_posicao ? " out-of-position" : ""}`} title={chemLabel} aria-hidden="true">
+        {chem.fora_de_posicao ? "!" : chem.pontos}
+      </span>
+    )}
     <span className="chit-gg">{rating ? rating.toFixed(1) : "—"}</span>
   </>;
   return <div className="pitch-chit">

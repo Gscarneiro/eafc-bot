@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 )
 
@@ -19,6 +20,29 @@ type SquadPlan struct {
 	Starters         []SquadAssignment   `json:"starters"`
 	Moves            []SquadMove         `json:"moves"`
 	Alternatives     []SquadAlternatives `json:"alternatives"`
+
+	// CurrentQuimica é o entrosamento do XI que está de pé HOJE (pode ter
+	// alguém fora de posição — é a única forma de perder entrosamento sob o
+	// modelo padrão, ver internal/chemistry). Quimica é o da escalação
+	// SUGERIDA (Starters), sempre 100% em posição por construção (o fluxo só
+	// cria aresta pra quem PlaysAt o slot) — nil quando não há XI válido
+	// para avaliar (Status == "unavailable").
+	CurrentQuimica *chemistry.Resultado `json:"current_chemistry,omitempty"`
+	Quimica        *chemistry.Resultado `json:"chemistry,omitempty"`
+}
+
+// SquadOptions governa como OptimizeSquad explica a sugestão. Por ora só o
+// modelo de química importa: ele decide como CurrentQuimica/Quimica são
+// calculados. Pesar o vínculo CONTRA o GG Rating na escolha em si (a
+// otimização de verdade) ainda não existe — hoje o resultado do fluxo de
+// custo mínimo não muda com estas opções.
+type SquadOptions struct {
+	ChemistryModel chemistry.Modelo
+}
+
+// DefaultSquadOptions usa o modelo de química padrão.
+func DefaultSquadOptions() SquadOptions {
+	return SquadOptions{ChemistryModel: chemistry.ModeloPadrao()}
 }
 
 type SquadAssignment struct {
@@ -42,15 +66,28 @@ type SquadAlternatives struct {
 	Players  []SquadAssignment `json:"players"`
 }
 
-// OptimizeSquad encontra o melhor matching global entre jogadores e slots.
-// O fluxo de custo mínimo evita a heurística de escolher cada posição isoladamente.
+// OptimizeSquad encontra o melhor matching global entre jogadores e slots,
+// com o modelo de química padrão. Ver OptimizeSquadWithOptions.
 func OptimizeSquad(club domain.Club) SquadPlan {
+	return OptimizeSquadWithOptions(club, DefaultSquadOptions())
+}
+
+// OptimizeSquadWithOptions encontra o melhor matching global entre jogadores
+// e slots. O fluxo de custo mínimo evita a heurística de escolher cada
+// posição isoladamente.
+func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 	plan := SquadPlan{Status: "unavailable"}
 	slots := club.Squad.Starters
 	if len(slots) == 0 {
 		plan.Reason = "escalação titular não sincronizada"
 		return plan
 	}
+	// A química do XI ATUAL não depende de GG Rating nenhum — só de
+	// posição/clube/liga/nação, que o retrato do clube sempre traz quando
+	// há slots. Calculado aqui, antes das checagens abaixo (que são só
+	// pré-requisito da SUGESTÃO), para não desaparecer só porque o fluxo de
+	// GG Rating não pôde rodar (ex.: dado sem GGRatingAt preenchido).
+	plan.CurrentQuimica = chemistry.Avaliar(opt.ChemistryModel, club)
 	for _, s := range slots {
 		if p, ok := club.PlayerByID(s.PlayerID); !ok {
 			plan.Reason = "titular ausente do retrato do clube"
@@ -146,6 +183,8 @@ func OptimizeSquad(club domain.Club) SquadPlan {
 		}
 		plan.Alternatives = append(plan.Alternatives, SquadAlternatives{s.Index, s.Position, cs})
 	}
+
+	plan.Quimica = quimicaDaSugestao(opt.ChemistryModel, plan.Starters)
 	return plan
 }
 
@@ -188,4 +227,19 @@ func minCostAugment(g [][]flowEdge, s, t int) bool {
 		g[v][e.rev].cap++
 	}
 	return true
+}
+
+// quimicaDaSugestao converte a escalação sugerida para o formato que
+// internal/chemistry entende. nil quando não há sugestão (a chamadora só
+// preenche Starters nos caminhos de sucesso).
+func quimicaDaSugestao(m chemistry.Modelo, starters []SquadAssignment) *chemistry.Resultado {
+	if len(starters) == 0 {
+		return nil
+	}
+	xi := make([]chemistry.Titular, len(starters))
+	for i, a := range starters {
+		xi[i] = chemistry.Titular{Index: a.Index, Position: a.Position, Player: a.Player.Player}
+	}
+	res := chemistry.Calcular(m, xi)
+	return &res
 }

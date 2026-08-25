@@ -241,10 +241,50 @@ export interface RosterCard {
   card_slug?: string;
 }
 
+// --- Química (entrosamento): ver internal/chemistry. O jogo publica os
+// mesmos limiares que o modelo usa (tela "Mais entrosamento" no app);
+// verificacao mostra se o modelo bate com o que o próprio jogo reportou
+// nesta coleta — quando não bate, ele NÃO deve pesar decisão nenhuma.
+
+export interface ChemistryVerification {
+  status: string; // "confere" | "diverge" | "sem_oraculo"
+  modelo: string;
+  calculado: number;
+  observado: number;
+  jogadores_conferem: number;
+  jogadores_total: number;
+  pior_erro: number;
+  detalhe?: string;
+}
+
+export interface ChemistryPlayer {
+  player_id: number;
+  index: number;
+  pontos: number; // efetivo, já com a base do modelo e o teto de 3
+  base: number;
+  clube: number;
+  liga: number;
+  nacao: number;
+  vinculo: number; // clube+liga+nação, sem a base — o número que a carta mostra no jogo
+  fora_de_posicao: boolean;
+  curinga?: string; // "Icon" | "Hero"
+}
+
+export interface ChemistryResult {
+  total: number;
+  maximo: number;
+  modelo: string;
+  jogadores: ChemistryPlayer[] | null;
+  fora_de_posicao: number;
+  nao_modelado?: string[];
+  verificacao: ChemistryVerification;
+}
+
 export interface StarterCard extends RosterCard {
   index: number;
   position_gg_rating?: number;
   position: Position; // slot físico — pode divergir da posição natural da carta
+  chemistry?: ChemistryPlayer;
 }
 
 export interface TimeResponse {
@@ -255,11 +295,52 @@ export interface TimeResponse {
   bench_page_size: number;
   bench_total: number;
   optimization: SquadOptimization;
+  chemistry?: ChemistryResult; // do XI ATUAL
 }
 
 export interface SquadMoveView { index:number; position:Position; current:StarterCard; suggested:StarterCard; current_gg_rating:number; suggested_gg_rating:number; gain:number }
 export interface SquadAlternativeView { index:number; position:Position; players:StarterCard[] }
-export interface SquadOptimization { status:string; reason?:string; current_average:number; suggested_average:number; gain:number; moves:SquadMoveView[]; alternatives:SquadAlternativeView[]; chemistry_warning:string }
+export interface SquadOptimization {
+  status:string; reason?:string; current_average:number; suggested_average:number; gain:number;
+  moves:SquadMoveView[]; alternatives:SquadAlternativeView[];
+  chemistry_note: string; // texto pronto pra tela, ver internal/api.chemistryNote
+  chemistry?: ChemistryResult; // da SUGESTÃO
+}
+
+// --- Gauntlet: quatro elencos consecutivos (11 titulares + 7 reservas cada)
+// sem repetir carta nenhuma entre eles — ver internal/analyze/gauntlet.go.
+
+export interface GauntletStarterView {
+  index: number;
+  position: Position; // slot físico da rodada — pode divergir da posição natural da carta
+  player: ClubPlayer;
+  rating: number; // GG Rating do fut.gg NESSA posição
+  card_slug?: string;
+  // Só caminhos de evolução com Final().GGRatingPos == position e nota
+  // confirmada pelo fut.gg — nunca uma estimativa. Ausente sem caminho.
+  potentials?: EvoPotential[];
+}
+
+export interface GauntletRoundView {
+  round: number; // 1..4
+  starters: GauntletStarterView[] | null;
+  bench: RosterCard[] | null;
+  total_rating: number;
+  average_rating: number;
+  chemistry?: ChemistryResult;
+}
+
+export interface GauntletResponse {
+  generated_at: string;
+  formation: string;
+  status: string; // "ok" | "unavailable"
+  reason?: string;
+  rules: string;
+  strategy?: string;
+  warnings?: string[];
+  objectives: Objective[] | null;
+  rounds: GauntletRoundView[] | null;
+}
 
 export interface Upgrade {
   slot: Position;

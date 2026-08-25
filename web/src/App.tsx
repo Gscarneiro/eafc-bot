@@ -29,7 +29,10 @@ const NAV = [
   { to: "/mercado", label: "Mercado", icon: "market" as IconName },
 ];
 
-const ELENCO_NAV = [{ to: "/time", label: "Meu time", end: true }];
+const ELENCO_NAV = [
+  { to: "/time", label: "Meu time", end: true },
+  { to: "/time/gauntlet", label: "Gauntlet" },
+];
 const AQUISICAO_NAV = [
   { to: "/mercado", label: "Oportunidades", end: true },
   { to: "/evolucoes", label: "Evoluções" },

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/cards"
+	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/futgg"
 )
@@ -109,6 +110,16 @@ type Store interface {
 	// do status diário sem carregar o snapshot inteiro de cada dia.
 	SnapshotHistory(ctx context.Context, cycle string, days int) ([]SnapshotSummary, error)
 
+	// ClubHistory devolve o retrato do clube de cada snapshot guardado, do
+	// mais antigo para o mais novo — o oráculo de entrosamento
+	// (Squad.Chemistry + ClubPlayer.Chemistry) que a calibração de
+	// internal/chemistry replaya. Devolve só o clube, não o Snapshot
+	// inteiro: um snapshot passa de 30 MB e a maior parte é mercado.
+	//
+	// Mesmo assim é CARO (abre cada arquivo do período) — é comando de CLI
+	// (`eafcbot quimica -calibrar`), nunca handler de API.
+	ClubHistory(ctx context.Context, cycle string, days int) ([]domain.Club, error)
+
 	// PriceSeries devolve a série de preço observada de cada carta na janela
 	// pedida — o mesmo histórico que Trends já lê, sem colapsar num resumo.
 	PriceSeries(ctx context.Context, cycle string, eaIDs []int64, since time.Duration) (map[int64][]PricePoint, error)
@@ -183,6 +194,21 @@ type Snapshot struct {
 	// min_rating configurado — o trabalho caro (~1,3 MB por carta contra o
 	// fut.gg) que o scheduler paga uma vez à noite em vez de sob demanda.
 	Cards []cards.CardReport `json:"cards"`
+
+	// GauntletPlan é o planejamento das quatro rodadas do modo Gauntlet
+	// (ver internal/analyze/gauntlet.go). Status vazio é o sentinela de
+	// snapshot gravado antes deste campo existir — internal/api recompõe o
+	// plano nesse caso, direto de Club, sem tocar rede (mesmo padrão de
+	// MarketFunnel.Considered==0 acima).
+	GauntletPlan analyze.GauntletPlan `json:"gauntlet_plan"`
+
+	// Quimica é o entrosamento do XI ATIVO pelo modelo configurado, já
+	// confrontado com o que o próprio jogo reportou (ver
+	// internal/chemistry.Avaliar). Ponteiro nil é o sentinela de snapshot
+	// gravado antes deste campo existir OU de clube sem escalação
+	// sincronizada — internal/api recalcula direto de Club nesse caso, sem
+	// tocar rede (mesmo padrão de GauntletPlan.Status=="" acima).
+	Quimica *chemistry.Resultado `json:"chemistry,omitempty"`
 }
 
 // SnapshotSummary é o ponto leve de um dia, para o gráfico de tendência —

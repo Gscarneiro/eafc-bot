@@ -292,6 +292,51 @@ func TestActiveSquadSoPegaOsOnzeDoField(t *testing.T) {
 	if sq.Chemistry != 33 {
 		t.Errorf("química %d, esperava 33 (11 titulares x 3)", sq.Chemistry)
 	}
+	// Os 11 resolveram contra o elenco: a soma é confiável como oráculo.
+	if !sq.ChemistrySynced {
+		t.Error("ChemistrySynced = false, esperava true (todos os 11 titulares resolveram contra o roster)")
+	}
+}
+
+// Um titular ausente do roster faz a soma sair MENOR, sem nada indicar isso
+// — uma soma parcial que parece exata é pior que nenhum número. ChemistrySynced
+// existe pra essa distinção: fica falso, mesmo a soma parcial não sendo zero.
+func TestActiveSquadNaoMarcaChemistrySyncedQuandoTitularAusenteDoRoster(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(activeSquadFixture()))
+	}))
+	defer srv.Close()
+
+	c := New(Config{
+		BaseURL:   srv.URL,
+		Cycle:     "26",
+		Endpoints: map[string]string{"club_squad": "/api/gg-club/{gamertag}/active-squad/"},
+	})
+
+	// A fixture usa playerEaId 1000..1010 (11 titulares); o roster aqui só
+	// traz 10 deles — falta o 1005.
+	roster := make([]domain.ClubPlayer, 0, 10)
+	for i := 0; i < 11; i++ {
+		if i == 5 {
+			continue
+		}
+		roster = append(roster, domain.ClubPlayer{
+			Player:    domain.Player{ID: int64(1000 + i), Position: domain.CM},
+			Chemistry: 3,
+		})
+	}
+
+	sq, err := c.ActiveSquad(context.Background(), "BilingualBee", roster)
+	if err != nil {
+		t.Fatalf("ActiveSquad: %v", err)
+	}
+	if sq.ChemistrySynced {
+		t.Error("ChemistrySynced = true, esperava false (o titular 1005 não estava no roster)")
+	}
+	if sq.Chemistry != 30 {
+		t.Errorf("química = %d, esperava 30 (10 titulares resolvidos x 3 — soma parcial, não confiável)", sq.Chemistry)
+	}
 }
 
 // O GG Rating vem com decimais ("92.4") e só existe no elenco do GG Club —

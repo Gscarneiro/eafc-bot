@@ -34,7 +34,11 @@ func cmdDemo(args []string) error {
 	cfg := config.Default()
 	cfg.GamerTag = snap.Club.GamerTag
 
-	data, err := analyzeAndBuild(context.Background(), cfg, nil, snap, started, true, nil)
+	// O elenco fictício do demo (15 cartas) fica bem abaixo das 72 que o
+	// Gauntlet exige — BuildGauntletPlan sinaliza "unavailable" sozinho,
+	// exercitando o mesmo caminho que um clube pequeno de verdade veria.
+	gauntletPlan := analyze.BuildGauntletPlanWithOptions(snap.Club, analyze.GauntletOptions{ChemistryModel: cfg.ChemistryModel()})
+	data, err := analyzeAndBuild(context.Background(), cfg, nil, snap, started, true, nil, gauntletPlan)
 	if err != nil {
 		return err
 	}
@@ -96,19 +100,31 @@ func p(id int64, name string, rating int, pos domain.Position, version string,
 
 func ps(name string, plus bool) domain.PlayStyle { return domain.PlayStyle{Name: name, Plus: plus} }
 
+// nat preenche clube/liga/nação depois de p() — os dois vêm separados porque
+// p() já tem 12 parâmetros posicionais e é reusado por demoMarket() também,
+// onde clube/liga/nação não fazem falta (só o XI ativo entra na conta de
+// entrosamento). O elenco abaixo tem vínculo de propósito (3 do AC Milan,
+// 4 da Premier League, 4 da Serie A, 3 franceses) para o modo demo exercitar
+// a regra de vínculo de verdade, não só o modelo padrão (que preenche a
+// barra pela posição sozinha — ver internal/chemistry).
+func nat(pl domain.Player, club, league, nation string) domain.Player {
+	pl.Club, pl.League, pl.Nation = club, league, nation
+	return pl
+}
+
 func demoClub() domain.Club {
 	players := []domain.ClubPlayer{
-		{Player: p(1, "Maignan", 87, domain.GK, "Ouro Raro", 86, 84, 70, 88, 45, 82, 38_000, ps("Far Reach", true))},
-		{Player: p(2, "Frimpong", 84, domain.RB, "Ouro Raro", 94, 70, 76, 84, 78, 74, 22_000, ps("Quick Step", false))},
-		{Player: p(3, "Saliba", 86, domain.CB, "Ouro Raro", 84, 40, 65, 72, 87, 84, 46_000, ps("Anticipate", true))},
-		{Player: p(4, "Gvardiol", 85, domain.CB, "Ouro Raro", 82, 55, 72, 75, 85, 83, 34_000, ps("Block", false))},
-		{Player: p(5, "T. Hernández", 85, domain.LB, "Ouro Raro", 93, 76, 79, 84, 79, 82, 41_000, ps("Rapid", false))},
-		{Player: p(6, "Rodri", 89, domain.CDM, "Ouro Raro", 68, 78, 86, 82, 87, 85, 128_000, ps("Anticipate", false), ps("Press Proven", true))},
-		{Player: p(7, "Valverde", 88, domain.CM, "Ouro Raro", 85, 84, 85, 84, 79, 86, 96_000, ps("Relentless", true))},
-		{Player: p(8, "Wirtz", 87, domain.CAM, "Ouro Raro", 82, 82, 87, 89, 45, 68, 74_000, ps("Technical", true))},
-		{Player: p(9, "Saka", 87, domain.RW, "Ouro Raro", 88, 84, 82, 88, 52, 72, 88_000, ps("Trickster", false))},
-		{Player: p(10, "Leão", 86, domain.LW, "Ouro Raro", 95, 82, 76, 87, 38, 78, 62_000, ps("Rapid", true))},
-		{Player: p(11, "Osimhen", 88, domain.ST, "Ouro Raro", 90, 87, 70, 84, 42, 85, 118_000, ps("Power Shot", false), ps("Aerial", true))},
+		{Player: nat(p(1, "Maignan", 87, domain.GK, "Ouro Raro", 86, 84, 70, 88, 45, 82, 38_000, ps("Far Reach", true)), "AC Milan", "Serie A Enilive", "France")},
+		{Player: nat(p(2, "Frimpong", 84, domain.RB, "Ouro Raro", 94, 70, 76, 84, 78, 74, 22_000, ps("Quick Step", false)), "Bayer Leverkusen", "Bundesliga", "Netherlands")},
+		{Player: nat(p(3, "Saliba", 86, domain.CB, "Ouro Raro", 84, 40, 65, 72, 87, 84, 46_000, ps("Anticipate", true)), "Arsenal", "Premier League", "France")},
+		{Player: nat(p(4, "Gvardiol", 85, domain.CB, "Ouro Raro", 82, 55, 72, 75, 85, 83, 34_000, ps("Block", false)), "Manchester City", "Premier League", "Croatia")},
+		{Player: nat(p(5, "T. Hernández", 85, domain.LB, "Ouro Raro", 93, 76, 79, 84, 79, 82, 41_000, ps("Rapid", false)), "AC Milan", "Serie A Enilive", "France")},
+		{Player: nat(p(6, "Rodri", 89, domain.CDM, "Ouro Raro", 68, 78, 86, 82, 87, 85, 128_000, ps("Anticipate", false), ps("Press Proven", true)), "Manchester City", "Premier League", "Spain")},
+		{Player: nat(p(7, "Valverde", 88, domain.CM, "Ouro Raro", 85, 84, 85, 84, 79, 86, 96_000, ps("Relentless", true)), "Real Madrid", "LALIGA EA SPORTS", "Uruguay")},
+		{Player: nat(p(8, "Wirtz", 87, domain.CAM, "Ouro Raro", 82, 82, 87, 89, 45, 68, 74_000, ps("Technical", true)), "Bayer Leverkusen", "Bundesliga", "Germany")},
+		{Player: nat(p(9, "Saka", 87, domain.RW, "Ouro Raro", 88, 84, 82, 88, 52, 72, 88_000, ps("Trickster", false)), "Arsenal", "Premier League", "England")},
+		{Player: nat(p(10, "Leão", 86, domain.LW, "Ouro Raro", 95, 82, 76, 87, 38, 78, 62_000, ps("Rapid", true)), "AC Milan", "Serie A Enilive", "Portugal")},
+		{Player: nat(p(11, "Osimhen", 88, domain.ST, "Ouro Raro", 90, 87, 70, 84, 42, 85, 118_000, ps("Power Shot", false), ps("Aerial", true)), "Napoli", "Serie A Enilive", "Nigeria")},
 		// Reservas: dão para vender e financiar as trocas.
 		{Player: p(12, "Reijnders", 84, domain.CM, "Ouro Raro", 78, 76, 83, 84, 72, 76, 18_000)},
 		{Player: p(13, "Kolo Muani", 83, domain.ST, "Ouro Raro", 89, 81, 72, 80, 40, 82, 14_000)},
@@ -132,8 +148,11 @@ func demoClub() domain.Club {
 	return domain.Club{
 		GamerTag: "carneiro22", Platform: "ps5", Coins: 145_000,
 		Players: players,
-		Squad:   domain.Squad{Name: "Titular", Formation: "4-2-3-1", Chemistry: 29, Starters: starters, SyncedAt: time.Now()},
-		Cycle:   "26", SyncedAt: time.Now(), Source: "demo",
+		// Chemistry 33 = 11 titulares x 3 (o mesmo padrão observado no
+		// elenco real, ver internal/chemistry/modelos.go). ChemistrySynced
+		// true porque, no demo, "a coleta" é sempre completa por definição.
+		Squad: domain.Squad{Name: "Titular", Formation: "4-2-3-1", Chemistry: 33, ChemistrySynced: true, Starters: starters, SyncedAt: time.Now()},
+		Cycle: "26", SyncedAt: time.Now(), Source: "demo",
 	}
 }
 

@@ -519,6 +519,10 @@ func (c *Client) Club(ctx context.Context, gamerTag string) (domain.Club, error)
 	if sq, err := c.ActiveSquad(ctx, gamerTag, club.Players); err == nil {
 		club.Squad = sq
 	} else {
+		// ChemistrySynced fica no zero-value (false) DE PROPÓSITO: sem
+		// escalação não existe química nenhuma para comparar, e marcar
+		// "sincronizado" aqui faria um zero acidental passar por medição
+		// boa (ver Squad.ChemistrySynced). Não "conserte" isto.
 		club.Squad = domain.Squad{SyncedAt: club.SyncedAt}
 	}
 	return club, nil
@@ -570,6 +574,11 @@ func (c *Client) ActiveSquad(ctx context.Context, gamerTag string, roster []doma
 		sq.Formation = formationByID[id]
 	}
 	chem := 0
+	// Química só vira oráculo se TODOS os titulares resolverem contra o
+	// elenco: a soma é por carta, então um titular que não aparece em byID
+	// contribui 0 e o total sai menor sem nada indicar isso. Uma soma parcial
+	// é pior que número nenhum — ela parece exata (ver Squad.ChemistrySynced).
+	todosResolvidos := true
 	for _, gp := range data.nodes("activeGroupPositions") {
 		if gp.str("group") != "FIELD" {
 			continue
@@ -589,6 +598,8 @@ func (c *Client) ActiveSquad(ctx context.Context, gamerTag string, roster []doma
 				pos = p.Position
 			}
 			chem += p.Chemistry
+		} else {
+			todosResolvidos = false
 		}
 		if pos == "" {
 			continue // nem carta de posição nem carta no elenco: não dá pra plotar
@@ -598,6 +609,7 @@ func (c *Client) ActiveSquad(ctx context.Context, gamerTag string, roster []doma
 		})
 	}
 	sq.Chemistry = chem
+	sq.ChemistrySynced = todosResolvidos && len(sq.Starters) > 0
 	return sq, nil
 }
 

@@ -57,15 +57,22 @@ type CardReport struct {
 }
 
 // BuildReports monta um CardReport para cada jogador do clube com rating
-// igual ou acima de minRating. A ordem de saída é por GGRatingGain do Best
-// decrescente (quem ganha mais primeiro); cartas sem Best vão ao final,
-// ordenadas por nome.
-func BuildReports(ctx context.Context, client *futgg.Client, club domain.Club, minRating int) ([]CardReport, error) {
+// igual ou acima de minRating, mais qualquer carta listada em requiredIDs
+// (Player.ID) mesmo abaixo desse corte — é o que força relatório de
+// evolução para os titulares do Gauntlet, que podem incluir cartas mais
+// fracas nas primeiras rodadas (ver CLAUDE.md, seção do Gauntlet). A ordem
+// de saída é por GGRatingGain do Best decrescente (quem ganha mais
+// primeiro); cartas sem Best vão ao final, ordenadas por nome.
+func BuildReports(ctx context.Context, client *futgg.Client, club domain.Club, minRating int, requiredIDs []int64) ([]CardReport, error) {
 	roles := client.Roles(ctx)
+	required := make(map[int64]bool, len(requiredIDs))
+	for _, id := range requiredIDs {
+		required[id] = true
+	}
 
 	var out []CardReport
 	for _, cp := range club.Players {
-		if cp.Player.Rating < minRating {
+		if cp.Player.Rating < minRating && !required[cp.Player.ID] {
 			continue
 		}
 		r := CardReport{

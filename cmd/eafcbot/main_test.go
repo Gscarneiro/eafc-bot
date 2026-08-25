@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/futgg"
@@ -28,7 +29,7 @@ func TestClubeVazioNaoSobrescreveSnapshotBom(t *testing.T) {
 			Players: []domain.ClubPlayer{{Player: domain.Player{ID: 1, Name: "Titular"}}},
 		},
 	}
-	if _, err := analyzeAndBuild(ctx, cfg, st, bom, time.Now(), false, nil); err != nil {
+	if _, err := analyzeAndBuild(ctx, cfg, st, bom, time.Now(), false, nil, analyze.GauntletPlan{}); err != nil {
 		t.Fatalf("analyzeAndBuild (dia bom): %v", err)
 	}
 
@@ -38,7 +39,7 @@ func TestClubeVazioNaoSobrescreveSnapshotBom(t *testing.T) {
 	}
 
 	vazio := &futgg.Snapshot{Club: domain.Club{GamerTag: cfg.GamerTag, Cycle: cfg.FutGG.Cycle}}
-	data, err := analyzeAndBuild(ctx, cfg, st, vazio, time.Now(), false, nil)
+	data, err := analyzeAndBuild(ctx, cfg, st, vazio, time.Now(), false, nil, analyze.GauntletPlan{})
 	if err != nil {
 		t.Fatalf("analyzeAndBuild (clube vazio): %v", err)
 	}

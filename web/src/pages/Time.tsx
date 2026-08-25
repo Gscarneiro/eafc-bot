@@ -7,7 +7,7 @@ import PageHeader from "../components/PageHeader";
 import Pitch, { canDrawPitch } from "../components/Pitch";
 import { useData } from "../useData";
 import { useCollection } from "../useCollection";
-import type { ClubPlayer, Position, RosterCard, StarterCard } from "../types";
+import type { ChemistryPlayer, ClubPlayer, Position, RosterCard, StarterCard } from "../types";
 import "../shared.css";
 
 const VIEW_KEY = "eafc-bot:time-view";
@@ -74,12 +74,22 @@ export default function Time() {
 
       <section>
         <h2>Titulares</h2>
+        {data.chemistry && data.chemistry.fora_de_posicao > 0 && (
+          <div className="banner alert">
+            {data.chemistry.fora_de_posicao} titular{data.chemistry.fora_de_posicao > 1 ? "es" : ""} fora de posição — zera o entrosamento dele e tira o vínculo dos outros também (única forma de perder química hoje).
+          </div>
+        )}
         {showPitch ? (
           <Pitch formation={data.formation} starters={displayedStarters} />
         ) : (
-          <RosterTable rows={displayedStarters.map((s) => ({ player: s.player, cardSlug: s.card_slug, position: s.position }))} />
+          <RosterTable rows={displayedStarters.map((s) => ({ player: s.player, cardSlug: s.card_slug, position: s.position, chemistry: s.chemistry }))} showChemistry />
         )}
-        {data.optimization?.status === "improved" && <div className="notice"><strong>Melhor encaixe: +{data.optimization.gain.toFixed(1)} GG</strong><br />{data.optimization.chemistry_warning}</div>}
+        {data.optimization?.status === "improved" && (
+          <div className="banner">
+            <strong>Melhor encaixe: +{data.optimization.gain.toFixed(1)} GG</strong>
+            {data.optimization.chemistry_note && <><br />{data.optimization.chemistry_note}</>}
+          </div>
+        )}
       </section>
 
       {(benchCollection.count > 0 || search || position || tradeable !== "all") && (
@@ -110,9 +120,15 @@ interface Row {
   player: ClubPlayer;
   cardSlug?: string;
   position?: Position;
+  chemistry?: ChemistryPlayer;
 }
 
-function RosterTable({ rows }: { rows: Row[] }) {
+// showChemistry só é true pra tabela de TITULARES: no banco, p.chemistry é o
+// valor cru que o fut.gg persiste por carta, que sobra de escalações
+// passadas (46 cartas do banco carregam chem>0 mesmo fora do XI ativo, num
+// retrato real) — mostrar isso confundiria com o entrosamento calculado do
+// XI de hoje, que só faz sentido pra quem está escalado.
+function RosterTable({ rows, showChemistry = false }: { rows: Row[]; showChemistry?: boolean }) {
   return (
     <div className="tablewrap">
       <table>
@@ -123,11 +139,11 @@ function RosterTable({ rows }: { rows: Row[] }) {
             <th>Carta</th>
             <th className="num">Overall</th>
             <th className="num">GG Rating</th>
-            <th>Química</th>
+            {showChemistry && <th>Química</th>}
           </tr>
         </thead>
         <tbody>
-          {rows.map(({ player: p, cardSlug, position }) => (
+          {rows.map(({ player: p, cardSlug, position, chemistry }) => (
             <tr key={p.id}>
               <td>{p.image_url && <img className="thumb" src={p.image_url} alt="" loading="lazy" />}</td>
               <td>
@@ -144,7 +160,21 @@ function RosterTable({ rows }: { rows: Row[] }) {
               </td>
               <td className="num">{p.rating}</td>
               <td className="num">{p.gg_rating ? p.gg_rating.toFixed(1) : "—"}</td>
-              <td>{p.chemistry}/3</td>
+              {showChemistry && (
+                <td>
+                  {chemistry ? (
+                    chemistry.fora_de_posicao ? (
+                      <Chip tone="alert">fora de posição</Chip>
+                    ) : (
+                      <span title={`base ${chemistry.base} · clube ${chemistry.clube} · liga ${chemistry.liga} · nação ${chemistry.nacao}`}>
+                        {chemistry.pontos}/3
+                      </span>
+                    )
+                  ) : (
+                    "—"
+                  )}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

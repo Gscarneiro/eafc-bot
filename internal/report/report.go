@@ -12,6 +12,7 @@ import (
 
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/cards"
+	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/futgg"
 	"github.com/gscarneiro/eafc-bot/internal/store"
@@ -116,6 +117,10 @@ type Input struct {
 	// SBCCostTrends é a tendência de custo de cada desafio de SBC (ver
 	// store.Store.SBCCostTrend), indexada por store.SBCChallengeKey.
 	SBCCostTrends map[string]store.PriceTrend
+
+	// ChemistryModel decide como SquadPlan.Quimica/CurrentQuimica são
+	// calculados (ver internal/chemistry). Zero-valor cai no modelo padrão.
+	ChemistryModel chemistry.Modelo
 }
 
 // Build organiza os resultados na forma que o relatório apresenta:
@@ -154,7 +159,11 @@ func Build(in Input) Data {
 	}
 
 	d.SquadScore, d.WeakestSlot, d.WeakestName, d.WeakestGGRating = SquadSummary(club)
-	d.SquadPlan = analyze.OptimizeSquad(club)
+	model := in.ChemistryModel
+	if model.Nome == "" {
+		model = chemistry.ModeloPadrao()
+	}
+	d.SquadPlan = analyze.OptimizeSquadWithOptions(club, analyze.SquadOptions{ChemistryModel: model})
 	d.SquadSwaps = analyze.FindSquadSwaps(club)
 	d.MainSquad = MainSquad(club)
 	d.SBCs, d.Objectives = RankChallenges(snap.SBCs, snap.Objectives)

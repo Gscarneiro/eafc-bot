@@ -1,0 +1,260 @@
+{
+  "gamer_tag": "BilingualBee",
+  "cycle": "26",
+  "players": [
+    {
+      "id": 67311906,
+      "name": "Jack Butland",
+      "common_name": "Jack Butland",
+      "rating": 96,
+      "position": "GK",
+      "alt_positions": null,
+      "version": "FUTTIES",
+      "club": "Hull City",
+      "league": "EFL Championship",
+      "nation": "England",
+      "chemistry": 3
+    },
+    {
+      "id": 67341227,
+      "name": "Milan Škriniar",
+      "common_name": "Milan Škriniar",
+      "rating": 98,
+      "position": "CB",
+      "alt_positions": [
+        "CDM",
+        "RB",
+        "CM",
+        "LB"
+      ],
+      "version": "FUTTIES",
+      "club": "Fenerbahçe",
+      "league": "Trendyol Süper Lig",
+      "nation": "Slovakia",
+      "chemistry": 3
+    },
+    {
+      "id": 100864320,
+      "name": "Kalidou Koulibaly",
+      "common_name": "Kalidou Koulibaly",
+      "rating": 97,
+      "position": "CB",
+      "alt_positions": [
+        "CDM",
+        "RB",
+        "CM",
+        "LB"
+      ],
+      "version": "FUTTIES",
+      "club": "Al Hilal",
+      "league": "ROSHN Saudi League",
+      "nation": "Senegal",
+      "chemistry": 3
+    },
+    {
+      "id": 67333964,
+      "name": "Joe Gomez",
+      "common_name": "Joe Gomez",
+      "rating": 97,
+      "position": "CB",
+      "alt_positions": [
+        "LM",
+        "RB",
+        "RM",
+        "LB"
+      ],
+      "version": "FUTTIES",
+      "club": "Liverpool",
+      "league": "Premier League",
+      "nation": "England",
+      "chemistry": 3
+    },
+    {
+      "id": 117688331,
+      "name": "Nico Schlotterbeck",
+      "common_name": "Nico Schlotterbeck",
+      "rating": 98,
+      "position": "CB",
+      "alt_positions": [
+        "CDM",
+        "RB",
+        "CM",
+        "LB"
+      ],
+      "version": "FUT Birthday",
+      "club": "Borussia Dortmund",
+      "league": "Bundesliga",
+      "nation": "Germany",
+      "chemistry": 3
+    },
+    {
+      "id": 134449475,
+      "name": "Kylian Mbappé",
+      "common_name": "Kylian Mbappé",
+      "rating": 98,
+      "position": "ST",
+      "alt_positions": [
+        "LM",
+        "LW",
+        "RM"
+      ],
+      "version": "FUTTIES",
+      "club": "Real Madrid",
+      "league": "LALIGA EA SPORTS",
+      "nation": "France",
+      "chemistry": 3
+    },
+    {
+      "id": 100891998,
+      "name": "Frenkie de Jong",
+      "common_name": "Frenkie de Jong",
+      "rating": 98,
+      "position": "CM",
+      "alt_positions": [
+        "LM",
+        "CDM",
+        "CAM",
+        "RM"
+      ],
+      "version": "FUTTIES",
+      "club": "FC Barcelona",
+      "league": "LALIGA EA SPORTS",
+      "nation": "Netherlands",
+      "chemistry": 3
+    },
+    {
+      "id": 84109414,
+      "name": "Joelinton",
+      "common_name": "Joelinton",
+      "rating": 98,
+      "position": "CM",
+      "alt_positions": [
+        "LM",
+        "CAM",
+        "CDM",
+        "LW"
+      ],
+      "version": "FUTTIES",
+      "club": "Newcastle Utd",
+      "league": "Premier League",
+      "nation": "Brazil",
+      "chemistry": 3
+    },
+    {
+      "id": 100932700,
+      "name": "Salma Paralluelo",
+      "common_name": "Salma Paralluelo",
+      "rating": 97,
+      "position": "LW",
+      "alt_positions": [
+        "LM",
+        "ST",
+        "RM",
+        "RW"
+      ],
+      "version": "FUTTIES",
+      "club": "OL",
+      "league": "Arkema Première Ligue",
+      "nation": "Spain",
+      "chemistry": 3
+    },
+    {
+      "id": 168027413,
+      "name": "Vitinha",
+      "common_name": "Vitinha",
+      "rating": 99,
+      "position": "CM",
+      "alt_positions": [
+        "LM",
+        "CDM",
+        "CAM",
+        "RM"
+      ],
+      "version": "FUTTIES",
+      "club": "Paris SG",
+      "league": "Ligue 1 McDonald's",
+      "nation": "Portugal",
+      "chemistry": 3
+    },
+    {
+      "id": 67339530,
+      "name": "Gabriel Jesus",
+      "common_name": "Gabriel Jesus",
+      "rating": 98,
+      "position": "ST",
+      "alt_positions": [
+        "LM",
+        "CAM",
+        "LW",
+        "RW"
+      ],
+      "version": "FUTTIES",
+      "club": "Arsenal",
+      "league": "Premier League",
+      "nation": "Brazil",
+      "chemistry": 3
+    }
+  ],
+  "squad": {
+    "formation": "4-4-1-1",
+    "chemistry": 33,
+    "chemistry_synced": true,
+    "starters": [
+      {
+        "index": 0,
+        "position": "GK",
+        "player_id": 67311906
+      },
+      {
+        "index": 1,
+        "position": "RB",
+        "player_id": 67341227
+      },
+      {
+        "index": 2,
+        "position": "CB",
+        "player_id": 100864320
+      },
+      {
+        "index": 3,
+        "position": "CB",
+        "player_id": 67333964
+      },
+      {
+        "index": 4,
+        "position": "LB",
+        "player_id": 117688331
+      },
+      {
+        "index": 5,
+        "position": "RM",
+        "player_id": 134449475
+      },
+      {
+        "index": 6,
+        "position": "CM",
+        "player_id": 100891998
+      },
+      {
+        "index": 7,
+        "position": "CM",
+        "player_id": 84109414
+      },
+      {
+        "index": 8,
+        "position": "LM",
+        "player_id": 100932700
+      },
+      {
+        "index": 9,
+        "position": "CAM",
+        "player_id": 168027413
+      },
+      {
+        "index": 10,
+        "position": "ST",
+        "player_id": 67339530
+      }
+    ]
+  }
+}

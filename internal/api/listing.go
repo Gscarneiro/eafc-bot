@@ -10,6 +10,7 @@ import (
 
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/cards"
+	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/query"
 	"github.com/gscarneiro/eafc-bot/internal/report"
@@ -189,7 +190,8 @@ func (s *Server) handleTitulares(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	starters, formation := buildStarters(snap)
+	quimicaPorCarta := chemistryByPlayer(s.currentChemistry(snap))
+	starters, formation := buildStarters(snap, quimicaPorCarta)
 	page, ok := serveList(w, r, startersSchema(), starters)
 	if !ok {
 		return
@@ -235,13 +237,17 @@ func cardSlugs(cardsReports []cards.CardReport) map[int64]string {
 	return result
 }
 
-func buildStarters(snap store.Snapshot) ([]StarterCard, string) {
+func buildStarters(snap store.Snapshot, quimicaPorCarta map[int64]chemistry.Jogador) ([]StarterCard, string) {
 	slugByID := cardSlugs(snap.Cards)
 	main := reportMainSquad(snap.Club)
 	starters := make([]StarterCard, 0, len(main))
 	for _, card := range main {
 		rating, _ := card.Player.GGRatingAt(card.Position)
-		starters = append(starters, StarterCard{RosterCard: RosterCard{Player: card.Player, CardSlug: slugByID[card.Player.ID]}, Index: card.Index, Position: card.Position, PositionGGRating: rating})
+		sc := StarterCard{RosterCard: RosterCard{Player: card.Player, CardSlug: slugByID[card.Player.ID]}, Index: card.Index, Position: card.Position, PositionGGRating: rating}
+		if j, ok := quimicaPorCarta[card.Player.ID]; ok {
+			sc.Quimica = &j
+		}
+		starters = append(starters, sc)
 	}
 	formation := snap.Club.Squad.Formation
 	if formation == "" {

@@ -7,6 +7,11 @@ import "time"
 // gasto de evolução nela.
 type ClubPlayer struct {
 	Player
+	// ClubItemID é o identificador do registro físico no clube, quando a
+	// fonte o fornece. Ele é diferente de Player.ID: duas cópias da mesma
+	// carta compartilham o segundo, mas não deveriam ser colapsadas no diff
+	// do elenco. Vazio significa que a fonte ainda não provou essa identidade.
+	ClubItemID   string    `json:"club_item_id,omitempty"`
 	Untradeable  bool      `json:"untradeable"`
 	InSquad      bool      `json:"in_squad"`
 	SquadSlot    Position  `json:"squad_slot"` // onde ele joga HOJE no seu time
@@ -22,12 +27,19 @@ type ClubPlayer struct {
 // Cartas já evoluídas não podem ser evoluídas de novo no mesmo slot.
 func (c ClubPlayer) Evolvable() bool { return !c.EvoExhausted }
 
-// SellValue é quanto ele vale se você vender. Untradeable não vira coin.
+// SellValue é o valor bruto da carta no mercado. Untradeable não vira coin.
 func (c ClubPlayer) SellValue() int {
 	if c.Untradeable {
 		return 0
 	}
 	return c.Price.Coins
+}
+
+// NetSellValue é o que realmente entra no saldo depois da taxa de 5% da EA.
+// A conta inteira evita arredondar com float e mantém mercado, upgrades e
+// orçamento usando exatamente o mesmo valor líquido.
+func (c ClubPlayer) NetSellValue() int {
+	return c.SellValue() * 95 / 100
 }
 
 // SquadSlot é UM lugar físico na escalação titular — não uma posição
@@ -114,11 +126,6 @@ func (c Club) PlayerByID(id int64) (ClubPlayer, bool) {
 // Budget é quanto você pode gastar: coins em caixa mais o que dá para
 // levantar vendendo cartas que não são titulares.
 func (c Club) Budget() (cash int, raisable int) {
-	cash = c.Coins
-	for _, p := range c.Players {
-		if !p.InSquad && !p.Untradeable {
-			raisable += p.Price.Coins
-		}
-	}
-	return cash, raisable
+	capital := c.Capital(0, 0, 0)
+	return capital.Cash, capital.NetRaisable
 }

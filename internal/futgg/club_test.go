@@ -52,6 +52,9 @@ func TestClubeLeOElencoPublicoDoGGClub(t *testing.T) {
 	if cp.ID != 168027413 {
 		t.Errorf("id %d — parou no \"id\" em texto em vez de cair no eaId?", cp.ID)
 	}
+	if cp.ClubItemID != "2567219-919095915063" {
+		t.Errorf("club item id %q — identidade física do envelope foi perdida", cp.ClubItemID)
+	}
 	if cp.Player.Display() != "Vitinha" {
 		t.Errorf("nome %q", cp.Player.Display())
 	}
@@ -75,6 +78,150 @@ func TestClubeLeOElencoPublicoDoGGClub(t *testing.T) {
 	// As alternativas também vêm como id.
 	if len(cp.Player.AltPositions) != 4 || !cp.Player.PlaysAt(domain.CAM) {
 		t.Errorf("posições alternativas %v", cp.Player.AltPositions)
+	}
+}
+
+// clubDuplicataFixture monta duas entradas do mesmo eaId (168027413) com
+// ClubItemID diferentes ("a" e "b") — o caso central que o diff de elenco
+// (store.DiffClubs) precisa distinguir para não colapsar duas cópias.
+func clubDuplicataFixture(idA, idB string) string {
+	return `{"data":[
+ {"userId":2567219,"id":"` + idA + `","eaId":168027413,
+  "playerDef":{"eaId":168027413,"commonName":"Vitinha","overall":99,"position":14}},
+ {"userId":2567219,"id":"` + idB + `","eaId":168027413,
+  "playerDef":{"eaId":168027413,"commonName":"Vitinha","overall":99,"position":14}}],
+ "next":null,"currentPage":1,"total":2}`
+}
+
+// Quando a fonte prova identidade física distinta (dois "id" diferentes),
+// as duas cópias saem com ClubItemID distinto e nenhuma é perdida.
+func TestClubPreservaDuplicatasComItemIDsDistintos(t *testing.T) {
+	var wrapper node
+	if err := jsonUnmarshalNode([]byte(clubDuplicataFixture("2567219-a", "2567219-b")), &wrapper); err != nil {
+		t.Fatal(err)
+	}
+	nodes := wrapper.nodes("data")
+	if len(nodes) != 2 {
+		t.Fatalf("leu %d registros, esperava 2", len(nodes))
+	}
+	a := mapClubPlayer(nodes[0], "26", lens{})
+	b := mapClubPlayer(nodes[1], "26", lens{})
+	if a.ClubItemID == "" || b.ClubItemID == "" || a.ClubItemID == b.ClubItemID {
+		t.Fatalf("esperava dois ClubItemID distintos e não vazios, veio %q e %q", a.ClubItemID, b.ClubItemID)
+	}
+	if a.ID != 168027413 || b.ID != 168027413 {
+		t.Fatalf("as duas cópias deveriam ser a mesma carta (id 168027413): a=%d b=%d", a.ID, b.ID)
+	}
+}
+
+// Quando as duas entradas trazem o MESMO "id" (o formato observado no
+// envelope real é userId-eaId — ver clubPlayerReal —, que não identifica a
+// CÓPIA, só o par usuário+carta), mapClubPlayer não pode inventar
+// distinção que a fonte não provou: as duas cópias continuam presentes
+// (nenhuma é descartada como "duplicata"), só que com o MESMO ClubItemID —
+// honesto sobre o que a fonte realmente disse. store.DiffClubs trata isso
+// como multiconjunto (ver TestDiffClubsPreservaCartasDuplicadas), não como
+// linhagem por cópia.
+func TestClubDuplicatasComIDComumNaoInventaUnicidade(t *testing.T) {
+	var wrapper node
+	if err := jsonUnmarshalNode([]byte(clubDuplicataFixture("2567219-168027413", "2567219-168027413")), &wrapper); err != nil {
+		t.Fatal(err)
+	}
+	nodes := wrapper.nodes("data")
+	if len(nodes) != 2 {
+		t.Fatalf("leu %d registros, esperava 2", len(nodes))
+	}
+	a := mapClubPlayer(nodes[0], "26", lens{})
+	b := mapClubPlayer(nodes[1], "26", lens{})
+	if a.ClubItemID == "" || a.ClubItemID != b.ClubItemID {
+		t.Fatalf("esperava o mesmo ClubItemID não vazio para as duas (a fonte não distingue), veio %q e %q", a.ClubItemID, b.ClubItemID)
+	}
+}
+
+// O ClubItemID precisa ser estável entre coletas sucessivas — é o que faz o
+// diff do elenco (store.DiffClubs) comparar o dia de hoje contra o de ontem
+// sem inventar entrada/saída de carta que não mudou de lugar nenhum.
+func TestClubItemIDEstavelEntreProbesSucessivos(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(clubPlayerReal))
+	}))
+	defer srv.Close()
+
+	c := New(Config{
+		BaseURL:   srv.URL,
+		Cycle:     "26",
+		Endpoints: map[string]string{"club": "/api/gg-club/{gamertag}/players/"},
+	})
+
+	primeira, err := c.Club(context.Background(), "BilingualBee")
+	if err != nil {
+		t.Fatalf("primeira coleta: %v", err)
+	}
+	segunda, err := c.Club(context.Background(), "BilingualBee")
+	if err != nil {
+		t.Fatalf("segunda coleta: %v", err)
+	}
+	if len(primeira.Players) != 1 || len(segunda.Players) != 1 {
+		t.Fatalf("esperava 1 jogador em cada probe: primeira=%d segunda=%d", len(primeira.Players), len(segunda.Players))
+	}
+	if primeira.Players[0].ClubItemID == "" || primeira.Players[0].ClubItemID != segunda.Players[0].ClubItemID {
+		t.Fatalf("ClubItemID mudou entre probes sucessivos: %q -> %q",
+			primeira.Players[0].ClubItemID, segunda.Players[0].ClubItemID)
+	}
+}
+
+// Uma carta de goleiro traz os seis atributos de linha junto dos seis da
+// face de GK. Os primeiros são reais, mas não podem ocupar DIV/HAN/KIC/REF/
+// SPD/POS no detalhe da carta.
+func TestGoleiroPrefereFaceEspecificaAosAtributosDeLinha(t *testing.T) {
+	p := mapPlayer(node{
+		"overall": 96.0, "position": "GK",
+		"facePace": 76.0, "faceShooting": 24.0, "facePassing": 40.0,
+		"faceDribbling": 35.0, "faceDefending": 15.0, "facePhysicality": 56.0,
+		"gkFaceDiving": 96.0, "gkFaceHandling": 94.0, "gkFaceKicking": 92.0,
+		"gkFaceReflexes": 96.0, "gkFaceSpeed": 76.0, "gkFacePositioning": 95.0,
+	}, "26", lens{})
+
+	want := domain.Attributes{Pace: 96, Shooting: 94, Passing: 92,
+		Dribbling: 96, Defending: 76, Physical: 95}
+	if p.Attributes != want {
+		t.Errorf("atributos %+v, esperava face de GK %+v", p.Attributes, want)
+	}
+}
+
+func TestGoleiroLeAliasesDaFaceEspecifica(t *testing.T) {
+	p := mapPlayer(node{
+		"overall": 90.0, "position": "GK",
+		"gkDiving": 91.0, "gkHandling": 92.0, "gkKicking": 93.0,
+		"gkReflexes": 94.0, "gkSpeed": 95.0, "gkPositioning": 96.0,
+	}, "26", lens{})
+
+	want := domain.Attributes{Pace: 91, Shooting: 92, Passing: 93,
+		Dribbling: 94, Defending: 95, Physical: 96}
+	if p.Attributes != want {
+		t.Errorf("atributos %+v, esperava aliases de GK %+v", p.Attributes, want)
+	}
+}
+
+func TestJogadorDeLinhaMantemMapaAprendidoDaFace(t *testing.T) {
+	l := lens{fm: map[string]string{
+		"pace": "faceStatsV2.facePace", "shooting": "faceStatsV2.faceShooting",
+		"passing": "faceStatsV2.facePassing", "dribbling": "faceStatsV2.faceDribbling",
+		"defending": "faceStatsV2.faceDefending", "physical": "faceStatsV2.facePhysicality",
+	}}
+	p := mapPlayer(node{
+		"overall": 91.0, "position": "ST",
+		"faceStatsV2": map[string]any{
+			"facePace": 97.0, "faceShooting": 92.0, "facePassing": 80.0,
+			"faceDribbling": 93.0, "faceDefending": 36.0, "facePhysicality": 78.0,
+		},
+	}, "26", l)
+
+	want := domain.Attributes{Pace: 97, Shooting: 92, Passing: 80,
+		Dribbling: 93, Defending: 36, Physical: 78}
+	if p.Attributes != want {
+		t.Errorf("atributos %+v, esperava jogador de linha %+v", p.Attributes, want)
 	}
 }
 

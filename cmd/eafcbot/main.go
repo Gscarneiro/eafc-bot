@@ -332,8 +332,12 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 	snap *futgg.Snapshot, started time.Time, dryRun bool, cardReports []cards.CardReport,
 	gauntletPlan analyze.GauntletPlan) (report.Data, error) {
 
-	cash, raisable := snap.Club.Budget()
-	budget := cash + raisable + cfg.Market.ExtraBudget
+	// Uma capital só, usada tanto para exibição quanto para decisão: Budget
+	// era cash+raisable ad-hoc, sem reserva nenhuma — orçamento de compra e
+	// capital exibido podiam divergir sobre quanto dava para gastar. Available
+	// já desconta reserva e comprometido (ver domain.Capital).
+	capital := snap.Club.Capital(cfg.Market.ExtraBudget, cfg.Market.Reserve, 0)
+	budget := capital.Available
 
 	upOpt := analyze.DefaultUpgradeOptions(budget)
 	upOpt.MinGain = cfg.Report.MinGain
@@ -398,6 +402,11 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 	} else {
 		freshNews = snap.News
 	}
+	// Trends consulta o histórico antes de gravar a rodada atual para não
+	// comparar o ponto recém-observado consigo mesmo. O relatório, porém,
+	// precisa terminar na cotação que o usuário vê agora; anexá-la aqui
+	// preserva a primeira amostra histórica e evita uma tabela um dia atrás.
+	mergeCurrentPriceTrends(trends, snap.Club, snap.Market)
 
 	chemModel := cfg.ChemistryModel()
 	data := report.Build(report.Input{
@@ -433,6 +442,7 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 				Duration:     time.Since(started),
 				Cycle:        snap.Club.Cycle,
 				Club:         snap.Club,
+				Capital:      capital,
 				Market:       snap.Market,
 				Evolutions:   snap.Evolutions,
 				Objectives:   snap.Objectives,
@@ -440,6 +450,7 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 				News:         snap.News,
 				Stats:        snap.Stats,
 				Errors:       snap.Errors,
+				Capabilities: snap.Capabilities,
 				Diff:         diff,
 				NewCards:     newCards,
 				FreshNews:    freshNews,
@@ -461,6 +472,48 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 	}
 
 	return data, nil
+}
+
+func mergeCurrentPriceTrends(trends map[int64]store.PriceTrend, club domain.Club, market []domain.Player) {
+	if trends == nil {
+		return
+	}
+	seen := make(map[int64]bool, len(club.Players)+len(market))
+	add := func(p domain.Player) {
+		if p.ID == 0 || seen[p.ID] || p.Price.Coins <= 0 {
+			return // preço desconhecido não pode ser inventado como zero
+		}
+		seen[p.ID] = true
+		t := trends[p.ID]
+		if t.EAID == 0 {
+			t.EAID = p.ID
+		}
+		if t.Samples == 0 || t.First <= 0 {
+			t.First = p.Price.Coins
+			t.Min = p.Price.Coins
+			t.Max = p.Price.Coins
+			t.Samples = 0
+		}
+		t.Last = p.Price.Coins
+		if t.Min == 0 || p.Price.Coins < t.Min {
+			t.Min = p.Price.Coins
+		}
+		if p.Price.Coins > t.Max {
+			t.Max = p.Price.Coins
+		}
+		t.Samples++
+		t.ChangePct = 0
+		if t.First > 0 {
+			t.ChangePct = float64(t.Last-t.First) / float64(t.First) * 100
+		}
+		trends[p.ID] = t
+	}
+	for _, p := range club.Players {
+		add(p.Player)
+	}
+	for _, p := range market {
+		add(p)
+	}
 }
 
 // interestingIDs limita a consulta de tendências ao que você tem e ao que
@@ -516,14 +569,17 @@ func writeReport(path string, data report.Data) error {
 
 func openStore(ctx context.Context, cfg config.Config) (store.Store, error) {
 	if cfg.Postgres.Enabled {
-		st, err := store.OpenPostgres(ctx, cfg.Postgres.Driver, cfg.Postgres.DSN)
+		st, err := store.OpenPostgresWithRetention(ctx, cfg.Postgres.Driver, cfg.Postgres.DSN, cfg.Serve.RetentionDays)
 		if err != nil {
-			return nil, fmt.Errorf("%w\n(dica: compile com `go build -tags postgres ./cmd/eafcbot` para incluir o driver)", err)
+			// %s com a mensagem já redigida, não %w: alguns erros de conexão do
+			// driver ecoam a DSN inteira de volta (ver config.Config.RedactSecrets),
+			// e esse texto vai direto pro stderr do processo.
+			return nil, fmt.Errorf("%s\n(dica: compile com `go build -tags postgres ./cmd/eafcbot` para incluir o driver)", cfg.RedactSecrets(err.Error()))
 		}
 		fmt.Println("histórico: Postgres")
 		return st, nil
 	}
-	st, err := store.NewJSON(cfg.DataDir)
+	st, err := store.NewJSONWithRetention(cfg.DataDir, cfg.Serve.RetentionDays)
 	if err != nil {
 		return nil, err
 	}

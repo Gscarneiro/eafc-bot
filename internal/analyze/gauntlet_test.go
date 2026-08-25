@@ -30,6 +30,9 @@ func gauntletFixtureClub(perPosition int) domain.Club {
 				ID: id, Name: fmt.Sprintf("%s-%d", pos, i), CommonName: fmt.Sprintf("%s-%d", pos, i),
 				Rating: int(rating), Position: pos, League: "Liga Teste",
 				GGRating: rating, GGRatingPos: pos,
+				// Um jogador-base por carta: no fixture base ninguém é outra
+				// versão de ninguém (quem testa isso é gauntletComDuasVersoes).
+				BasePlayerEaID: id,
 			}}
 			players = append(players, cp)
 			if i == 0 {
@@ -262,5 +265,136 @@ func TestStarterIDsListaSemRepetirDeTodasAsRodadas(t *testing.T) {
 			t.Fatalf("id %d repetido em StarterIDs", id)
 		}
 		seen[id] = true
+	}
+}
+
+// gauntletComDuasVersoes reproduz o caso relatado: duas cartas do MESMO
+// jogador (mesmo BasePlayerEaID, ids de carta diferentes), cada uma sendo a
+// melhor da sua posição — foi assim que o Mbappé apareceu de LM e de RM na
+// mesma rodada. O que separa as duas é só a versão da carta, e o jogo não
+// aceita as duas no mesmo elenco.
+func gauntletComDuasVersoes() domain.Club {
+	club := gauntletFixtureClub(8)
+	versao := func(id int64, nome string, pos domain.Position, gg float64) domain.ClubPlayer {
+		return domain.ClubPlayer{Player: domain.Player{
+			ID: id, Name: nome, CommonName: nome, Rating: 99, Position: pos,
+			League: "Liga Teste", GGRating: gg, GGRatingPos: pos,
+			BasePlayerEaID: 777,
+		}}
+	}
+	club.Players = append(club.Players,
+		versao(9001, "Mbappé TOTS", domain.RM, 99.0),
+		versao(9002, "Mbappé Ouro", domain.LM, 98.0))
+	return club
+}
+
+func versoesPorRodada(round GauntletSquad) map[int64][]int64 {
+	porBase := map[int64][]int64{}
+	for _, a := range round.Starters {
+		porBase[a.Player.BasePlayerEaID] = append(porBase[a.Player.BasePlayerEaID], a.Player.ID)
+	}
+	for _, b := range round.Bench {
+		porBase[b.BasePlayerEaID] = append(porBase[b.BasePlayerEaID], b.ID)
+	}
+	return porBase
+}
+
+// O bug relatado: duas versões do mesmo jogador escaladas na mesma rodada
+// (Mbappé de LM e de RM). O jogo não aceita duas cartas do mesmo atleta num
+// elenco — e a regra vale para o banco também.
+func TestGauntletNaoEscalaDuasVersoesDoMesmoJogadorNaMesmaRodada(t *testing.T) {
+	plan := BuildGauntletPlan(gauntletComDuasVersoes())
+	if plan.Status != "ok" {
+		t.Fatalf("status = %q, motivo = %q", plan.Status, plan.Reason)
+	}
+	for _, round := range plan.Rounds {
+		for base, ids := range versoesPorRodada(round) {
+			if len(ids) > 1 {
+				t.Fatalf("rodada %d: jogador-base %d entrou %d vezes (cartas %v) — o jogo não aceita duas versões do mesmo jogador no mesmo elenco",
+					round.Round, base, len(ids), ids)
+			}
+		}
+	}
+}
+
+// A trava é POR RODADA, não global: cada rodada é um elenco diferente, então
+// o Mbappé TOTS numa e o Mbappé ouro noutra são duas escalações legais — e
+// desperdiçar a segunda carta seria pior que o bug.
+func TestGauntletUsaVersoesDoMesmoJogadorEmRodadasDiferentes(t *testing.T) {
+	plan := BuildGauntletPlan(gauntletComDuasVersoes())
+	if plan.Status != "ok" {
+		t.Fatalf("status = %q, motivo = %q", plan.Status, plan.Reason)
+	}
+	rodadaDe := map[int64]int{}
+	for _, round := range plan.Rounds {
+		for _, a := range round.Starters {
+			rodadaDe[a.Player.ID] = round.Round
+		}
+	}
+	r1, ok1 := rodadaDe[9001]
+	r2, ok2 := rodadaDe[9002]
+	if !ok1 || !ok2 {
+		t.Fatalf("as duas versões deviam ser titulares em alguma rodada (99.0 e 98.0 contra 67.0 do pool base), escaladas = %v", rodadaDe)
+	}
+	if r1 == r2 {
+		t.Fatalf("as duas versões caíram na mesma rodada (%d) — era exatamente o bug", r1)
+	}
+}
+
+// Ter duas CÓPIAS da mesma carta é normal no FUT, e o elenco real tem
+// várias. Elas têm o mesmo Player.ID, então o pool as trata como um jogador
+// só — e uma rodada não pode escalar as duas.
+func TestGauntletNaoRepeteCopiaDaMesmaCartaNaMesmaRodada(t *testing.T) {
+	club := gauntletFixtureClub(8)
+	copia := domain.ClubPlayer{Player: domain.Player{
+		ID: 9500, Name: "Cópia", CommonName: "Cópia", Rating: 99,
+		Position: domain.RM, AltPositions: []domain.Position{domain.LM},
+		League: "Liga Teste",
+		// Sem BasePlayerEaID de propósito: a carta vira chave de si mesma, que
+		// é o que faz as duas cópias colidirem (ver domain.Player.PlayerKey).
+		GGRatings: map[domain.Position]float64{domain.RM: 99.0, domain.LM: 98.0},
+	}}
+	club.Players = append(club.Players, copia, copia)
+
+	plan := BuildGauntletPlan(club)
+	if plan.Status != "ok" {
+		t.Fatalf("status = %q, motivo = %q", plan.Status, plan.Reason)
+	}
+	for _, round := range plan.Rounds {
+		vezes := 0
+		for _, a := range round.Starters {
+			if a.Player.ID == 9500 {
+				vezes++
+			}
+		}
+		for _, b := range round.Bench {
+			if b.ID == 9500 {
+				vezes++
+			}
+		}
+		if vezes > 1 {
+			t.Fatalf("rodada %d escalou a mesma carta %d vezes", round.Round, vezes)
+		}
+	}
+}
+
+// Sem basePlayerEaId o bot não tem como saber se duas cartas são o mesmo
+// atleta. Ele não chuta pelo nome (CLAUDE.md: na dúvida, não afirma) — mas
+// também não pode deixar o buraco invisível.
+func TestGauntletAvisaCartaSemChaveDeJogador(t *testing.T) {
+	club := gauntletFixtureClub(8)
+	for i := range club.Players {
+		club.Players[i].BasePlayerEaID = 0
+	}
+	plan := BuildGauntletPlan(club)
+	if plan.Status != "ok" {
+		t.Fatalf("status = %q, motivo = %q", plan.Status, plan.Reason)
+	}
+	if len(plan.Warnings) == 0 {
+		t.Fatal("esperava aviso de que a trava de um-jogador-por-elenco não alcança cartas sem id de jogador-base")
+	}
+
+	if len(BuildGauntletPlan(gauntletFixtureClub(8)).Warnings) != 0 {
+		t.Fatal("elenco com todos os ids de jogador-base preenchidos não devia gerar aviso nenhum")
 	}
 }

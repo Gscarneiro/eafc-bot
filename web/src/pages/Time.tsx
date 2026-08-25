@@ -5,6 +5,7 @@ import { asyncGate } from "../components/asyncGate";
 import Chip from "../components/Chip";
 import PageHeader from "../components/PageHeader";
 import Pitch, { canDrawPitch } from "../components/Pitch";
+import type { Filter } from "../odata";
 import { useData } from "../useData";
 import { useCollection } from "../useCollection";
 import type { ChemistryPlayer, ClubPlayer, Position, RosterCard, StarterCard } from "../types";
@@ -52,6 +53,15 @@ export default function Time() {
   const bench = benchCollection.rows;
   const pitchOK = canDrawPitch(data.formation || "", starters.length);
   const showPitch = pitchOK && view === "campo";
+  const applyBenchFilters = (nextPosition: string, nextTradeable: typeof tradeable) => {
+    const filters: Filter[] = [];
+    if (nextPosition) filters.push({ kind: "compare", field: "player/position", op: "eq", value: nextPosition });
+    if (nextTradeable !== "all") filters.push({ kind: "compare", field: "player/untradeable", op: "eq", value: nextTradeable === "untradeable" });
+    const filter = filters.reduce<Filter | undefined>((result, item) => result ? { kind: "and", left: result, right: item } : item, undefined);
+    benchCollection.setFilter(filter);
+    benchCollection.setPage(1);
+    setPage(1);
+  };
 
   return (
     <div className="wrap">
@@ -100,8 +110,8 @@ export default function Time() {
           </div>
           <div className="roster-filters" aria-label="Filtrar reservas">
             <label><span>Buscar</span><input value={search} onChange={(e) => { const value = e.target.value; setSearch(value); benchCollection.setSearch(value); setPage(1); }} placeholder="Nome da carta" /></label>
-            <label><span>Posição</span><select value={position} onChange={(e) => { setPosition(e.target.value); setPage(1); }}><option value="">Todas</option>{["GK", "RB", "CB", "LB", "RWB", "LWB", "CDM", "CM", "CAM", "RM", "LM", "RW", "LW", "CF", "ST"].map((p) => <option key={p}>{p}</option>)}</select></label>
-            <label><span>Status</span><select value={tradeable} onChange={(e) => { setTradeable(e.target.value as typeof tradeable); setPage(1); }}><option value="all">Todas</option><option value="tradeable">Negociáveis</option><option value="untradeable">Inegociáveis</option></select></label>
+            <label><span>Posição</span><select value={position} onChange={(e) => { const value = e.target.value; setPosition(value); applyBenchFilters(value, tradeable); }}><option value="">Todas</option>{["GK", "RB", "CB", "LB", "RWB", "LWB", "CDM", "CM", "CAM", "RM", "LM", "RW", "LW", "CF", "ST"].map((p) => <option key={p}>{p}</option>)}</select></label>
+            <label><span>Status</span><select value={tradeable} onChange={(e) => { const value = e.target.value as typeof tradeable; setTradeable(value); applyBenchFilters(position, value); }}><option value="all">Todas</option><option value="tradeable">Negociáveis</option><option value="untradeable">Inegociáveis</option></select></label>
           </div>
           <RosterTable rows={bench.map((b) => ({ player: b.player, cardSlug: b.card_slug }))} />
           <Pagination page={benchCollection.page} pages={benchCollection.pages} onPage={benchCollection.setPage} />

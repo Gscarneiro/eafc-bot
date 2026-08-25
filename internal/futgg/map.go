@@ -62,7 +62,7 @@ func mapPlayer(n node, cycle string, l lens) domain.Player {
 		}
 	}
 
-	p.Attributes = mapAttributes(n, l)
+	p.Attributes = mapAttributes(n, l, p.Position)
 	p.PlayStyles = mapPlayStyles(n, l)
 	p.Price = mapPrice(n, l)
 
@@ -99,7 +99,11 @@ func mapPlayer(n node, cycle string, l lens) domain.Player {
 	return p
 }
 
-func mapAttributes(n node, l lens) domain.Attributes {
+func mapAttributes(n node, l lens, pos domain.Position) domain.Attributes {
+	if pos.IsGK() {
+		return mapGoalkeeperAttributes(n)
+	}
+
 	// Formato A: campos soltos no objeto do jogador.
 	//
 	// Os "face*" são os seis números grandes que a carta mostra, e o fut.gg
@@ -144,6 +148,32 @@ func mapAttributes(n node, l lens) domain.Attributes {
 		}
 	}
 	return a
+}
+
+// mapGoalkeeperAttributes preserva no modelo plano a correspondência
+// PAC=DIV, SHO=HAN, PAS=KIC, DRI=REF, DEF=SPD e PHY=POS. O payload também
+// traz facePace/faceShooting/etc. para goleiros, mas eles são os atributos
+// de linha e rotulá-los como atributos de GK no detalhe da carta é errado.
+func mapGoalkeeperAttributes(n node) domain.Attributes {
+	a := goalkeeperFace(n)
+	if a != (domain.Attributes{}) {
+		return a
+	}
+
+	// Alguns endpoints agrupam a face de GK em attributes, stats ou
+	// faceStats. O vocabulário continua sendo o de goleiro, nunca PAC/SHO.
+	return goalkeeperFace(n.sub("attributes", "stats", "faceStats"))
+}
+
+func goalkeeperFace(n node) domain.Attributes {
+	return domain.Attributes{
+		Pace:      n.int("gkFaceDiving", "gkDiving", "gk_face_diving", "attributeGkDiving", "attribute_gk_diving", "diving"),
+		Shooting:  n.int("gkFaceHandling", "gkHandling", "gk_face_handling", "attributeGkHandling", "attribute_gk_handling", "handling"),
+		Passing:   n.int("gkFaceKicking", "gkKicking", "gk_face_kicking", "attributeGkKicking", "attribute_gk_kicking", "kicking"),
+		Dribbling: n.int("gkFaceReflexes", "gkReflexes", "gk_face_reflexes", "attributeGkReflexes", "attribute_gk_reflexes", "reflexes"),
+		Defending: n.int("gkFaceSpeed", "gkSpeed", "gk_face_speed", "speed"),
+		Physical:  n.int("gkFacePositioning", "gkPositioning", "gk_face_positioning", "attributeGkPositioning", "attribute_gk_positioning", "positioning"),
+	}
 }
 
 // mapPlayStyles lê os PlayStyles da carta. O mercado manda o nome direto
@@ -245,7 +275,11 @@ func mapClubPlayer(n node, cycle string, l lens) domain.ClubPlayer {
 	}
 
 	cp := domain.ClubPlayer{
-		Player:       mapPlayer(inner, cycle, l),
+		Player: mapPlayer(inner, cycle, l),
+		// O envelope do GG Club traz um id opaco como
+		// "gamertag-eaId". Guardá-lo separadamente do Player.ID evita
+		// colapsar duas cópias da mesma carta ao comparar snapshots.
+		ClubItemID:   n.str("clubItemId", "club_item_id", "itemId", "item_id", "id"),
 		Untradeable:  n.bool_("untradeable", "isUntradeable", "untradable"),
 		InSquad:      n.bool_("inSquad", "in_squad", "isStarter", "isInActiveSquad", "inActiveSquad"),
 		Chemistry:    n.int("chemistryPoints", "chemistry_points", "chemistry"),

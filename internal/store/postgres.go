@@ -15,11 +15,18 @@ import (
 // pacote main (veja cmd/eafcbot/driver_pgx.go), então este pacote continua
 // sem dependência externa e testável sem banco.
 type PostgresStore struct {
-	db *sql.DB
+	db        *sql.DB
+	retention int
 }
 
 // OpenPostgres abre a conexão. driverName costuma ser "pgx" ou "postgres".
 func OpenPostgres(ctx context.Context, driverName, dsn string) (*PostgresStore, error) {
+	return OpenPostgresWithRetention(ctx, driverName, dsn, snapshotRetention)
+}
+
+// OpenPostgresWithRetention mantém a poda do banco alinhada a
+// serve.retention_days. O construtor antigo continua com 30 dias.
+func OpenPostgresWithRetention(ctx context.Context, driverName, dsn string, retention int) (*PostgresStore, error) {
 	db, err := sql.Open(driverName, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("abrindo conexão: %w", err)
@@ -34,7 +41,10 @@ func OpenPostgres(ctx context.Context, driverName, dsn string) (*PostgresStore, 
 		db.Close()
 		return nil, fmt.Errorf("conectando no Postgres: %w", err)
 	}
-	return &PostgresStore{db: db}, nil
+	if retention <= 0 {
+		retention = snapshotRetention
+	}
+	return &PostgresStore{db: db, retention: retention}, nil
 }
 
 func (s *PostgresStore) Close() error { return s.db.Close() }
@@ -306,7 +316,7 @@ func (s *PostgresStore) SaveSnapshot(ctx context.Context, snap Snapshot) error {
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM snapshots WHERE cycle = $1 AND day NOT IN (
 			SELECT day FROM snapshots WHERE cycle = $1 ORDER BY day DESC LIMIT $2)`,
-		snap.Cycle, snapshotRetention); err != nil {
+		snap.Cycle, s.retention); err != nil {
 		return fmt.Errorf("podando snapshots antigos: %w", err)
 	}
 	return tx.Commit()
@@ -331,7 +341,7 @@ func (s *PostgresStore) LatestSnapshot(ctx context.Context, cycle string) (Snaps
 
 func (s *PostgresStore) SnapshotHistory(ctx context.Context, cycle string, days int) ([]SnapshotSummary, error) {
 	if days <= 0 {
-		days = snapshotRetention
+		days = s.retention
 	}
 	// A subconsulta pega os `days` mais recentes; a de fora reordena
 	// crescente, porque é a ordem que o gráfico de tendência consome.
@@ -363,7 +373,7 @@ func (s *PostgresStore) SnapshotHistory(ctx context.Context, cycle string, days 
 // cliente precisar ler o snapshot inteiro.
 func (s *PostgresStore) ClubHistory(ctx context.Context, cycle string, days int) ([]domain.Club, error) {
 	if days <= 0 {
-		days = snapshotRetention
+		days = s.retention
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT club FROM (

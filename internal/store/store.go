@@ -165,6 +165,7 @@ type Snapshot struct {
 	Cycle       string        `json:"cycle"`
 
 	Club       domain.Club        `json:"club"`
+	Capital    domain.Capital     `json:"capital"`
 	Market     []domain.Player    `json:"market"`
 	Evolutions []domain.Evolution `json:"evolutions"`
 	Objectives []domain.Objective `json:"objectives"`
@@ -172,6 +173,11 @@ type Snapshot struct {
 	News       []domain.NewsItem  `json:"news"`
 	Stats      futgg.Stats        `json:"stats"`
 	Errors     []string           `json:"errors"`
+	// Capabilities é a procedência por fonte desta coleta — ver
+	// futgg.Observation. Mapa vazio (nil) é o sentinela de snapshot gravado
+	// antes deste campo existir; /api/saude marca esse caso como "estimado"
+	// em vez de fingir que sabe a procedência de um dado antigo.
+	Capabilities map[string]futgg.Observation `json:"capabilities,omitempty"`
 
 	// Diff, NewCards e FreshNews são derivados contra o snapshot anterior no
 	// momento da gravação — não recalculados na leitura.
@@ -226,28 +232,49 @@ type ClubDiff struct {
 	CoinsDelta int                 `json:"coins_delta"`
 }
 
-// DiffClubs compara dois retratos do clube.
+// DiffClubs compara dois retratos do clube sem transformar o elenco numa
+// tabela Player.ID -> carta. Player.ID identifica a carta publicada pela EA,
+// não a cópia física que o usuário possui; por isso o índice guarda uma fila
+// por chave e preserva duplicatas. Quando ClubItemID existe, ele é a chave
+// preferida. Quando não existe, a comparação é uma multiconjunto por EA ID e
+// não promete linhagem entre duas cópias iguais.
 func DiffClubs(prev, cur domain.Club) ClubDiff {
-	prevIDs := make(map[int64]domain.ClubPlayer, len(prev.Players))
-	for _, p := range prev.Players {
-		prevIDs[p.ID] = p
-	}
-	curIDs := make(map[int64]domain.ClubPlayer, len(cur.Players))
-	for _, p := range cur.Players {
-		curIDs[p.ID] = p
-	}
+	prevByKey, prevOrder := indexClubPlayers(prev.Players)
+	curByKey, curOrder := indexClubPlayers(cur.Players)
 
 	var d ClubDiff
-	for id, p := range curIDs {
-		if _, had := prevIDs[id]; !had {
-			d.Added = append(d.Added, p)
+	for _, key := range curOrder {
+		current := curByKey[key]
+		previous := prevByKey[key]
+		if len(current) > len(previous) {
+			d.Added = append(d.Added, current[len(previous):]...)
 		}
 	}
-	for id, p := range prevIDs {
-		if _, still := curIDs[id]; !still {
-			d.Removed = append(d.Removed, p)
+	for _, key := range prevOrder {
+		previous := prevByKey[key]
+		current := curByKey[key]
+		if len(previous) > len(current) {
+			d.Removed = append(d.Removed, previous[len(current):]...)
 		}
 	}
 	d.CoinsDelta = cur.Coins - prev.Coins
 	return d
+}
+
+func indexClubPlayers(players []domain.ClubPlayer) (map[string][]domain.ClubPlayer, []string) {
+	byKey := make(map[string][]domain.ClubPlayer, len(players))
+	order := make([]string, 0, len(players))
+	seen := make(map[string]bool, len(players))
+	for _, p := range players {
+		key := "card:" + strconv.FormatInt(p.ID, 10)
+		if p.ClubItemID != "" {
+			key = "item:" + p.ClubItemID
+		}
+		if !seen[key] {
+			seen[key] = true
+			order = append(order, key)
+		}
+		byKey[key] = append(byKey[key], p)
+	}
+	return byKey, order
 }

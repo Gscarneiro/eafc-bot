@@ -65,6 +65,10 @@ func cmdServe(ctx context.Context, args []string) error {
 	defer st.Close()
 
 	d := &daemon{cfg: cfg, store: st}
+	// O status vive na memória do daemon, mas a coleta continua sendo um
+	// processo diário. Restaurar o horário do último snapshot evita que a UI
+	// diga "nunca executou" depois de um restart limpo.
+	d.st.LastSuccess = restoreLastSuccess(ctx, st, cfg.FutGG.Cycle)
 
 	sched := &scheduler.Scheduler{
 		DailyAt:    cfg.Serve.DailyAt,
@@ -97,6 +101,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,
 		EvolutionMinRating: cfg.Serve.CardsMinRating, EvolutionExtraBudget: cfg.Market.ExtraBudget,
+		MarketReserve:  cfg.Market.Reserve,
 		ChemistryModel: cfg.ChemistryModel(),
 		CacheTTL:       10 * time.Second,
 		Trigger:        func() { go d.run(context.Background()) },
@@ -129,11 +134,21 @@ func cmdServe(ctx context.Context, args []string) error {
 			apiSrv.History = current.Serve.RetentionDays
 			apiSrv.EvolutionMinRating = current.Serve.CardsMinRating
 			apiSrv.EvolutionExtraBudget = current.Market.ExtraBudget
+			apiSrv.MarketReserve = current.Market.Reserve
 			return current.Editable(), nil
 		},
 		EnvLocked: envLockedSettings(),
 	}
 	return serveHTTP(ctx, cfg, dist, apiSrv, *open)
+}
+
+func restoreLastSuccess(ctx context.Context, st store.Store, cycle string) *time.Time {
+	snap, ok, err := st.LatestSnapshot(ctx, cycle)
+	if err != nil || !ok || snap.GeneratedAt.IsZero() {
+		return nil
+	}
+	last := snap.GeneratedAt
+	return &last
 }
 
 func envLockedSettings() []string {
@@ -203,6 +218,7 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,
 		EvolutionMinRating: cfg.Serve.CardsMinRating, EvolutionExtraBudget: cfg.Market.ExtraBudget,
+		MarketReserve:  cfg.Market.Reserve,
 		ChemistryModel: cfg.ChemistryModel(),
 		CacheTTL:       10 * time.Second,
 		Trigger:        func() {}, // não há job de verdade para acionar no demo
@@ -221,6 +237,7 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 			}
 			apiSrv.EvolutionMinRating = demoCfg.Serve.CardsMinRating
 			apiSrv.EvolutionExtraBudget = demoCfg.Market.ExtraBudget
+			apiSrv.MarketReserve = demoCfg.Market.Reserve
 			return demoCfg.Editable(), nil
 		},
 	}
@@ -232,11 +249,11 @@ func serveHTTP(ctx context.Context, cfg config.Config, dist fs.FS, apiSrv *api.S
 	mux.Handle("/api/", apiSrv.Handler())
 	mux.Handle("/", spaHandler(dist))
 
-	// Escuta em 0.0.0.0 para o docker-compose alcançar o processo de fora
-	// do container; é o compose que publica isso só em 127.0.0.1 no host
-	// (ver docker-compose.yml) — sem essa distinção o serve não escuta em
-	// lugar nenhum que o host acesse.
-	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Serve.Port)
+	// O binário nativo fica em loopback por padrão: sem autenticação, uma API
+	// que escuta na LAN é uma superfície desnecessária. O compose opta
+	// explicitamente por 0.0.0.0 dentro do container via EAFC_LISTEN_HOST e
+	// ainda publica a porta somente em 127.0.0.1 no host.
+	addr := fmt.Sprintf("%s:%d", listenHost(), cfg.Serve.Port)
 	srv := &http.Server{Addr: addr, Handler: mux}
 
 	errCh := make(chan error, 1)
@@ -269,6 +286,13 @@ func serveHTTP(ctx context.Context, cfg config.Config, dist fs.FS, apiSrv *api.S
 	defer cancel()
 	fmt.Println("\nparando o servidor...")
 	return srv.Shutdown(shutdownCtx)
+}
+
+func listenHost() string {
+	if host := strings.TrimSpace(os.Getenv("EAFC_LISTEN_HOST")); host != "" {
+		return host
+	}
+	return "127.0.0.1"
 }
 
 // daemon guarda o estado do job diário para a API/UI consultarem. A trava
@@ -313,12 +337,15 @@ func (d *daemon) run(ctx context.Context) {
 	d.st.LastStarted = &started
 	d.mu.Unlock()
 
-	_, err := runJob(ctx, d.config(), d.store, "", false)
+	cfg := d.config()
+	_, err := runJob(ctx, cfg, d.store, "", false)
 
 	d.mu.Lock()
 	d.st.Running = false
 	if err != nil {
-		d.st.LastError = err.Error()
+		// LastError vai para /api/job, visível na UI — a mensagem não pode
+		// ecoar DSN nem cookie de sessão (ver config.Config.RedactSecrets).
+		d.st.LastError = cfg.RedactSecrets(err.Error())
 	} else {
 		success := time.Now()
 		d.st.LastSuccess = &success
@@ -326,7 +353,7 @@ func (d *daemon) run(ctx context.Context) {
 	d.mu.Unlock()
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "erro na coleta: %v\n", err)
+		fmt.Fprintf(os.Stderr, "erro na coleta: %s\n", cfg.RedactSecrets(err.Error()))
 	}
 }
 

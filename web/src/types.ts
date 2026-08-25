@@ -126,6 +126,8 @@ export interface CardReport {
   // válida, não ausência de dado.
   best: EvoPotential | null;
   alternates: EvoPotential[] | null;
+  evolution_status?: "confirmed" | "no_path" | "not_eligible" | "fetch_error" | "not_checked";
+  evolution_error?: string;
 }
 
 export interface PricePoint {
@@ -220,6 +222,7 @@ export interface StatusResponse {
   squad_score: number;
   coins: number;
   raisable: number;
+  capital: Capital;
   weakest_slot: Position | "";
   weakest_name: string;
   weakest_gg_rating: number;
@@ -231,6 +234,16 @@ export interface StatusResponse {
   objectives: Objective[] | null;
   errors: string[] | null;
   history: SnapshotSummary[] | null;
+}
+
+export interface Capital {
+  cash: number;
+  extra_budget: number;
+  reserve: number;
+  gross_raisable: number;
+  net_raisable: number;
+  committed: number;
+  available: number;
 }
 
 export interface RosterCard {
@@ -340,6 +353,59 @@ export interface GauntletResponse {
   warnings?: string[];
   objectives: Objective[] | null;
   rounds: GauntletRoundView[] | null;
+}
+
+// --- Squad Planner: cenários que trocam nota por entrosamento (fronteira
+// Pareto nota×química) para o XI titular — ver
+// internal/analyze/squad_planner.go. Diferente do Gauntlet, é UM elenco só,
+// sem rodadas; e diferente de optimization (TimeResponse), traz VÁRIOS
+// cenários lado a lado, não uma sugestão só.
+
+export interface SquadPlanStarterView {
+  index: number;
+  position: Position; // slot físico — pode divergir da posição natural da carta
+  player: ClubPlayer;
+  rating: number; // GG Rating do fut.gg nessa posição
+  card_slug?: string;
+}
+
+export interface SquadPlanMoveView {
+  index: number;
+  position: Position;
+  current: SquadPlanStarterView;
+  suggested: SquadPlanStarterView;
+  current_rating: number;
+  suggested_rating: number;
+  gain: number;
+}
+
+export interface SquadPlanScenario {
+  label: string;
+  chemistry_weight: number;
+  starters: SquadPlanStarterView[] | null;
+  total_rating: number;
+  average_rating: number;
+  chemistry?: ChemistryResult;
+  moves: SquadPlanMoveView[] | null;
+}
+
+// O planejador só APONTA necessidades — nunca escolhe qual carta comprar
+// (isso é o mercado, uma tela separada).
+export interface SquadPlanNeed {
+  index: number;
+  position: Position;
+  reason: string;
+}
+
+export interface SquadPlanResponse {
+  generated_at: string;
+  status: string; // "ok" | "unavailable"
+  reason?: string;
+  formation: string;
+  scenarios: SquadPlanScenario[] | null;
+  needs: SquadPlanNeed[] | null;
+  warnings?: string[];
+  capital: Capital;
 }
 
 export interface Upgrade {
@@ -505,6 +571,7 @@ export interface UISettings {
     pages: number;
     per_page: number;
     extra_budget: number;
+    reserve: number;
   };
   report: {
     min_gain: number;
@@ -553,7 +620,7 @@ export interface InvestmentFunnel {
   has_best_rejected: boolean;
 }
 
-export type SellRecommendation = "vender" | "segurar_potencial" | "promover" | "nao_vendavel";
+export type SellRecommendation = "vender" | "segurar_potencial" | "aguardar_verificacao" | "promover" | "nao_vendavel";
 
 export interface SellCandidate {
   player: ClubPlayer;
@@ -569,6 +636,7 @@ export interface SellFunnel {
   not_tradeable: number;
   promotable: number;
   held_for_potential: number;
+  waiting_verification: number;
   suggested: number;
   min_evo_gg_gain: number;
 }

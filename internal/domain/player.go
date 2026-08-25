@@ -203,6 +203,28 @@ type Player struct {
 	MomentumPct float64 `json:"momentum_pct,omitempty"`
 }
 
+// PlayerKey identifica o JOGADOR, não a carta — responde "estas duas cartas
+// são o mesmo atleta?", que é a pergunta que o jogo faz para proibir duas
+// versões do mesmo jogador no mesmo elenco. ID não serve para isso: ele é o
+// id do RECURSO, diferente em cada versão (Mbappé ouro e Mbappé TOTS são
+// dois ids).
+//
+// Sem basePlayerEaId nem basePlayerSlug a resposta honesta é "não sei"
+// (CLAUDE.md: na dúvida, não afirma). Cair no nome colapsaria homônimos e
+// tiraria carta boa da escalação sem deixar rastro, então a carta vira chave
+// de si mesma e a trava simplesmente não a alcança — de quebra, isso já
+// trata duas CÓPIAS da mesma carta (mesmo ID, coisa normal de se ter no
+// clube) como o mesmo jogador, que é o certo.
+func (p Player) PlayerKey() string {
+	if p.BasePlayerEaID > 0 {
+		return "base:" + strconv.FormatInt(p.BasePlayerEaID, 10)
+	}
+	if p.BasePlayerSlug != "" {
+		return "slug:" + p.BasePlayerSlug
+	}
+	return "card:" + strconv.FormatInt(p.ID, 10)
+}
+
 // GGRatingAt devolve a nota exata para o lugar físico da escalação.
 func (p Player) GGRatingAt(pos Position) (float64, bool) {
 	if v, ok := p.GGRatings[pos]; ok && v > 0 {

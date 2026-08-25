@@ -22,6 +22,11 @@ type Snapshot struct {
 	News       []domain.NewsItem  `json:"news"`
 	Stats      Stats              `json:"stats"`
 	Errors     []string           `json:"errors"`
+	// Capabilities é a procedência por fonte desta coleta — fonte, horário,
+	// cobertura, avisos, erro e estado (ver Observation). Errors continua
+	// existindo como a lista plana que o relatório já imprime; este mapa é o
+	// que /api/saude expõe estruturado.
+	Capabilities map[string]Observation `json:"capabilities"`
 }
 
 // formationByID traduz o identificador que o GG Club guarda na tática para
@@ -47,10 +52,12 @@ func (c *Client) Collect(ctx context.Context, gamerTag string, marketFilter Play
 	snap := &Snapshot{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	capErrs := make(map[string]error, 6)
 
 	fail := func(what string, err error) {
 		mu.Lock()
 		snap.Errors = append(snap.Errors, fmt.Sprintf("%s: %v", what, err))
+		capErrs[what] = err
 		mu.Unlock()
 	}
 
@@ -144,6 +151,7 @@ func (c *Client) Collect(ctx context.Context, gamerTag string, marketFilter Play
 		}
 	}
 	snap.Stats = c.Stats()
+	snap.Capabilities = c.buildCapabilities(gamerTag, capErrs, snap)
 	return snap, nil
 }
 
@@ -187,22 +195,21 @@ func (c *Client) enrichPositionRatings(ctx context.Context, club *domain.Club) e
 				return err
 			}
 			for _, r := range resp.Data {
-				p, ok := club.PlayerByID(r.EaID)
-				if !ok {
-					continue
-				}
 				if got, ok := domain.PositionFromID(r.Position); !ok || got != pos {
 					continue
 				}
-				if p.GGRatings == nil {
-					p.GGRatings = map[domain.Position]float64{}
-				}
-				p.GGRatings[pos] = r.Score
+				// TODAS as linhas com aquele id, sem break: ter duas cópias da
+				// mesma carta no clube é normal no FUT, e parar na primeira
+				// deixava a segunda só com a nota escalar — ela chegava mais
+				// fraca do que é na hora de escalar (analyze.gauntletValue).
 				for i := range club.Players {
-					if club.Players[i].ID == p.ID {
-						club.Players[i] = p
-						break
+					if club.Players[i].ID != r.EaID {
+						continue
 					}
+					if club.Players[i].GGRatings == nil {
+						club.Players[i].GGRatings = map[domain.Position]float64{}
+					}
+					club.Players[i].GGRatings[pos] = r.Score
 				}
 			}
 		}

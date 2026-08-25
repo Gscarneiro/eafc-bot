@@ -234,6 +234,19 @@ de pista de nome — que é exatamente a situação do FC 27.
 
 ## Armadilhas conhecidas
 
+- **`Player.ID` é a CARTA; `BasePlayerEaID` é o JOGADOR.** O jogo não aceita
+  duas versões do mesmo atleta no mesmo elenco (banco incluso), e Mbappé ouro
+  e Mbappé TOTS são ids diferentes — de-duplicar por `ID` deixa passar os
+  dois, que foi o bug de escalar o mesmo jogador de LM e de RM. Toda escolha
+  de XI passa por `domain.Player.PlayerKey()`, nunca por `ID`. Ele cai na
+  própria carta quando falta `basePlayerEaId` (na dúvida, não afirma: nome
+  colapsaria homônimos) — e isso já trata de graça as duas CÓPIAS da mesma
+  carta que um clube real tem. No Gauntlet a trava é POR RODADA: cada rodada
+  é um elenco diferente, então as duas versões podem entrar, em rodadas
+  diferentes. É por isso que `analyze.BuildGauntletPlan` roda um matching por
+  rodada, da 4 para a 1, em vez de um matching global de 44 slots — a
+  restrição (jogador, rodada) não cabe num fluxo de custo mínimo em que o
+  custo depende do par (carta, slot).
 - **`SquadSlot` é lugar físico, não posição lógica.** Uma formação repete
   posição (dois CB, dois CM); iterar `Squad.Starters` compara os dois,
   `Club.Starter(pos)` devolve só o de menor overall — de propósito, para a

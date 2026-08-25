@@ -72,6 +72,7 @@ export default function Configuracoes() {
           <Field label="Overall máximo" hint="1–99"><input type="number" min="1" max="99" value={form.market.max_rating} onChange={(e) => patch("market", "max_rating", Number(e.target.value))} /></Field>
           <Field label="Preço máximo" hint="0 = sem limite"><input type="number" min="0" value={form.market.max_price} onChange={(e) => patch("market", "max_price", Number(e.target.value))} /></Field>
           <Field label="Orçamento extra" hint={locked.has("market.extra_budget") ? "controlado por EAFC_BUDGET" : "moedas além do saldo"}><input disabled={locked.has("market.extra_budget")} type="number" min="0" value={form.market.extra_budget} onChange={(e) => patch("market", "extra_budget", Number(e.target.value))} /></Field>
+          <Field label="Reserva" hint="moedas que nunca entram no orçamento de compra"><input type="number" min="0" value={form.market.reserve} onChange={(e) => patch("market", "reserve", Number(e.target.value))} /></Field>
           <Field label="Páginas consultadas"><input type="number" min="1" value={form.market.pages} onChange={(e) => patch("market", "pages", Number(e.target.value))} /></Field>
           <Field label="Cartas por página"><input type="number" min="1" value={form.market.per_page} onChange={(e) => patch("market", "per_page", Number(e.target.value))} /></Field>
         </SettingsSection>

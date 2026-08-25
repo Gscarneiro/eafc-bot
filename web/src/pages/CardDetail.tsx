@@ -156,6 +156,10 @@ export default function CardDetail() {
               {report.best.training_time && <span>{report.best.training_time} de treino</span>}
             </div>
           </div>
+        ) : report.evolution_status === "fetch_error" ? (
+          <div className="empty">Não foi possível verificar os caminhos de evolução agora. A carta não deve ser vendida com base nesta coleta. {report.evolution_error ? `Detalhe: ${report.evolution_error}` : "Tente uma nova coleta."}</div>
+        ) : report.evolution_status === "not_checked" ? (
+          <div className="empty">Os caminhos de evolução ainda não foram verificados para esta carta. Tente uma nova coleta antes de decidir.</div>
         ) : (
           <div className="empty">
             Já está no teto das evoluções ativas — nenhum caminho disponível hoje leva essa carta mais longe.

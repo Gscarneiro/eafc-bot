@@ -137,7 +137,7 @@ func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) 
 		}
 		slot := squadSlot.Position
 		curScore := Score(current.Player, slot)
-		recoup := current.SellValue()
+		recoup := current.NetSellValue()
 
 		var perSlot []Upgrade
 		for i, pc := range pool {

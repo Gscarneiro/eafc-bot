@@ -89,6 +89,56 @@ func TestSaveSnapshotPodaAposTrintaDias(t *testing.T) {
 	}
 }
 
+func TestSaveSnapshotRespeitaRetencaoConfigurada(t *testing.T) {
+	st, err := NewJSONWithRetention(t.TempDir(), 3)
+	if err != nil {
+		t.Fatalf("NewJSONWithRetention: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, 2, 1, 5, 0, 0, 0, time.UTC)
+	for i := 0; i < 5; i++ {
+		if err := st.SaveSnapshot(ctx, Snapshot{GeneratedAt: base.AddDate(0, 0, i), Cycle: "26"}); err != nil {
+			t.Fatalf("SaveSnapshot dia %d: %v", i, err)
+		}
+	}
+	hist, err := st.SnapshotHistory(ctx, "26", 0)
+	if err != nil {
+		t.Fatalf("SnapshotHistory: %v", err)
+	}
+	if len(hist) != 3 || hist[0].Date != "2026-02-03" {
+		t.Fatalf("retenção configurada ignorada: %+v", hist)
+	}
+}
+
+func TestDiffClubsPreservaCartasDuplicadas(t *testing.T) {
+	mesmaCarta := func(item string) domain.ClubPlayer {
+		return domain.ClubPlayer{Player: domain.Player{ID: 42, Name: "Carta repetida"}, ClubItemID: item}
+	}
+	prev := domain.Club{Players: []domain.ClubPlayer{mesmaCarta("a"), mesmaCarta("b")}}
+	cur := domain.Club{Players: []domain.ClubPlayer{mesmaCarta("a"), mesmaCarta("c")}}
+
+	d := DiffClubs(prev, cur)
+	if len(d.Added) != 1 || d.Added[0].ClubItemID != "c" {
+		t.Fatalf("carta adicionada foi colapsada ou errada: %+v", d.Added)
+	}
+	if len(d.Removed) != 1 || d.Removed[0].ClubItemID != "b" {
+		t.Fatalf("carta removida foi colapsada ou errada: %+v", d.Removed)
+	}
+}
+
+func TestDiffClubsUsaMulticonjuntoQuandoFonteNaoDaItemID(t *testing.T) {
+	card := func(nome string) domain.ClubPlayer {
+		return domain.ClubPlayer{Player: domain.Player{ID: 42, Name: nome}}
+	}
+	prev := domain.Club{Players: []domain.ClubPlayer{card("A"), card("B")}}
+	cur := domain.Club{Players: []domain.ClubPlayer{card("A")}}
+
+	d := DiffClubs(prev, cur)
+	if len(d.Added) != 0 || len(d.Removed) != 1 {
+		t.Fatalf("a contagem de duplicatas não foi preservada: %+v", d)
+	}
+}
+
 func TestPriceSeriesDevolveSerieDentroDaJanela(t *testing.T) {
 	st, err := NewJSON(t.TempDir())
 	if err != nil {

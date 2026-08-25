@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
@@ -68,8 +69,16 @@ type GauntletPlan struct {
 // rating (ver CLAUDE.md, seção do Gauntlet).
 func (p GauntletPlan) StarterIDs() []int64 {
 	ids := make([]int64, 0, GauntletRounds*gauntletStartersCount)
+	seen := map[int64]bool{}
 	for _, round := range p.Rounds {
 		for _, a := range round.Starters {
+			// Duas CÓPIAS da mesma carta podem ser titulares em rodadas
+			// diferentes (é normal ter duas no clube) — aqui o que importa é o
+			// conjunto de cartas a relatar, não quantas vezes cada uma jogou.
+			if seen[a.Player.ID] {
+				continue
+			}
+			seen[a.Player.ID] = true
 			ids = append(ids, a.Player.ID)
 		}
 	}
@@ -99,75 +108,58 @@ func BuildGauntletPlan(club domain.Club) GauntletPlan {
 // A prioridade é maximizar a força do conjunto de titulares; reservas só
 // cobrem a exigência de banco cheio, com as cartas elegíveis mais fracas
 // que sobraram — nunca uma carta que valeria mais como titular.
+//
+// É um atalho para BuildGauntletPlanFromRequest com DefaultGauntletRequest
+// (4 rodadas, estratégia crescente, sem locks/exclusões, química só
+// informativa) — só ChemistryModel vem de opt. Quem já chama esta função ou
+// BuildGauntletPlan não precisa mudar nada; o motor geral (regras
+// versionadas, estratégias, locks, exclusões) mora em gauntlet_rules.go.
 func BuildGauntletPlanWithOptions(club domain.Club, opt GauntletOptions) GauntletPlan {
-	plan := GauntletPlan{Status: "unavailable", Formation: club.Squad.Formation}
-
-	slots := club.Squad.Starters
-	if len(slots) != gauntletStartersCount {
-		plan.Reason = fmt.Sprintf("escalação titular não sincronizada (tem %d slots, precisa de %d)",
-			len(slots), gauntletStartersCount)
-		return plan
+	req := DefaultGauntletRequest()
+	if opt.ChemistryModel.Nome != "" {
+		req.ChemistryModel = opt.ChemistryModel
 	}
-	for _, s := range slots {
-		if _, ok := club.PlayerByID(s.PlayerID); !ok {
-			plan.Reason = "titular ausente do retrato do clube"
-			return plan
+	return BuildGauntletPlanFromRequest(club, req)
+}
+
+// gauntletWarnings avisa sobre as cartas em que a trava de "um jogador por
+// elenco" não tem como agir: sem basePlayerEaId nem basePlayerSlug, o bot não
+// sabe se duas cartas são o mesmo atleta e trata cada uma como jogador
+// próprio (ver domain.Player.PlayerKey).
+func gauntletWarnings(pool []gauntletCard) []string {
+	cegas := 0
+	for _, c := range pool {
+		if strings.HasPrefix(c.key, "card:") {
+			cegas++
 		}
 	}
-
-	pool := gauntletPool(club)
-	if len(pool) < gauntletTotalCards {
-		plan.Reason = fmt.Sprintf(
-			"elenco tem %d cartas com GG Rating conhecido, precisa de %d (%d titulares + %d reservas em %d rodadas) para montar o Gauntlet",
-			len(pool), gauntletTotalCards, GauntletRounds*gauntletStartersCount, GauntletRounds*gauntletBenchPerRound, GauntletRounds)
-		return plan
+	if cegas == 0 {
+		return nil
 	}
-
-	assignments, ok := matchGauntletStarters(pool, slots)
-	if !ok {
-		plan.Reason = "não há jogadores elegíveis o bastante, por posição, para preencher os titulares das 4 rodadas nessa formação"
-		return plan
-	}
-
-	rounds := distributeRounds(assignments)
-
-	used := make(map[int64]bool, len(assignments))
-	for _, a := range assignments {
-		used[a.Player.ID] = true
-	}
-	bench := gauntletBench(pool, used)
-	if len(bench) < GauntletRounds*gauntletBenchPerRound {
-		plan.Reason = fmt.Sprintf("sobraram %d cartas elegíveis para o banco, precisa de %d",
-			len(bench), GauntletRounds*gauntletBenchPerRound)
-		return plan
-	}
-	assignBench(rounds, bench)
-
-	for i := range rounds {
-		rounds[i].Quimica = quimicaDaRodada(opt.ChemistryModel, rounds[i].Starters)
-	}
-
-	plan.Status = "ok"
-	plan.Rounds = rounds
-	plan.Strategy = "Titulares escolhidos de uma vez só, por matching global de GG Rating nas 4 rodadas " +
-		"(nunca posição por posição isolada), depois distribuídos da rodada mais fraca para a mais forte " +
-		"em cada posição — os melhores ficam guardados para a última partida. Reservas usam as cartas " +
-		"elegíveis restantes mais fracas, sem tirar lugar de titular nenhum."
-	return plan
+	return []string{fmt.Sprintf(
+		"%d cartas do elenco não trazem o id do jogador-base, então o bot não consegue "+
+			"saber se são outra versão de alguém já escalado — rode `./eafcbot run` para recoletar o clube",
+		cegas)}
 }
 
 // gauntletPool são as cartas do clube com GG Rating conhecido — a mesma
 // régua de FindSquadSwaps para comparar DENTRO do elenco (ver CLAUDE.md,
 // "duas notas, dois domínios de uso"). Sem essa nota não dá para comparar a
-// carta com as demais, nem como titular nem como reserva.
-func gauntletPool(club domain.Club) []domain.ClubPlayer {
-	pool := make([]domain.ClubPlayer, 0, len(club.Players))
-	for _, p := range club.Players {
-		if gauntletValue(p) > 0 {
-			pool = append(pool, p)
-		}
-	}
-	return pool
+// carta com as demais, nem como titular nem como reserva. Atalho para
+// gauntletPoolExcluding sem exclusão nenhuma (ver gauntlet_rules.go).
+func gauntletPool(club domain.Club) []gauntletCard {
+	return gauntletPoolExcluding(club, nil)
+}
+
+// gauntletCard é uma carta do pool com a identidade já resolvida. O índice é
+// a chave de "já usei esta carta": Player.ID não serve, porque ter duas
+// CÓPIAS da mesma carta no clube é normal no FUT — usá-lo faria a segunda
+// cópia desaparecer junto com a primeira, mesmo podendo servir noutra
+// rodada.
+type gauntletCard struct {
+	idx int
+	p   domain.ClubPlayer
+	key string // domain.Player.PlayerKey(): o JOGADOR, não a carta
 }
 
 // gauntletValue é a melhor nota conhecida da carta, em qualquer posição —
@@ -186,155 +178,159 @@ func gauntletValue(p domain.ClubPlayer) float64 {
 	return best
 }
 
-// gauntletSlot é uma cópia de um slot físico da formação, repetida uma vez
-// por rodada — 44 no total. O matching escolhe, entre as cópias, os
-// melhores 44 titulares sem repetir carta; a rodada de cada um é decidida
-// depois, em distributeRounds.
-type gauntletSlot struct {
-	Index    int
-	Position domain.Position
-}
-
-// matchGauntletStarters reusa o mesmo fluxo de custo mínimo de
-// OptimizeSquad (flowEdge/minCostAugment, squad_optimizer.go), só que
-// contra 44 slots (11 x 4 rodadas) em vez de 11 — o mesmo argumento vale:
-// matching global evita a heurística de escolher posição por posição
-// isoladamente, que erraria um jogador elegível em mais de uma posição
-// (ex.: CB e CDM) para a posição errada.
+// matchGauntletRound escolhe os 11 titulares de UMA rodada entre as cartas
+// disponíveis, reusando o mesmo fluxo de custo mínimo de OptimizeSquad
+// (flowEdge/minCostAugment, squad_optimizer.go) — matching global evita a
+// heurística de escolher posição por posição isoladamente, que erraria um
+// jogador elegível em mais de uma posição (ex.: CB e CDM) para a posição
+// errada.
 //
-// Diferente de OptimizeSquad, uma carta só entra numa aresta quando
-// GGRatingAt confirma a nota NAQUELA posição — sem isso o jogador ainda
-// poderia "jogar lá" (PlaysAt) mas sem nota conhecida, o que viraria uma
-// aresta de custo zero e um GG Rating de exibição enganoso (CLAUDE.md: "na
-// dúvida, não afirma").
-func matchGauntletStarters(pool []domain.ClubPlayer, formation []domain.SquadSlot) ([]GauntletAssignment, bool) {
-	slots := make([]gauntletSlot, 0, len(formation)*GauntletRounds)
-	for _, s := range formation {
-		for r := 0; r < GauntletRounds; r++ {
-			slots = append(slots, gauntletSlot{Index: s.Index, Position: s.Position})
+// O grafo tem uma camada a mais que o de OptimizeSquad:
+//
+//	src -cap1-> JOGADOR -cap1-> carta -custo -GGRatingAt(slot)-> slot -cap1-> sink
+//
+// O nó de jogador é o que proíbe duas versões do mesmo atleta no mesmo
+// elenco (regra do jogo, e o bug que esta camada existe para matar); o nó de
+// carta continua garantindo uma escalação por carta. Não dá para expressar
+// isso num matching único das 4 rodadas: o custo depende do par
+// (carta, slot), mas a capacidade a limitar é por (jogador, rodada) — que
+// fica ENTRE os dois e apagaria qual carta passou. Por isso a rodada é
+// fixada antes, e o matching roda uma vez por rodada.
+//
+// Uma carta só entra numa aresta quando GGRatingAt confirma a nota NAQUELA
+// posição — sem isso o jogador ainda poderia "jogar lá" (PlaysAt) mas sem
+// nota conhecida, o que viraria uma aresta de custo zero e um GG Rating de
+// exibição enganoso (CLAUDE.md: "na dúvida, não afirma").
+func matchGauntletRound(pool []gauntletCard, formation []domain.SquadSlot) ([]GauntletAssignment, []int, bool) {
+	// Carta sem nota em nenhum slot da formação não pode ser titular; deixá-la
+	// fora do grafo mantém a busca de caminho barata (o elenco real passa de
+	// 800 cartas e só uma fração serve a cada formação).
+	cards := make([]gauntletCard, 0, len(pool))
+	keys := map[string]int{} // PlayerKey -> índice do nó de jogador
+	for _, c := range pool {
+		eligible := false
+		for _, s := range formation {
+			if _, ok := c.p.GGRatingAt(s.Position); ok {
+				eligible = true
+				break
+			}
 		}
+		if !eligible {
+			continue
+		}
+		if _, seen := keys[c.key]; !seen {
+			keys[c.key] = len(keys)
+		}
+		cards = append(cards, c)
+	}
+	if len(cards) < len(formation) || len(keys) < len(formation) {
+		return nil, nil, false
 	}
 
-	n := 2 + len(pool) + len(slots)
+	playerNode := func(i int) int { return 1 + i }
+	cardNode := func(i int) int { return 1 + len(keys) + i }
+	slotNode := func(j int) int { return 1 + len(keys) + len(cards) + j }
+	n := 2 + len(keys) + len(cards) + len(formation)
 	src, sink := 0, n-1
+
 	g := make([][]flowEdge, n)
 	add := func(a, b, cap, cost int) {
 		g[a] = append(g[a], flowEdge{to: b, rev: len(g[b]), cap: cap, cost: cost})
 		g[b] = append(g[b], flowEdge{to: a, rev: len(g[a]) - 1, cap: 0, cost: -cost})
 	}
-	for i, p := range pool {
-		add(src, 1+i, 1, 0)
-		for j, slot := range slots {
-			r, ok := p.GGRatingAt(slot.Position)
+	// Índice, não range sobre o mapa: ordem de aresta muda o desempate do
+	// Bellman-Ford, e um plano do Gauntlet que mudasse a cada execução com o
+	// mesmo elenco seria impossível de conferir.
+	for k := 0; k < len(keys); k++ {
+		add(src, playerNode(k), 1, 0)
+	}
+	for i, c := range cards {
+		add(playerNode(keys[c.key]), cardNode(i), 1, 0)
+		for j, s := range formation {
+			r, ok := c.p.GGRatingAt(s.Position)
 			if !ok {
 				continue
 			}
-			add(1+i, 1+len(pool)+j, 1, -int(math.Round(r*1000)))
+			add(cardNode(i), slotNode(j), 1, -int(math.Round(r*1000)))
 		}
 	}
-	for j := range slots {
-		add(1+len(pool)+j, sink, 1, 0)
+	for j := range formation {
+		add(slotNode(j), sink, 1, 0)
 	}
-	for f := 0; f < len(slots); f++ {
+	for f := 0; f < len(formation); f++ {
 		if !minCostAugment(g, src, sink) {
-			return nil, false
+			return nil, nil, false
 		}
 	}
 
-	out := make([]GauntletAssignment, 0, len(slots))
-	for i, p := range pool {
-		for _, e := range g[1+i] {
-			if e.to >= 1+len(pool) && e.to < sink && e.cap == 0 {
-				j := e.to - (1 + len(pool))
-				rating, _ := p.GGRatingAt(slots[j].Position)
+	out := make([]GauntletAssignment, 0, len(formation))
+	picked := make([]int, 0, len(formation))
+	for i, c := range cards {
+		for _, e := range g[cardNode(i)] {
+			if e.to >= slotNode(0) && e.to < sink && e.cap == 0 {
+				s := formation[e.to-slotNode(0)]
+				rating, _ := c.p.GGRatingAt(s.Position)
 				out = append(out, GauntletAssignment{
-					Index: slots[j].Index, Position: slots[j].Position, Player: p, Rating: rating,
+					Index: s.Index, Position: s.Position, Player: c.p, Rating: rating,
 				})
+				picked = append(picked, c.idx)
 			}
 		}
 	}
-	return out, true
-}
-
-// distributeRounds agrupa as 44 escolhas por slot físico (0..10) e ordena
-// cada grupo de 4 pela nota ascendente, dando a rodada 1 à mais fraca e a
-// rodada 4 à mais forte. Como cada posição cresce isoladamente, a soma por
-// rodada também cresce — ordenar É a troca local ótima aqui: rearranjar
-// duas rodadas da mesma posição só pioraria a monotonicidade, nunca
-// melhora, então nenhuma busca de troca adicional é necessária.
-func distributeRounds(assignments []GauntletAssignment) []GauntletSquad {
-	bySlot := map[int][]GauntletAssignment{}
-	var order []int
-	for _, a := range assignments {
-		if _, seen := bySlot[a.Index]; !seen {
-			order = append(order, a.Index)
-		}
-		bySlot[a.Index] = append(bySlot[a.Index], a)
-	}
-	sort.Ints(order)
-
-	rounds := make([]GauntletSquad, GauntletRounds)
-	for i := range rounds {
-		rounds[i].Round = i + 1
-	}
-	for _, slotIndex := range order {
-		group := bySlot[slotIndex]
-		sort.Slice(group, func(i, j int) bool {
-			if group[i].Rating != group[j].Rating {
-				return group[i].Rating < group[j].Rating
-			}
-			return group[i].Player.ID < group[j].Player.ID
-		})
-		for r := 0; r < GauntletRounds && r < len(group); r++ {
-			a := group[r]
-			a.Round = r + 1
-			rounds[r].Starters = append(rounds[r].Starters, a)
-		}
-	}
-	for i := range rounds {
-		sort.Slice(rounds[i].Starters, func(a, b int) bool {
-			return rounds[i].Starters[a].Index < rounds[i].Starters[b].Index
-		})
-		for _, a := range rounds[i].Starters {
-			rounds[i].TotalRating += a.Rating
-		}
-		if n := len(rounds[i].Starters); n > 0 {
-			rounds[i].AverageRating = rounds[i].TotalRating / float64(n)
-		}
-	}
-	return rounds
+	return out, picked, true
 }
 
 // gauntletBench pega, entre as cartas do pool que não viraram titular, as
 // mais fracas primeiro: reserva é só cobertura, não deveria consumir uma
 // carta que sobrou sem função melhor (ver CLAUDE.md, decisão fechada).
-func gauntletBench(pool []domain.ClubPlayer, used map[int64]bool) []domain.ClubPlayer {
-	bench := make([]domain.ClubPlayer, 0, len(pool))
-	for _, p := range pool {
-		if !used[p.ID] {
-			bench = append(bench, p)
+func gauntletBench(pool []gauntletCard, used map[int]bool) []gauntletCard {
+	bench := make([]gauntletCard, 0, len(pool))
+	for _, c := range pool {
+		if !used[c.idx] {
+			bench = append(bench, c)
 		}
 	}
 	sort.Slice(bench, func(i, j int) bool {
-		vi, vj := gauntletValue(bench[i]), gauntletValue(bench[j])
+		vi, vj := gauntletValue(bench[i].p), gauntletValue(bench[j].p)
 		if vi != vj {
 			return vi < vj
 		}
-		return bench[i].ID < bench[j].ID
+		return bench[i].p.ID < bench[j].p.ID
 	})
 	return bench
 }
 
-// assignBench reparte as reservas mais fracas em blocos de 7, na mesma
-// ordem crescente usada para os titulares — sem exigência de força mínima
-// por rodada, já que o banco é só cobertura (ver o comentário de
+// assignBench reparte as reservas mais fracas em blocos de reservasPerRound,
+// na mesma ordem crescente usada para os titulares — sem exigência de força
+// mínima por rodada, já que o banco é só cobertura (ver o comentário de
 // gauntletBench).
-func assignBench(rounds []GauntletSquad, bench []domain.ClubPlayer) {
+//
+// A trava de "um jogador por elenco" vale para o banco também: quem já está
+// naquela rodada, titular ou reserva, é pulado e cai na rodada seguinte.
+// Devolve o número da rodada que não fechou o banco (0 quando todas
+// fecharam).
+func assignBench(rounds []GauntletSquad, bench []gauntletCard, reservasPerRound int) int {
+	used := make(map[int]bool, len(rounds)*reservasPerRound)
 	for i := range rounds {
-		start := i * gauntletBenchPerRound
-		end := start + gauntletBenchPerRound
-		rounds[i].Bench = append([]domain.ClubPlayer(nil), bench[start:end]...)
+		keys := make(map[string]bool, len(rounds[i].Starters)+reservasPerRound)
+		for _, a := range rounds[i].Starters {
+			keys[a.Player.PlayerKey()] = true
+		}
+		for _, c := range bench {
+			if len(rounds[i].Bench) == reservasPerRound {
+				break
+			}
+			if used[c.idx] || keys[c.key] {
+				continue
+			}
+			used[c.idx], keys[c.key] = true, true
+			rounds[i].Bench = append(rounds[i].Bench, c.p)
+		}
+		if len(rounds[i].Bench) < reservasPerRound {
+			return rounds[i].Round
+		}
 	}
+	return 0
 }
 
 // quimicaDaRodada converte os titulares da rodada para o formato que

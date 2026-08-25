@@ -99,6 +99,11 @@ type MarketConf struct {
 	Pages       int `json:"pages"`
 	PerPage     int `json:"per_page"`
 	ExtraBudget int `json:"extra_budget"` // moedas além do saldo, se você pretende vender coisas
+	// Reserve é quanto NUNCA entra em orçamento de compra — moedas guardadas
+	// para SBC, evolução ou objetivo que você já decidiu separar. Alimenta
+	// domain.Club.Capital diretamente; zero (o padrão) preserva o
+	// comportamento anterior a este campo existir.
+	Reserve int `json:"reserve"`
 }
 
 type ReportConf struct {
@@ -139,6 +144,7 @@ type UISettingsMarket struct {
 	Pages       int `json:"pages"`
 	PerPage     int `json:"per_page"`
 	ExtraBudget int `json:"extra_budget"`
+	Reserve     int `json:"reserve"`
 }
 
 type UISettingsReport struct {
@@ -161,7 +167,7 @@ type UISettingsServe struct {
 // Editable devolve apenas os valores que a tela pode mostrar e alterar.
 func (c Config) Editable() UISettings {
 	return UISettings{
-		Market:    UISettingsMarket{MinRating: c.Market.MinRating, MaxRating: c.Market.MaxRating, MaxPrice: c.Market.MaxPrice, Pages: c.Market.Pages, PerPage: c.Market.PerPage, ExtraBudget: c.Market.ExtraBudget},
+		Market:    UISettingsMarket{MinRating: c.Market.MinRating, MaxRating: c.Market.MaxRating, MaxPrice: c.Market.MaxPrice, Pages: c.Market.Pages, PerPage: c.Market.PerPage, ExtraBudget: c.Market.ExtraBudget, Reserve: c.Market.Reserve},
 		Report:    UISettingsReport{MinGain: c.Report.MinGain, TrendWindowHrs: c.Report.TrendWindowHrs, AllowOutOfPos: c.Report.AllowOutOfPos, AllowUnpriced: c.Report.AllowUnpriced},
 		Serve:     UISettingsServe{DailyAt: c.Serve.DailyAt, StaleAfterHours: c.Serve.StaleAfterHours, RetentionDays: c.Serve.RetentionDays, CardsMinRating: c.Serve.CardsMinRating, FastRefreshMinutes: c.Serve.FastRefreshMinutes, MomentumWindowHours: c.Serve.MomentumWindowHours, EvolutionFavorites: c.Serve.EvolutionFavorites},
 		Chemistry: UISettingsChemistry{Weight: c.Chemistry.Weight},
@@ -175,6 +181,7 @@ func (c *Config) ApplyEditable(v UISettings) error {
 	previous := *c
 	c.Market.MinRating, c.Market.MaxRating, c.Market.MaxPrice = v.Market.MinRating, v.Market.MaxRating, v.Market.MaxPrice
 	c.Market.Pages, c.Market.PerPage, c.Market.ExtraBudget = v.Market.Pages, v.Market.PerPage, v.Market.ExtraBudget
+	c.Market.Reserve = v.Market.Reserve
 	c.Report.MinGain, c.Report.TrendWindowHrs = v.Report.MinGain, v.Report.TrendWindowHrs
 	c.Report.AllowOutOfPos, c.Report.AllowUnpriced = v.Report.AllowOutOfPos, v.Report.AllowUnpriced
 	c.Serve.DailyAt, c.Serve.StaleAfterHours, c.Serve.RetentionDays = v.Serve.DailyAt, v.Serve.StaleAfterHours, v.Serve.RetentionDays
@@ -332,8 +339,8 @@ func (c Config) Validate() error {
 	if c.Market.MinRating < 1 || c.Market.MaxRating > 99 || c.Market.MinRating > c.Market.MaxRating {
 		return fmt.Errorf("market.min_rating/max_rating inválidos — use uma faixa entre 1 e 99")
 	}
-	if c.Market.MaxPrice < 0 || c.Market.Pages < 1 || c.Market.PerPage < 1 || c.Market.ExtraBudget < 0 {
-		return fmt.Errorf("limites do mercado inválidos — preço, páginas, cartas por página e orçamento extra não podem ser negativos")
+	if c.Market.MaxPrice < 0 || c.Market.Pages < 1 || c.Market.PerPage < 1 || c.Market.ExtraBudget < 0 || c.Market.Reserve < 0 {
+		return fmt.Errorf("limites do mercado inválidos — preço, páginas, cartas por página, orçamento extra e reserva não podem ser negativos")
 	}
 	if c.Report.MinGain < 0 || c.Report.TrendWindowHrs < 1 {
 		return fmt.Errorf("report.min_gain/trend_window_hours inválidos — use ganho não negativo e uma janela positiva")
@@ -431,6 +438,24 @@ func mergeBloco(raw map[string]any, nome string, bloco any) {
 		atual[k] = v
 	}
 	raw[nome] = atual
+}
+
+// RedactSecrets apaga qualquer ocorrência literal de um segredo conhecido
+// (DSN do Postgres, cookie de sessão do fut.gg) de uma mensagem antes dela
+// chegar ao console ou à API. Existe porque o driver do Postgres, em alguns
+// erros de conexão ou de DSN malformada, ecoa a string de conexão inteira de
+// volta — e esse erro atravessa openStore/daemon.run até virar texto visível
+// (stderr, ou JobStatus.LastError exposto por /api/job). Redigir aqui, no
+// ponto onde a mensagem se torna visível, cobre qualquer origem do eco sem
+// precisar confiar que cada driver nunca vai vazar a DSN.
+func (c Config) RedactSecrets(msg string) string {
+	for _, secret := range []string{c.Postgres.DSN, c.FutGG.SessionCookie} {
+		if secret == "" {
+			continue
+		}
+		msg = strings.ReplaceAll(msg, secret, "[redigido]")
+	}
+	return msg
 }
 
 // DefaultPath é onde o bot procura a configuração: dentro do repo, não no

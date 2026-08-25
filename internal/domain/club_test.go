@@ -38,3 +38,33 @@ func TestStarterSemTitularNaPosicao(t *testing.T) {
 		t.Error("não deveria achar titular em ST")
 	}
 }
+
+func TestNetSellValueAplicaTaxaSemFloat(t *testing.T) {
+	tradeable := ClubPlayer{Player: Player{Price: Price{Coins: 100001}}}
+	if got := tradeable.NetSellValue(); got != 95000 {
+		t.Fatalf("NetSellValue = %d, esperava 95000", got)
+	}
+	locked := ClubPlayer{Player: Player{Price: Price{Coins: 100001}}, Untradeable: true}
+	if got := locked.NetSellValue(); got != 0 {
+		t.Fatalf("carta inegociável vale %d líquido, esperava 0", got)
+	}
+}
+
+func TestCapitalSeparaBrutoLiquidoReservaEComprometido(t *testing.T) {
+	club := Club{
+		Coins: 1000,
+		Players: []ClubPlayer{
+			{Player: Player{Price: Price{Coins: 101}}, InSquad: false},
+			{Player: Player{Price: Price{Coins: 999}}, InSquad: true},
+			{Player: Player{Price: Price{Coins: 500}}, Untradeable: true},
+		},
+	}
+
+	got := club.Capital(200, 300, 50)
+	if got.Cash != 1000 || got.ExtraBudget != 200 || got.GrossRaisable != 101 || got.NetRaisable != 95 {
+		t.Fatalf("capital bruto/líquido incorreto: %+v", got)
+	}
+	if got.Available != 945 { // 1000 + 200 + 95 - 300 - 50
+		t.Fatalf("disponível incorreto: %d", got.Available)
+	}
+}

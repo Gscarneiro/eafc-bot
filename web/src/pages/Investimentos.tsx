@@ -14,8 +14,8 @@ import "./Investimentos.css";
 
 export type CapitalSection = "investimentos" | "vendas" | "sbcs";
 
-const RECOMMENDATION_LABEL: Record<SellRecommendation, string> = { vender: "vender", segurar_potencial: "segurar: potencial", promover: "promover", nao_vendavel: "não vendável" };
-const RECOMMENDATION_TONE: Record<SellRecommendation, ChipTone> = { vender: "cost", segurar_potencial: "gain", promover: "gain", nao_vendavel: "flat" };
+const RECOMMENDATION_LABEL: Record<SellRecommendation, string> = { vender: "vender", segurar_potencial: "segurar: potencial", aguardar_verificacao: "aguardar verificação", promover: "promover", nao_vendavel: "não vendável" };
+const RECOMMENDATION_TONE: Record<SellRecommendation, ChipTone> = { vender: "cost", segurar_potencial: "gain", aguardar_verificacao: "alert", promover: "gain", nao_vendavel: "flat" };
 const PHASE_LABEL: Record<FodderPhase, string> = { recente: "recente", pico: "pico — não compre", esfriando: "esfriando", estavel: "estável", esvaziar: "esvaziar", expirado: "expirado" };
 const PHASE_TONE: Record<FodderPhase, ChipTone> = { recente: "flat", pico: "alert", esfriando: "gain", estavel: "flat", esvaziar: "alert", expirado: "flat" };
 

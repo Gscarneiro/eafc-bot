@@ -74,14 +74,32 @@ func cmdDemo(args []string) error {
 
 func demoSnapshot(rng *rand.Rand) *futgg.Snapshot {
 	club := demoClub()
+	market := demoMarket()
+	evolutions := demoEvolutions()
+	sbcs := demoSBCs()
+	objectives := demoObjectives()
+	news := demoNews()
 	return &futgg.Snapshot{
 		Club:       club,
-		Market:     demoMarket(),
-		Evolutions: demoEvolutions(),
-		SBCs:       demoSBCs(),
-		Objectives: demoObjectives(),
-		News:       demoNews(),
+		Market:     market,
+		Evolutions: evolutions,
+		SBCs:       sbcs,
+		Objectives: objectives,
+		News:       news,
 		Stats:      futgg.Stats{Requests: 14, CacheHits: 3, Retries: 1, Bytes: 2_400_000},
+		// Capabilities fictícia, coerente com o resto do dado sintético: o
+		// modo demo não passa por Collect() (não há rede), então nada aqui
+		// vem de fato de "futgg" — mas /api/saude precisa de ALGUM contrato
+		// pra exercitar, senão a tela cairia sempre no ramo de snapshot
+		// legado (ver serve -demo no CLAUDE.md).
+		Capabilities: map[string]futgg.Observation{
+			"clube":     {Source: "demo", ObservedAt: time.Now(), Coverage: len(club.Players), Status: futgg.StatusConfirmado},
+			"mercado":   {Source: "demo", ObservedAt: time.Now(), Coverage: len(market), Status: futgg.StatusConfirmado},
+			"evoluções": {Source: "demo", ObservedAt: time.Now(), Coverage: len(evolutions), Status: futgg.StatusConfirmado},
+			"objetivos": {Source: "demo", ObservedAt: time.Now(), Coverage: len(objectives), Status: futgg.StatusConfirmado},
+			"SBCs":      {Source: "demo", ObservedAt: time.Now(), Coverage: len(sbcs), Status: futgg.StatusConfirmado},
+			"notícias":  {Source: "demo", ObservedAt: time.Now(), Coverage: len(news), Status: futgg.StatusConfirmado},
+		},
 	}
 }
 

@@ -17,16 +17,26 @@ import (
 // funciona no primeiro dia sem Postgres, sem Docker, sem nada instalado.
 // Para histórico longo e consulta, use PostgresStore.
 type JSONStore struct {
-	dir string
-	mu  sync.Mutex
+	dir       string
+	retention int
+	mu        sync.Mutex
 }
 
 // NewJSON abre (ou cria) o diretório de dados.
 func NewJSON(dir string) (*JSONStore, error) {
+	return NewJSONWithRetention(dir, snapshotRetention)
+}
+
+// NewJSONWithRetention permite que serve.retention_days controle a poda sem
+// quebrar os chamadores antigos de NewJSON, cujo padrão histórico é 30 dias.
+func NewJSONWithRetention(dir string, retention int) (*JSONStore, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("criando diretório de dados: %w", err)
 	}
-	return &JSONStore{dir: dir}, nil
+	if retention <= 0 {
+		retention = snapshotRetention
+	}
+	return &JSONStore{dir: dir, retention: retention}, nil
 }
 
 func (s *JSONStore) path(name string) string { return filepath.Join(s.dir, name) }
@@ -301,7 +311,7 @@ func (s *JSONStore) SaveSnapshot(ctx context.Context, snap Snapshot) error {
 	})
 }
 
-// pruneSnapshots mantém só os `snapshotRetention` arquivos mais recentes —
+// pruneSnapshots mantém só os arquivos mais recentes da retenção configurada —
 // por NOME (a data no arquivo já ordena lexicograficamente), não por
 // relógio: assim o teste de poda não depende de injetar hora nenhuma.
 func (s *JSONStore) pruneSnapshots(cycle string) error {
@@ -318,7 +328,7 @@ func (s *JSONStore) pruneSnapshots(cycle string) error {
 		dates = append(dates, e.Name())
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
-	cut := snapshotRetention
+	cut := s.retention
 	if len(dates) < cut {
 		cut = len(dates)
 	}
@@ -347,8 +357,8 @@ func (s *JSONStore) appendHistory(cycle string, sum SnapshotSummary) error {
 		hist = append(hist, sum)
 	}
 	sort.Slice(hist, func(i, j int) bool { return hist[i].Date < hist[j].Date })
-	if len(hist) > snapshotRetention {
-		hist = hist[len(hist)-snapshotRetention:]
+	if len(hist) > s.retention {
+		hist = hist[len(hist)-s.retention:]
 	}
 	return s.writeJSON(name, hist)
 }

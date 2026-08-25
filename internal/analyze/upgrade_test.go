@@ -40,6 +40,27 @@ func TestOrcamentoZeroNaoFiltraSugestao(t *testing.T) {
 	}
 }
 
+func TestUpgradeUsaRecoupLiquidoComTaxaDeCincoPorcento(t *testing.T) {
+	titular := mk(84, domain.CB, 80, 40, 66, 70, 84, 82)
+	titular.ID = 1
+	titular.Price = domain.Price{Coins: 100_001}
+	club := clubComUmTitular(titular)
+
+	candidata := mk(90, domain.CB, 90, 50, 75, 80, 90, 90)
+	candidata.ID = 2
+	candidata.Price = domain.Price{Coins: 100_001}
+	got, _ := FindUpgrades(club, []domain.Player{candidata}, DefaultUpgradeOptions(1_000_000))
+	if len(got) != 1 {
+		t.Fatalf("esperava uma troca, vieram %d", len(got))
+	}
+	if got[0].Recoup != 95_000 {
+		t.Fatalf("Recoup = %d, esperava 95000 líquido", got[0].Recoup)
+	}
+	if got[0].NetCost != 5_001 {
+		t.Fatalf("NetCost = %d, esperava 5001", got[0].NetCost)
+	}
+}
+
 // Cada carta do mercado deve cair em EXATAMENTE uma gaveta do funil, mesmo
 // varrendo vários titulares — sem isso a mesma carta seria contada uma vez
 // por slot e a soma nunca bateria Considered.

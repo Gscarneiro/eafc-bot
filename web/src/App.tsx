@@ -32,6 +32,7 @@ const NAV = [
 const ELENCO_NAV = [
   { to: "/time", label: "Meu time", end: true },
   { to: "/time/gauntlet", label: "Gauntlet" },
+  { to: "/time/planos", label: "Planejador" },
 ];
 const AQUISICAO_NAV = [
   { to: "/mercado", label: "Oportunidades", end: true },

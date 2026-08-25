@@ -50,6 +50,7 @@ function PlayerChit({ card }: { card: StarterCard }) {
   const label = `${player.common_name || player.name}, ${card.position}, ${rating ? `GG ${rating.toFixed(1)}` : "GG indisponível"}${chemLabel ? `, ${chemLabel}` : ""}`;
   const content = <>
     {player.image_url && <img className="chit-image" src={player.image_url} alt="" loading="lazy" />}
+    {!player.image_url && <span className="chit-fallback"><strong>{player.common_name || player.name}</strong><small>{card.position}</small></span>}
     {chem && (
       <span className={`chit-chem${chem.fora_de_posicao ? " out-of-position" : ""}`} title={chemLabel} aria-hidden="true">
         {chem.fora_de_posicao ? "!" : chem.pontos}

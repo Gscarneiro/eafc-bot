@@ -12,13 +12,12 @@ import (
 // recomendação do que fazer com ela.
 type SellCandidate struct {
 	Player domain.ClubPlayer `json:"player"`
-	// Recommendation: "vender" | "segurar_potencial" | "promover" | "nao_vendavel".
+	// Recommendation: "vender" | "segurar_potencial" | "aguardar_verificacao" |
+	// "promover" | "nao_vendavel".
 	Recommendation string `json:"recommendation"`
-	// NetSellValue é o líquido de VERDADE: SellValue() já descontando os
-	// 5% de taxa de venda da EA (pesquisa de mercado, 22/08/2026).
-	// Diferente de Upgrade.Recoup em upgrade.go, que usa SellValue() cru
-	// sem desconto de taxa — achado à parte da mesma pesquisa, fora do
-	// escopo deste recurso corrigir hoje (ver CLAUDE.md/plano). Zero
+	// NetSellValue é o líquido de verdade, já descontando os 5% de taxa de
+	// venda da EA. O mesmo método é usado por Upgrade.Recoup e Club.Budget.
+	// Zero
 	// quando Recommendation é "promover" ou "nao_vendavel".
 	NetSellValue int `json:"net_sell_value,omitempty"`
 	// EvoGGGain/EvoCost só vêm preenchidos quando Recommendation é
@@ -46,11 +45,12 @@ func DefaultSellOptions() SellOptions {
 // SellFunnel conta, carta a carta do banco, qual recomendação cada uma
 // recebeu — mesmo padrão de UpgradeFunnel/InvestmentFunnel.
 type SellFunnel struct {
-	Considered       int `json:"considered"` // banco: club.Players menos Squad.Starters
-	NotTradeable     int `json:"not_tradeable"`
-	Promotable       int `json:"promotable"`
-	HeldForPotential int `json:"held_for_potential"`
-	Suggested        int `json:"suggested"` // "vender"
+	Considered          int `json:"considered"` // banco: club.Players menos Squad.Starters
+	NotTradeable        int `json:"not_tradeable"`
+	Promotable          int `json:"promotable"`
+	HeldForPotential    int `json:"held_for_potential"`
+	WaitingVerification int `json:"waiting_verification"`
+	Suggested           int `json:"suggested"` // "vender"
 
 	MinEvoGGGain float64 `json:"min_evo_gg_gain"`
 }
@@ -79,9 +79,11 @@ func FindSellCandidates(club domain.Club, cardReports []cards.CardReport, swaps 
 		promotable[s.Candidate.ID] = true
 	}
 	bestByID := make(map[int64]*cards.EvoPotential, len(cardReports))
+	evoStatusByID := make(map[int64]cards.EvolutionStatus, len(cardReports))
 	analyzed := make(map[int64]bool, len(cardReports))
 	for _, r := range cardReports {
 		bestByID[r.Player.ID] = r.Best
+		evoStatusByID[r.Player.ID] = r.EvolutionStatus
 		analyzed[r.Player.ID] = true
 	}
 
@@ -112,7 +114,15 @@ func FindSellCandidates(club domain.Club, cardReports []cards.CardReport, swaps 
 			continue
 		}
 
-		net := int(float64(p.SellValue()) * 0.95)
+		net := p.NetSellValue()
+		if status := evoStatusByID[p.ID]; status == cards.EvolutionFetchError || status == cards.EvolutionNotChecked {
+			funnel.WaitingVerification++
+			out = append(out, SellCandidate{
+				Player: p, Recommendation: "aguardar_verificacao",
+				Rationale: []string{"a evolução não foi verificada; aguarde uma coleta bem-sucedida antes de vender"},
+			})
+			continue
+		}
 
 		if best := bestByID[p.ID]; best != nil && best.GGRatingGain >= opt.MinEvoGGGain {
 			funnel.HeldForPotential++

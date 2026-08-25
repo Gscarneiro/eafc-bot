@@ -19,7 +19,8 @@ func clubComBancoEUmTitular(titularID int64, banco ...domain.ClubPlayer) domain.
 	}
 }
 
-// Untradeable nunca pode virar sugestão de venda — SellValue() já
+// Untradeable nunca pode virar sugestão de venda — SellValue()/NetSellValue()
+// já
 // devolve 0 pra essas, e recomendar a venda do que não pode ser vendido
 // é pior que não dizer nada (pesquisa de mercado).
 func TestNuncaSugereVenderCartaUntradeable(t *testing.T) {
@@ -120,6 +121,24 @@ func TestVendeSemAnaliseQuandoNaoHaCardReport(t *testing.T) {
 	}
 }
 
+func TestNaoVendeQuandoVerificacaoDeEvolucaoFalha(t *testing.T) {
+	banco := domain.ClubPlayer{Player: domain.Player{ID: 2, Rating: 90, Price: domain.Price{Coins: 50000}}}
+	club := clubComBancoEUmTitular(1, banco)
+	reports := []cards.CardReport{{
+		Player:          banco,
+		EvolutionStatus: cards.EvolutionFetchError,
+		EvolutionError:  "falha simulada",
+	}}
+
+	got, funnel := FindSellCandidates(club, reports, nil, DefaultSellOptions())
+	if len(got) != 1 || got[0].Recommendation != "aguardar_verificacao" {
+		t.Fatalf("falha de verificação deveria bloquear venda: %+v", got)
+	}
+	if funnel.WaitingVerification != 1 || got[0].NetSellValue != 0 {
+		t.Fatalf("funnel/capital incorretos: funnel=%+v candidato=%+v", funnel, got[0])
+	}
+}
+
 // O titular nunca aparece na lista — FindSellCandidates é só sobre o
 // banco.
 func TestApenasBancoEntraNaAnalise(t *testing.T) {
@@ -130,8 +149,8 @@ func TestApenasBancoEntraNaAnalise(t *testing.T) {
 	}
 }
 
-// NetSellValue desconta a taxa de venda de 5% da EA — SellValue() sozinho
-// (usado por Upgrade.Recoup) não faz isso; esta função faz.
+// NetSellValue desconta a taxa de venda de 5% da EA — a mesma conta usada
+// pelo orçamento e por Upgrade.Recoup.
 func TestNetSellValueDescontaTaxaDeVendaDe5Porcento(t *testing.T) {
 	banco := domain.ClubPlayer{Player: domain.Player{ID: 2, Rating: 84, Price: domain.Price{Coins: 100000}}}
 	club := clubComBancoEUmTitular(1, banco)

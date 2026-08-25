@@ -3,8 +3,10 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
+	"github.com/gscarneiro/eafc-bot/internal/futgg"
 	"github.com/gscarneiro/eafc-bot/internal/store"
 )
 
@@ -130,6 +133,42 @@ func TestHandleConfigEditaSomenteOrigemLocal(t *testing.T) {
 	srv.Handler().ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("origem externa: status=%d, esperava 403", w.Code)
+	}
+}
+
+// fixtureSnapshotComGauntletDeSobra monta um clube com 6 cartas elegíveis
+// por posição (66 no total) — o bastante para 3 rodadas do Gauntlet (3 x 18
+// = 54) com folga, e uma escalação titular sincronizada nas 11 posições.
+func fixtureSnapshotComGauntletDeSobra() store.Snapshot {
+	positions := []domain.Position{domain.GK, domain.RB, domain.CB, domain.LB, domain.CDM,
+		domain.CM, domain.CAM, domain.RM, domain.LM, domain.RW, domain.ST}
+	var players []domain.ClubPlayer
+	var starters []domain.SquadSlot
+	id := int64(1)
+	for slotIdx, pos := range positions {
+		for i := 0; i < 6; i++ {
+			rating := 60.0 + float64(i)
+			cp := domain.ClubPlayer{Player: domain.Player{
+				ID: id, Name: fmt.Sprintf("%s-%d", pos, i), CommonName: fmt.Sprintf("%s-%d", pos, i),
+				Rating: int(rating), Position: pos,
+				GGRating: rating, GGRatingPos: pos, BasePlayerEaID: id,
+			}}
+			players = append(players, cp)
+			if i == 0 {
+				starters = append(starters, domain.SquadSlot{Index: slotIdx, Position: pos, PlayerID: id})
+			}
+			id++
+		}
+	}
+	club := domain.Club{
+		GamerTag: "BilingualBee", Cycle: "26", Coins: 10_000,
+		Players: players,
+		Squad:   domain.Squad{Formation: "teste-11", Starters: starters},
+	}
+	return store.Snapshot{
+		GeneratedAt: time.Date(2026, 8, 21, 5, 0, 0, 0, time.UTC),
+		Cycle:       "26",
+		Club:        club,
 	}
 }
 
@@ -412,6 +451,27 @@ func TestHandleEvolucoesPaginaNoServidor(t *testing.T) {
 	}
 }
 
+func TestHandleEvolucoesPriorizaODataQuandoURLTambemTemFiltrosLegados(t *testing.T) {
+	srv, _ := newTestServerWithSnapshot(t, fixtureSnapshotComEvolucaoFutGG())
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/evolucoes?position=CM&$filter=slot%20eq%20%27CM%27", nil)
+	srv.Handler().ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decodificando envelope: %v", err)
+	}
+	if _, ok := raw["value"]; !ok {
+		t.Fatalf("envelope sem value OData: %s", w.Body.String())
+	}
+	if _, ok := raw["@odata.count"]; !ok {
+		t.Fatalf("envelope sem @odata.count: %s", w.Body.String())
+	}
+}
+
 func TestHandleEvolucoesBuscaSemResultadoPreservaFacetas(t *testing.T) {
 	srv, _ := newTestServerWithSnapshot(t, fixtureSnapshotComEvolucaoFutGG())
 	w := httptest.NewRecorder()
@@ -474,6 +534,26 @@ func TestHandleEvolucoesUsaSomentePathDoFutGGQueContemAEvolucao(t *testing.T) {
 	}
 	if len(match.Alternates) != 0 {
 		t.Fatalf("Alternates = %+v, não deveria incluir path de outra evolução", match.Alternates)
+	}
+}
+
+// confirmedEvoViews somava cash+raisable+extraBudget direto (Club.Budget()),
+// sem descontar reserva nenhuma — o selo "disponível" da evolução mentia
+// para quem já tinha configurado market.reserve. Agora o orçamento vem de
+// Capital.Available, que desconta.
+func TestConfirmedEvoViewsDescontaReservaDoOrcamento(t *testing.T) {
+	snap := fixtureSnapshotComEvolucaoFutGG()
+	snap.Club.Coins = 5000
+	snap.Evolutions[0].CoinCost = 5000
+
+	semReserva := confirmedEvoViews(snap, 0, 0, 0)
+	if len(semReserva) != 1 || !semReserva[0].Affordable {
+		t.Fatalf("sem reserva, 5000 em caixa deveria cobrir custo de 5000: %+v", semReserva)
+	}
+
+	comReserva := confirmedEvoViews(snap, 0, 0, 1000)
+	if len(comReserva) != 1 || comReserva[0].Affordable {
+		t.Fatalf("com reserva de 1000, só sobram 4000: esperava Affordable=false: %+v", comReserva)
 	}
 }
 
@@ -570,6 +650,98 @@ func TestHandleJobStatusETrigger(t *testing.T) {
 	}
 }
 
+// guardLocalWrite existe porque POST /api/job e PUT /api/evolucoes/favoritos
+// tinham, cada um, sua própria cobertura parcial (um sem checagem de Origin
+// nenhuma, o outro sem ela) antes de passarem a compartilhar esta função —
+// este teste prova que as duas rotas agora recusam origem externa, não só
+// PUT /api/config (já coberto por TestHandleConfigEditaSomenteOrigemLocal).
+func TestGuardLocalWriteBloqueiaOrigemExternaEmTodasAsRotasDeEscrita(t *testing.T) {
+	st, err := store.NewJSON(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewJSON: %v", err)
+	}
+	srv := &Server{
+		Store: st, Cycle: "26",
+		Trigger: func() {},
+		Status:  func() JobStatus { return JobStatus{} },
+		Config: &ConfigEditor{
+			GetFavorites:    func() []string { return nil },
+			UpdateFavorites: func([]string) error { return nil },
+		},
+	}
+
+	casos := []struct {
+		nome   string
+		method string
+		path   string
+		body   string
+	}{
+		{"job", http.MethodPost, "/api/job", ""},
+		{"favoritos", http.MethodPut, "/api/evolucoes/favoritos", `{"favorites":[]}`},
+		{"planos_elenco", http.MethodPost, "/api/planos/elenco", "{}"},
+	}
+	for _, c := range casos {
+		t.Run(c.nome, func(t *testing.T) {
+			req := httptest.NewRequest(c.method, c.path, strings.NewReader(c.body))
+			req.Host = "127.0.0.1:4173"
+			req.Header.Set("Origin", "http://outro-host:4173")
+			w := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(w, req)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("%s %s com origem externa: status=%d, esperava 403", c.method, c.path, w.Code)
+			}
+		})
+	}
+}
+
+func TestHandleSaude(t *testing.T) {
+	snap := fixtureSnapshot()
+	snap.Errors = []string{"mercado: HTTP 500"}
+	snap.Capabilities = map[string]futgg.Observation{
+		"clube":   {Source: "futgg", Coverage: 2, Status: futgg.StatusConfirmado},
+		"mercado": {Source: "futgg", Status: futgg.StatusErro, Error: "HTTP 500"},
+	}
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/saude", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[SaudeResponse](t, w)
+	if got.LegacySnapshot {
+		t.Error("LegacySnapshot = true, esperava false (snapshot já tem Capabilities)")
+	}
+	if got.Healthy {
+		t.Error("Healthy = true, esperava false (há erro de coleta e uma capability em erro)")
+	}
+	if got.Capabilities["clube"].Status != futgg.StatusConfirmado {
+		t.Errorf("clube = %+v, esperava confirmado", got.Capabilities["clube"])
+	}
+	if got.Capabilities["mercado"].Status != futgg.StatusErro {
+		t.Errorf("mercado = %+v, esperava erro", got.Capabilities["mercado"])
+	}
+}
+
+// Snapshot gravado antes do contrato de Capabilities existir não pode
+// parecer "tudo certo" só porque não tem erro nenhum registrado — o gate da
+// fase 01 é exatamente evitar que procedência desconhecida passe por
+// procedência boa.
+func TestHandleSaudeSnapshotAntigoMarcaLegacy(t *testing.T) {
+	snap := fixtureSnapshot() // sem Capabilities
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/saude", nil))
+	got := decodeJSON[SaudeResponse](t, w)
+	if !got.LegacySnapshot {
+		t.Error("LegacySnapshot = false, esperava true para snapshot sem Capabilities")
+	}
+	if got.Healthy {
+		t.Error("Healthy = true, esperava false para snapshot legado")
+	}
+}
+
 // fixtureSnapshot só tem 2 cartas e 1 slot titular — bem menos que os 72
 // que o Gauntlet exige, então o recompute cai no ramo "escalação não
 // sincronizada" (1 slot, não 11). O que este teste prova é que a API
@@ -649,6 +821,159 @@ func evoPotential(pos domain.Position, finalGG float64, cost int, styles ...doma
 // Só caminhos cujo Final().GGRatingPos bate com a posição do SLOT titular
 // sobrevivem, e duas variações do mesmo PlayStyle ganho colapsam na de
 // melhor nota final.
+// Pedir uma estratégia (ou rodadas/peso de química) diferente força o
+// recompute mesmo com um plano persistido — /api/gauntlet continua sendo a
+// única rota da fase 02, sem esperar POST /api/planos/elenco.
+func TestHandleGauntletQueryStrategyForcaRecompute(t *testing.T) {
+	snap := fixtureSnapshot()
+	snap.GauntletPlan = analyze.GauntletPlan{Status: "ok", Formation: "sentinela-9-9-9"}
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gauntlet?strategy=mais_forte_primeiro", nil))
+	got := decodeJSON[GauntletResponse](t, w)
+	// A fixture só tem 2 cartas — bem abaixo do que qualquer formato do
+	// Gauntlet exige — então o recompute tem que dar "unavailable" em vez de
+	// ecoar o "sentinela-9-9-9" persistido.
+	if got.Formation == "sentinela-9-9-9" || got.Status != "unavailable" {
+		t.Fatalf("esperava recompute (unavailable, sem a formação sentinela), veio %+v", got)
+	}
+}
+
+func TestHandleGauntletQueryRodadasInvalidoDevolve400(t *testing.T) {
+	srv, _ := newTestServer(t)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gauntlet?rodadas=abc", nil))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, esperava 400 (rodadas não numérico)", w.Code)
+	}
+}
+
+// Pedir 3 rodadas via query muda o texto de regras (não cita mais a fonte
+// oficial de 4 partidas) e o plano de fato sai com 3, quando o elenco
+// comporta.
+func TestHandleGauntletQueryRodadasMudaOFormatoEOTexto(t *testing.T) {
+	snap := fixtureSnapshotComGauntletDeSobra()
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gauntlet?rodadas=3", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[GauntletResponse](t, w)
+	if got.Status != "ok" {
+		t.Fatalf("status do plano = %q, motivo = %q", got.Status, got.Reason)
+	}
+	if len(got.Rounds) != 3 {
+		t.Fatalf("rounds = %d, esperava 3", len(got.Rounds))
+	}
+	if strings.Contains(got.Rules, "FUT Deep Dive") {
+		t.Errorf("Rules ainda cita a fonte oficial de 4 partidas para um plano de 3: %q", got.Rules)
+	}
+}
+
+func postSquadPlan(t *testing.T, srv *Server, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/planos/elenco", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	return w
+}
+
+func TestHandleSquadPlanCorpoVazioDevolveCenarios(t *testing.T) {
+	snap := fixtureSnapshotComGauntletDeSobra()
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := postSquadPlan(t, srv, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[SquadPlanResponse](t, w)
+	if got.Status != "ok" {
+		t.Fatalf("status do plano = %q, motivo = %q", got.Status, got.Reason)
+	}
+	if len(got.Scenarios) == 0 {
+		t.Fatal("esperava pelo menos um cenário")
+	}
+	if got.Formation == "" {
+		t.Error("Formation vazia")
+	}
+}
+
+func TestHandleSquadPlanCorpoInvalidoDevolve400(t *testing.T) {
+	snap := fixtureSnapshotComGauntletDeSobra()
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := postSquadPlan(t, srv, "{isso não é json")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, esperava 400 para corpo JSON inválido", w.Code)
+	}
+}
+
+func TestHandleSquadPlanExcluiJogadorDoElenco(t *testing.T) {
+	snap := fixtureSnapshotComGauntletDeSobra()
+	// exclui o titular do GK (id 1) — o próximo GK do pool (id 2) precisa
+	// assumir, e o 1 não pode aparecer em cenário nenhum.
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := postSquadPlan(t, srv, `{"excluded":[1]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[SquadPlanResponse](t, w)
+	if got.Status != "ok" {
+		t.Fatalf("status do plano = %q, motivo = %q", got.Status, got.Reason)
+	}
+	for _, sc := range got.Scenarios {
+		for _, st := range sc.Starters {
+			if st.Player.Player.ID == 1 {
+				t.Fatalf("cenário %q: jogador excluído (id 1) apareceu titular", sc.Label)
+			}
+		}
+	}
+}
+
+func TestHandleSquadPlanLockComClubItemIDPrendeACopia(t *testing.T) {
+	snap := fixtureSnapshotComGauntletDeSobra()
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	// id 1 é o titular padrão do GK — ver fixtureSnapshotComGauntletDeSobra;
+	// não precisa de ClubItemID pra existir no elenco, mas o teste confirma
+	// que o corpo do lock chega até analyze.BuildSquadPlan.
+	w := postSquadPlan(t, srv, `{"locks":[{"player_id":1,"position":"GK"}]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[SquadPlanResponse](t, w)
+	if got.Status != "ok" {
+		t.Fatalf("status do plano = %q, motivo = %q", got.Status, got.Reason)
+	}
+	found := false
+	for _, st := range got.Scenarios[0].Starters {
+		if st.Player.Player.ID == 1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("jogador travado (id 1) não apareceu titular no primeiro cenário")
+	}
+}
+
+func TestHandleSquadPlanReflexteCapitalDoServidor(t *testing.T) {
+	snap := fixtureSnapshotComGauntletDeSobra()
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	srv.EvolutionExtraBudget = 5000
+	srv.MarketReserve = 1000
+
+	w := postSquadPlan(t, srv, "")
+	got := decodeJSON[SquadPlanResponse](t, w)
+	want := snap.Club.Capital(5000, 1000, 0)
+	if got.Capital != want {
+		t.Fatalf("Capital = %+v, esperava %+v", got.Capital, want)
+	}
+}
+
 func TestGauntletPotentialsFiltraPorPosicaoEAgrupaPorPlayStyle(t *testing.T) {
 	anticipatePlus := domain.PlayStyle{Name: "Anticipate", Plus: true}
 	best := evoPotential(domain.CDM, 90.0, 20000, anticipatePlus)

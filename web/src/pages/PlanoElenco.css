@@ -1,0 +1,75 @@
+/* A tela do Planejador reusa primitivas de shared.css (.banner, .chip,
+   .card-list, .list-row) — as trilhas de cenário e o cabeçalho de métricas
+   espelham Gauntlet.css de propósito (mesmo padrão visual de "rodadas" e
+   "cenários", só o rótulo muda). */
+
+.plano-elenco-needs ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.plano-elenco-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 var(--space-4);
+}
+.plano-elenco-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+  padding: 8px 14px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--duration) var(--ease), background-color var(--duration) var(--ease);
+}
+.plano-elenco-tab:hover {
+  border-color: var(--turf);
+}
+.plano-elenco-tab.active {
+  border-color: var(--turf);
+  background: var(--turf-bg);
+  color: var(--turf);
+}
+.plano-elenco-tab-label {
+  font: 600 11px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.plano-elenco-tab-value {
+  font: 700 15px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.plano-elenco-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+.plano-elenco-stats {
+  color: var(--ink-2);
+  font: 12.5px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.plano-elenco-note {
+  color: var(--alert);
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 620px) {
+  .plano-elenco-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .plano-elenco-tab {
+    flex: 0 0 auto;
+  }
+}

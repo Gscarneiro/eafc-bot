@@ -97,45 +97,10 @@ func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 			return plan
 		}
 	}
-	// Grafo bipartido: fonte -> carta -> slot -> destino.
-	n := 2 + len(club.Players) + len(slots)
-	src, sink := 0, n-1
-	g := make([][]flowEdge, n)
-	add := func(a, b, cap, cost int) {
-		g[a] = append(g[a], flowEdge{to: b, rev: len(g[b]), cap: cap, cost: cost})
-		g[b] = append(g[b], flowEdge{to: a, rev: len(g[a]) - 1, cap: 0, cost: -cost})
-	}
-	for i, p := range club.Players {
-		add(src, 1+i, 1, 0)
-		for j, s := range slots {
-			if p.PlaysAt(s.Position) {
-				r, _ := p.GGRatingAt(s.Position)
-				bonus := 0
-				if p.ID == s.PlayerID {
-					// Um centésimo não evita micro-trocas: aqui o bônus equivale
-					// a 0,1 GG, a tolerância mínima da recomendação.
-					bonus = 100
-				}
-				add(1+i, 1+len(club.Players)+j, 1, -int(math.Round(r*1000))-bonus)
-			}
-		}
-	}
-	for j := range slots {
-		add(1+len(club.Players)+j, sink, 1, 0)
-	}
-	for f := 0; f < len(slots); f++ {
-		if !minCostAugment(g, src, sink) {
-			plan.Reason = "não há jogadores elegíveis para todos os slots"
-			return plan
-		}
-	}
-	chosen := make([]domain.ClubPlayer, len(slots))
-	for i := range club.Players {
-		for _, e := range g[1+i] {
-			if e.to >= 1+len(club.Players) && e.to < sink && e.cap == 0 {
-				chosen[e.to-(1+len(club.Players))] = club.Players[i]
-			}
-		}
+	chosen, ok := squadMatch(club.Players, slots)
+	if !ok {
+		plan.Reason = "não há jogadores elegíveis para todos os slots"
+		return plan
 	}
 	plan.Starters = make([]SquadAssignment, 0, len(slots))
 	plan.Alternatives = make([]SquadAlternatives, 0, len(slots))
@@ -158,14 +123,17 @@ func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 	} else {
 		plan.Status = "optimal"
 	}
-	used := map[int64]bool{}
+	// Por JOGADOR, não por carta: sugerir "troque por Mbappé TOTS" quando o
+	// Mbappé ouro já é titular noutro slot seria uma troca ilegal — o jogo não
+	// aceita duas versões do mesmo atleta no mesmo elenco.
+	used := map[string]bool{}
 	for _, a := range plan.Starters {
-		used[a.Player.ID] = true
+		used[a.Player.PlayerKey()] = true
 	}
 	for _, s := range slots {
 		var cs []SquadAssignment
 		for _, p := range club.Players {
-			if used[p.ID] || !p.PlaysAt(s.Position) {
+			if used[p.PlayerKey()] || !p.PlaysAt(s.Position) {
 				continue
 			}
 			if r, ok := p.GGRatingAt(s.Position); ok {
@@ -186,6 +154,76 @@ func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 
 	plan.Quimica = quimicaDaSugestao(opt.ChemistryModel, plan.Starters)
 	return plan
+}
+
+// squadMatch roda o fluxo de custo mínimo de sempre sobre um pool de cartas
+// e uma lista de slots, e devolve a carta escolhida para cada slot (na mesma
+// ordem de `slots`) — ou false quando não dá pra cobrir todos. É o motor de
+// escalação em si, compartilhado por OptimizeSquad (players = club.Players
+// inteiro, slots = club.Squad.Starters) e pelo Squad Planner
+// (squad_planner.go), que pode filtrar o pool por exclusão e usar uma
+// formação diferente — a mesma regra de "não reescrever o matching" que
+// vale para o Gauntlet (ver gauntlet_rules.go).
+//
+// Grafo: fonte -> JOGADOR -> carta -> slot -> destino. O nó de jogador é o
+// que impede a sugestão de escalar duas versões do mesmo atleta (o jogo não
+// aceita duas cartas do mesmo jogador no mesmo elenco); o nó de carta
+// continua garantindo um slot por carta. Ver domain.Player.PlayerKey.
+func squadMatch(players []domain.ClubPlayer, slots []domain.SquadSlot) ([]domain.ClubPlayer, bool) {
+	keys := map[string]int{}
+	for _, p := range players {
+		if _, seen := keys[p.PlayerKey()]; !seen {
+			keys[p.PlayerKey()] = len(keys)
+		}
+	}
+	playerNode := func(i int) int { return 1 + i }
+	cardNode := func(i int) int { return 1 + len(keys) + i }
+	slotNode := func(j int) int { return 1 + len(keys) + len(players) + j }
+	n := 2 + len(keys) + len(players) + len(slots)
+	src, sink := 0, n-1
+	g := make([][]flowEdge, n)
+	add := func(a, b, cap, cost int) {
+		g[a] = append(g[a], flowEdge{to: b, rev: len(g[b]), cap: cap, cost: cost})
+		g[b] = append(g[b], flowEdge{to: a, rev: len(g[a]) - 1, cap: 0, cost: -cost})
+	}
+	// Por índice, não por range no mapa: ordem de aresta muda o desempate do
+	// Bellman-Ford, e uma sugestão que mudasse a cada execução com o mesmo
+	// elenco seria impossível de conferir.
+	for k := 0; k < len(keys); k++ {
+		add(src, playerNode(k), 1, 0)
+	}
+	for i, p := range players {
+		add(playerNode(keys[p.PlayerKey()]), cardNode(i), 1, 0)
+		for j, s := range slots {
+			if p.PlaysAt(s.Position) {
+				r, _ := p.GGRatingAt(s.Position)
+				bonus := 0
+				if p.ID == s.PlayerID {
+					// Um centésimo não evita micro-trocas: aqui o bônus equivale
+					// a 0,1 GG, a tolerância mínima da recomendação.
+					bonus = 100
+				}
+				add(cardNode(i), slotNode(j), 1, -int(math.Round(r*1000))-bonus)
+			}
+		}
+	}
+	for j := range slots {
+		add(slotNode(j), sink, 1, 0)
+	}
+	for f := 0; f < len(slots); f++ {
+		if !minCostAugment(g, src, sink) {
+			return nil, false
+		}
+	}
+	chosen := make([]domain.ClubPlayer, len(slots))
+	for i := range players {
+		for _, e := range g[cardNode(i)] {
+			if e.to >= slotNode(0) && e.to < sink && e.cap == 0 {
+				chosen[e.to-slotNode(0)] = players[i]
+			}
+		}
+	}
+	return chosen, true
 }
 
 type flowEdge struct{ to, rev, cap, cost int }

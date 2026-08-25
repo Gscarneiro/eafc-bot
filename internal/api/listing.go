@@ -124,7 +124,11 @@ func (s *Server) handleEvolucoes(w http.ResponseWriter, r *http.Request) {
 	// A compatibilidade é deliberadamente estreita: só é ativada quando um
 	// cliente antigo ainda manda os parâmetros legados. Uma URL nova, mesmo
 	// sem filtro, recebe exclusivamente a coleção OData.
-	if hasLegacyEvolutionQuery(r) {
+	// A tela atual ainda mantém os nomes legados na URL para preservar links
+	// salvos, mas manda também o contrato OData. O envelope OData tem
+	// precedência quando qualquer parâmetro com "$" está presente; só uma
+	// URL exclusivamente legada cai no adaptador antigo.
+	if hasLegacyEvolutionQuery(r) && !hasODataEvolutionQuery(r) {
 		s.handleEvolucoesLegacy(w, r)
 		return
 	}
@@ -132,7 +136,7 @@ func (s *Server) handleEvolucoes(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	views := confirmedEvoViews(snap, s.EvolutionMinRating, s.EvolutionExtraBudget)
+	views := confirmedEvoViews(snap, s.EvolutionMinRating, s.EvolutionExtraBudget, s.MarketReserve)
 	page, ok := serveList(w, r, evolucoesSchema(), views)
 	if !ok {
 		return
@@ -152,6 +156,16 @@ func hasLegacyEvolutionQuery(r *http.Request) bool {
 	q := r.URL.Query()
 	for _, key := range []string{"page", "page_size", "position", "impact", "category", "q", "status", "expiring", "sort"} {
 		if q.Get(key) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasODataEvolutionQuery(r *http.Request) bool {
+	q := r.URL.Query()
+	for _, key := range []string{"$filter", "$search", "$orderby", "$top", "$skip", "$count"} {
+		if _, ok := q[key]; ok {
 			return true
 		}
 	}

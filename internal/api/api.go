@@ -20,6 +20,7 @@ import (
 	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
+	"github.com/gscarneiro/eafc-bot/internal/futgg"
 	"github.com/gscarneiro/eafc-bot/internal/report"
 	"github.com/gscarneiro/eafc-bot/internal/store"
 )
@@ -62,6 +63,10 @@ type Server struct {
 	// disponibilidade usar o mesmo orçamento do job, sem reaproveitar a
 	// estimativa de analyze.EvoMatch.
 	EvolutionExtraBudget int
+	// MarketReserve espelha market.reserve — moedas que nunca entram no
+	// orçamento de compra recalculado por request (evoluções confirmadas,
+	// status). O mesmo valor que cmd/eafcbot usa para o snapshot gravado.
+	MarketReserve int
 	// ChemistryModel espelha chemistry.model. Zero-valor (Nome=="") cai no
 	// modelo padrão via resolveChemistryModel — mantém compatibilidade com
 	// servidores de teste que não configuram isto.
@@ -106,6 +111,7 @@ type ConfigResponse struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.handleStatus)
+	mux.HandleFunc("GET /api/saude", s.handleSaude)
 	mux.HandleFunc("GET /api/time", s.handleTime)
 	mux.HandleFunc("GET /api/time/{slug}", s.handleTimeSlug)
 	mux.HandleFunc("GET /api/gauntlet", s.handleGauntlet)
@@ -124,14 +130,42 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/hoje/movimentacao", s.handleHojeMovimentacao)
 	mux.HandleFunc("GET /api/historico", s.handleHistorico)
 	mux.HandleFunc("GET /api/job", s.handleJobStatus)
-	mux.HandleFunc("POST /api/job", s.handleJobTrigger)
+	mux.HandleFunc("POST /api/job", s.guardLocalWrite(s.handleJobTrigger))
+	mux.HandleFunc("POST /api/planos/elenco", s.guardLocalWrite(s.handleSquadPlan))
 	if s.Config != nil {
 		mux.HandleFunc("GET /api/config", s.handleConfig)
-		mux.HandleFunc("PUT /api/config", s.handleConfigUpdate)
+		mux.HandleFunc("PUT /api/config", s.guardLocalWrite(s.handleConfigUpdate))
 		mux.HandleFunc("GET /api/evolucoes/favoritos", s.handleFavorites)
-		mux.HandleFunc("PUT /api/evolucoes/favoritos", s.handleFavoritesUpdate)
+		mux.HandleFunc("PUT /api/evolucoes/favoritos", s.guardLocalWrite(s.handleFavoritesUpdate))
 	}
 	return mux
+}
+
+// maxLocalWriteBody é o teto de corpo para toda escrita local — folgado o
+// bastante para a lista de favoritos ou o bloco de configuração, pequeno o
+// bastante para não deixar um corpo absurdo consumir memória à toa.
+const maxLocalWriteBody = 1 << 20
+
+// guardLocalWrite centraliza a defesa das rotas de escrita (POST/PUT) desta
+// API local: checagem de Origin (a UI sem autenticação é intencionalmente
+// local — isto evita que uma página de outra origem dispare uma escrita
+// silenciosa; o deploy ainda deve publicar a porta só em loopback, como no
+// docker-compose) e o teto de corpo, num lugar só — para uma rota de escrita
+// nova não esquecer de aplicar os dois, o que já aconteceu aqui (POST
+// /api/job e PUT /api/evolucoes/favoritos tinham cada um sua própria
+// cobertura parcial antes desta função existir).
+func (s *Server) guardLocalWrite(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			parsed, err := url.Parse(origin)
+			if err != nil || parsed.Host == "" || parsed.Host != r.Host {
+				http.Error(w, "origem não autorizada", http.StatusForbidden)
+				return
+			}
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxLocalWriteBody)
+		next(w, r)
+	}
 }
 
 type FavoritesResponse struct {
@@ -152,7 +186,7 @@ func (s *Server) handleFavoritesUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in FavoritesResponse
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, fmt.Sprintf("lendo favoritos: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -180,23 +214,8 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "configuração editável indisponível", http.StatusNotImplemented)
 		return
 	}
-	// A UI sem autenticação é intencionalmente local. A checagem evita que uma
-	// página de outra origem faça POST silencioso contra o bot; o deploy ainda
-	// deve publicar a porta somente em loopback, como no docker-compose.
-	if origin := r.Header.Get("Origin"); origin != "" {
-		parsed, err := url.Parse(origin)
-		if err != nil || parsed.Host == "" || parsed.Host != r.Host {
-			http.Error(w, "origem não autorizada", http.StatusForbidden)
-			return
-		}
-	}
-	if r.ContentLength > 1<<20 {
-		http.Error(w, "configuração grande demais", http.StatusRequestEntityTooLarge)
-		return
-	}
 	var in config.UISettings
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	if err := dec.Decode(&in); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, fmt.Sprintf("lendo configuração: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -282,6 +301,7 @@ type StatusResponse struct {
 	SquadScore      float64         `json:"squad_score"`
 	Coins           int             `json:"coins"`
 	Raisable        int             `json:"raisable"`
+	Capital         domain.Capital  `json:"capital"`
 	WeakestSlot     domain.Position `json:"weakest_slot"`
 	WeakestName     string          `json:"weakest_name"`
 	WeakestGGRating float64         `json:"weakest_gg_rating"`
@@ -303,7 +323,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, raisable := snap.Club.Budget()
+	capital := snap.Capital
+	if capital == (domain.Capital{}) {
+		// Snapshots anteriores ao contrato de capital continuam legíveis.
+		capital = snap.Club.Capital(s.EvolutionExtraBudget, s.MarketReserve, 0)
+	}
 	avg, weakSlot, weakName, weakGG := report.SquadSummary(snap.Club)
 	sbcs, objs := report.RankChallenges(snap.SBCs, snap.Objectives)
 
@@ -317,7 +341,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Cycle:           snap.Cycle,
 		SquadScore:      avg,
 		Coins:           snap.Club.Coins,
-		Raisable:        raisable,
+		Raisable:        capital.NetRaisable,
+		Capital:         capital,
 		WeakestSlot:     weakSlot,
 		WeakestName:     weakName,
 		WeakestGGRating: weakGG,
@@ -329,6 +354,49 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Objectives:      objs,
 		Errors:          snap.Errors,
 		History:         hist,
+	})
+}
+
+// SaudeResponse expõe a procedência de cada capability desta coleta — fonte,
+// horário, cobertura, avisos, erro e estado (ver futgg.Observation). É o que
+// fecha o gate da fase 01: erro e incompletude não podem ficar escondidos
+// dentro de um snapshot que "parece bom" só porque as outras telas leem os
+// campos que já tinham dado certo.
+type SaudeResponse struct {
+	GeneratedAt  time.Time                    `json:"generated_at"`
+	Cycle        string                       `json:"cycle"`
+	Capabilities map[string]futgg.Observation `json:"capabilities"`
+	// LegacySnapshot é true quando o snapshot foi gravado antes deste
+	// contrato existir — Capabilities vem vazio nesse caso porque a coleta
+	// não gravou o metadado, não porque ela foi perfeita.
+	LegacySnapshot bool     `json:"legacy_snapshot"`
+	Errors         []string `json:"errors"`
+	// Healthy resume num booleano se dá para confiar no snapshot sem olhar
+	// capability por capability: falso havendo erro de coleta, qualquer
+	// capability fora de StatusConfirmado, ou snapshot anterior a este
+	// contrato (procedência desconhecida não é o mesmo que procedência boa).
+	Healthy bool `json:"healthy"`
+}
+
+func (s *Server) handleSaude(w http.ResponseWriter, r *http.Request) {
+	snap, ok := s.load(w, r)
+	if !ok {
+		return
+	}
+	legacy := snap.Capabilities == nil
+	healthy := !legacy && len(snap.Errors) == 0
+	for _, obs := range snap.Capabilities {
+		if obs.Status != futgg.StatusConfirmado {
+			healthy = false
+		}
+	}
+	writeJSON(w, SaudeResponse{
+		GeneratedAt:    snap.GeneratedAt,
+		Cycle:          snap.Cycle,
+		Capabilities:   snap.Capabilities,
+		LegacySnapshot: legacy,
+		Errors:         snap.Errors,
+		Healthy:        healthy,
 	})
 }
 
@@ -636,14 +704,30 @@ func (s *Server) handleTimeSlug(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-// gauntletRulesText explica a regra oficial que motiva a tela: elenco
-// inteiramente diferente, banco incluso, a cada uma das 4 rodadas (ver EA FC
-// 26 FUT Deep Dive, pitch notes). Texto fixo, não é dado do fut.gg — por
-// isso mora aqui, no envelope da API, e não em internal/analyze junto do
-// plano calculado.
-const gauntletRulesText = "O Gauntlet exige um elenco de 18 jogadores (11 titulares + 7 reservas) " +
-	"inteiramente diferente a cada uma das 4 partidas — nenhuma carta pode repetir, nem no banco. " +
-	"Ver EA FC 26 FUT Deep Dive: https://www.ea.com/games/ea-sports-fc/fc-26/news/pitch-notes-fc26-fut-deep-dive"
+// gauntletRulesText explica a regra que motiva a tela: elenco inteiramente
+// diferente, banco incluso, a cada rodada — para o formato padrão de 4 isso
+// é a regra oficial documentada (ver EA FC 26 FUT Deep Dive, pitch notes);
+// para 3 ou 5 (analyze.GauntletRules.Rodadas, pedido via query string) o
+// texto se ajusta ao formato pedido, sem fingir que a EA documentou esse
+// número específico. Não é dado do fut.gg — por isso mora aqui, no envelope
+// da API, e não em internal/analyze junto do plano calculado.
+func gauntletRulesText(rules analyze.GauntletRules) string {
+	total := rules.Titulares + rules.Reservas
+	msg := fmt.Sprintf(
+		"O Gauntlet exige um elenco de %d jogadores (%d titulares + %d reservas) "+
+			"inteiramente diferente a cada uma das %d partidas — nenhuma carta pode repetir, nem no banco.",
+		total, rules.Titulares, rules.Reservas, rules.Rodadas)
+	if rules.Rodadas == GauntletRoundsPadrao {
+		msg += " Ver EA FC 26 FUT Deep Dive: https://www.ea.com/games/ea-sports-fc/fc-26/news/pitch-notes-fc26-fut-deep-dive"
+	}
+	return msg
+}
+
+// GauntletRoundsPadrao é o formato oficial documentado (EA FC 26 FUT Deep
+// Dive) — só ele carrega a referência à fonte no texto de regras; 3 ou 5
+// rodadas são formatos ALTERNATIVOS que este bot aceita calcular, não algo
+// que a EA publicou.
+const GauntletRoundsPadrao = analyze.GauntletRounds
 
 // GauntletStarterView é um titular do Gauntlet pronto pra tela: a carta, o
 // slot físico que ocupa naquela rodada, e os potenciais de evolução
@@ -683,6 +767,47 @@ type GauntletResponse struct {
 	Rounds      []GauntletRoundView `json:"rounds"`
 }
 
+// hasGauntletPlanQuery diz se a requisição pede um plano DIFERENTE do
+// persistido no snapshot — estratégia, número de rodadas ou peso de
+// química. Sem nenhum desses, a rota devolve o plano já calculado na
+// coleta, sem tocar rede nem reprocessar o matching à toa.
+func hasGauntletPlanQuery(r *http.Request) bool {
+	q := r.URL.Query()
+	for _, key := range []string{"strategy", "rodadas", "chemistry_weight"} {
+		if q.Get(key) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// applyGauntletQuery sobrepõe req com os parâmetros pedidos — só um erro de
+// PARSING (número inválido) vira 400; uma estratégia desconhecida ou um
+// número de rodadas fora da faixa é decisão de domínio, e cai em
+// plan.Status/Reason como qualquer outra inviabilidade (mesmo padrão do
+// resto da API: erro de sintaxe é HTTP, erro de negócio é corpo de 200).
+func applyGauntletQuery(req *analyze.GauntletRequest, r *http.Request) error {
+	q := r.URL.Query()
+	if v := q.Get("strategy"); v != "" {
+		req.Strategy = analyze.GauntletStrategy(v)
+	}
+	if v := q.Get("rodadas"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("rodadas inválido: %v", err)
+		}
+		req.Rules.Rodadas = n
+	}
+	if v := q.Get("chemistry_weight"); v != "" {
+		peso, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return fmt.Errorf("chemistry_weight inválido: %v", err)
+		}
+		req.ChemistryWeight = peso
+	}
+	return nil
+}
+
 func (s *Server) handleGauntlet(w http.ResponseWriter, r *http.Request) {
 	snap, ok := s.load(w, r)
 	if !ok {
@@ -691,10 +816,22 @@ func (s *Server) handleGauntlet(w http.ResponseWriter, r *http.Request) {
 
 	// Snapshot antigo gravado antes deste campo existir: Status vazio é o
 	// sentinela (ver o comentário de store.Snapshot.GauntletPlan) — recompõe
-	// direto do clube já carregado, sem tocar rede.
+	// direto do clube já carregado, sem tocar rede. O mesmo recompute vale
+	// quando a requisição pede estratégia/rodadas/peso de química diferentes
+	// do que a coleta calculou (ver hasGauntletPlanQuery) — /api/gauntlet
+	// continua sendo a única rota, sem esperar POST /api/planos/elenco (fase
+	// 02 do plano do copiloto, ainda não construída).
 	plan := snap.GauntletPlan
-	if plan.Status == "" {
-		plan = analyze.BuildGauntletPlanWithOptions(snap.Club, analyze.GauntletOptions{ChemistryModel: s.resolveChemistryModel()})
+	rules := analyze.DefaultGauntletRules()
+	if plan.Status == "" || hasGauntletPlanQuery(r) {
+		req := analyze.DefaultGauntletRequest()
+		req.ChemistryModel = s.resolveChemistryModel()
+		if err := applyGauntletQuery(&req, r); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		rules = req.Rules
+		plan = analyze.BuildGauntletPlanFromRequest(snap.Club, req)
 	}
 
 	slugByID := make(map[int64]string, len(snap.Cards))
@@ -709,7 +846,7 @@ func (s *Server) handleGauntlet(w http.ResponseWriter, r *http.Request) {
 		Formation:   plan.Formation,
 		Status:      plan.Status,
 		Reason:      plan.Reason,
-		Rules:       gauntletRulesText,
+		Rules:       gauntletRulesText(rules),
 		Strategy:    plan.Strategy,
 		Warnings:    plan.Warnings,
 		Objectives:  gauntletObjectives(snap.Objectives),
@@ -906,9 +1043,8 @@ func evoMatchView(report cards.CardReport, evolution domain.Evolution, club doma
 	return view, true
 }
 
-func confirmedEvoViews(snap store.Snapshot, minRating, extraBudget int) []EvoMatchView {
-	cash, raisable := snap.Club.Budget()
-	budget := cash + raisable + extraBudget
+func confirmedEvoViews(snap store.Snapshot, minRating, extraBudget, reserve int) []EvoMatchView {
+	budget := snap.Club.Capital(extraBudget, reserve, 0).Available
 	views := make([]EvoMatchView, 0)
 	for _, report := range snap.Cards {
 		if (minRating > 0 && report.Player.Rating < minRating) || !report.Player.Evolvable() {
@@ -1132,7 +1268,7 @@ func (s *Server) handleEvolucoesLegacy(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	filterPositions := map[string]bool{}
 	filterCategories := map[string]bool{}
-	confirmed := confirmedEvoViews(snap, s.EvolutionMinRating, s.EvolutionExtraBudget)
+	confirmed := confirmedEvoViews(snap, s.EvolutionMinRating, s.EvolutionExtraBudget, s.MarketReserve)
 	for _, view := range confirmed {
 		filterPositions[string(view.Slot)] = true
 		filterCategories[view.Acquisition] = true

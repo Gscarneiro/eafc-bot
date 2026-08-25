@@ -38,6 +38,18 @@ type EvoPotential struct {
 	TrainingTime     string               `json:"training_time"`
 }
 
+// EvolutionStatus explica por que uma carta tem ou não um path disponível.
+// Best nil sozinho não distingue teto, inelegibilidade e falha de coleta.
+type EvolutionStatus string
+
+const (
+	EvolutionConfirmed   EvolutionStatus = "confirmed"
+	EvolutionNoPath      EvolutionStatus = "no_path"
+	EvolutionNotEligible EvolutionStatus = "not_eligible"
+	EvolutionFetchError  EvolutionStatus = "fetch_error"
+	EvolutionNotChecked  EvolutionStatus = "not_checked"
+)
+
 // CardReport é uma carta pronta pro relatório.
 type CardReport struct {
 	// Slug identifica a carta na URL (/cards/:slug) e é ÚNICO dentro de um
@@ -52,8 +64,10 @@ type CardReport struct {
 	// Best é nil quando a carta não tem nenhum caminho de evolução válido
 	// hoje — ela já está no teto que as evoluções ativas alcançam. Isso é
 	// uma resposta, não uma falha: aparece no relatório assim mesmo.
-	Best       *EvoPotential  `json:"best"`
-	Alternates []EvoPotential `json:"alternates"`
+	Best            *EvoPotential   `json:"best"`
+	Alternates      []EvoPotential  `json:"alternates"`
+	EvolutionStatus EvolutionStatus `json:"evolution_status"`
+	EvolutionError  string          `json:"evolution_error,omitempty"`
 }
 
 // BuildReports monta um CardReport para cada jogador do clube com rating
@@ -76,20 +90,33 @@ func BuildReports(ctx context.Context, client *futgg.Client, club domain.Club, m
 			continue
 		}
 		r := CardReport{
-			Player:     cp,
-			ByPosition: positionRoles(cp.Player, roles),
+			Player:          cp,
+			ByPosition:      positionRoles(cp.Player, roles),
+			EvolutionStatus: EvolutionNotChecked,
 		}
 
 		if cp.Player.BasePlayerEaID > 0 {
+			if !cp.Evolvable() {
+				r.EvolutionStatus = EvolutionNotEligible
+				out = append(out, r)
+				continue
+			}
 			paths, err := client.EvolutionPaths(ctx, cp.Player.BasePlayerEaID, cp.Player.ID)
 			if err != nil {
-				// Uma carta sem caminho não pode derrubar as outras 93 —
-				// mesmo princípio do Collect(): fonte acessória falha,
-				// o resto do relatório continua.
-				paths = nil
+				// Uma fonte acessória falha sem derrubar as outras cartas, mas
+				// o relatório precisa conservar o erro para não tratar isso como
+				// "sem caminho" e sugerir uma venda.
+				r.EvolutionStatus = EvolutionFetchError
+				r.EvolutionError = err.Error()
+			} else {
+				best, alts := bestPaths(paths, cp.Player)
+				r.Best, r.Alternates = best, alts
+				if best != nil {
+					r.EvolutionStatus = EvolutionConfirmed
+				} else {
+					r.EvolutionStatus = EvolutionNoPath
+				}
 			}
-			best, alts := bestPaths(paths, cp.Player)
-			r.Best, r.Alternates = best, alts
 		}
 
 		out = append(out, r)

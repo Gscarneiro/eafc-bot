@@ -1,6 +1,10 @@
 package cards
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gscarneiro/eafc-bot/internal/domain"
@@ -139,6 +143,37 @@ func TestBestPathsSemCaminhosDevolveNil(t *testing.T) {
 	only := []domain.EvolutionPath{path(98, 99.0, 10000, true)}
 	if best, _ := bestPaths(only, domain.Player{GGRating: 99.1}); best != nil {
 		t.Errorf("todos expirados devia dar nil, veio %+v", best)
+	}
+}
+
+func TestBuildReportsPreservaFalhaDePathComoEstado(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "roles") {
+			_, _ = w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`falha simulada`))
+	}))
+	defer srv.Close()
+
+	client := futgg.New(futgg.Config{BaseURL: srv.URL, Cycle: "26", Endpoints: map[string]string{
+		"roles":           "/api/fut/roles/",
+		"evolution_paths": "/api/fut/evolutions/{id}/",
+	}})
+	club := domain.Club{Players: []domain.ClubPlayer{{Player: domain.Player{
+		ID: 7, Name: "Carta", Rating: 90, BasePlayerEaID: 700,
+	}}}}
+	reports, err := BuildReports(context.Background(), client, club, 80, nil)
+	if err != nil {
+		t.Fatalf("BuildReports: %v", err)
+	}
+	if len(reports) != 1 || reports[0].EvolutionStatus != EvolutionFetchError {
+		t.Fatalf("status = %+v, esperava fetch_error", reports)
+	}
+	if reports[0].EvolutionError == "" {
+		t.Fatal("falha de path não foi preservada")
 	}
 }
 

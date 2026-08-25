@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -72,6 +73,43 @@ func TestApplyEditableDescartaConfiguracaoInvalida(t *testing.T) {
 	}
 	if got := cfg.Editable(); got != before {
 		t.Fatalf("configuração mudou apesar do erro: antes=%+v depois=%+v", before, got)
+	}
+}
+
+func TestValidateRecusaReservaNegativa(t *testing.T) {
+	cfg := Default()
+	cfg.Market.Reserve = -1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("esperava erro para market.reserve negativo")
+	}
+}
+
+func TestApplyEditableAtualizaReserva(t *testing.T) {
+	cfg := Default()
+	next := cfg.Editable()
+	next.Market.Reserve = 50_000
+	if err := cfg.ApplyEditable(next); err != nil {
+		t.Fatalf("ApplyEditable: %v", err)
+	}
+	if cfg.Market.Reserve != 50_000 {
+		t.Fatalf("Market.Reserve = %d, esperava 50000", cfg.Market.Reserve)
+	}
+}
+
+// A mensagem que sai pro console/API pode conter a DSN inteira quando o
+// driver do Postgres a ecoa de volta num erro de conexão — RedactSecrets é o
+// ponto único que impede essa string de aparecer em texto visível.
+func TestRedactSecretsApagaDSNECookie(t *testing.T) {
+	cfg := Default()
+	cfg.Postgres.DSN = "postgres://user:supersecreto@host/db"
+	cfg.FutGG.SessionCookie = "session=abc123"
+
+	msg := cfg.RedactSecrets("falha ao conectar em postgres://user:supersecreto@host/db: timeout (cookie session=abc123 rejeitado)")
+	if strings.Contains(msg, "supersecreto") || strings.Contains(msg, "abc123") {
+		t.Fatalf("segredo vazou na mensagem redigida: %q", msg)
+	}
+	if !strings.Contains(msg, "[redigido]") {
+		t.Fatalf("mensagem não foi redigida: %q", msg)
 	}
 }
 

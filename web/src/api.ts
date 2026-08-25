@@ -4,6 +4,7 @@ import type {
   EvolutionFavoritesResponse,
   GauntletResponse,
   JobStatus,
+  SquadPlanResponse,
   StatusResponse,
   TimeResponse,
   UISettings,
@@ -38,6 +39,18 @@ export const fetchCollection = <T,>(path: string, query: ODataQuery = {}) => {
 export const fetchStatus = () => getJSON<StatusResponse>("/api/status");
 export const fetchTime = () => getJSON<TimeResponse>("/api/time");
 export const fetchGauntlet = () => getJSON<GauntletResponse>("/api/gauntlet");
+export async function fetchSquadPlan(): Promise<SquadPlanResponse> {
+  const res = await fetch("/api/planos/elenco", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (!res.ok) {
+    const text = (await res.text()).trim();
+    throw new ApiError(res.status, text || `POST /api/planos/elenco devolveu ${res.status}`);
+  }
+  return res.json();
+}
 export const fetchCard = (slug: string) => getJSON<CardDetailResponse>(`/api/time/${encodeURIComponent(slug)}`);
 export const fetchEvolutionFavorites = () => getJSON<EvolutionFavoritesResponse>("/api/evolucoes/favoritos");
 export async function saveEvolutionFavorites(favorites: string[]): Promise<EvolutionFavoritesResponse> {

@@ -69,3 +69,58 @@ func TestOptimizeSquadPreencheQuimicaDaSugestaoQuandoTudoDisponivel(t *testing.T
 		t.Fatalf("Quimica (sugestão) = %d, esperava 3 (1 titular em posição, modelo padrão)", plan.Quimica.Total)
 	}
 }
+
+// Mesmo defeito que o Gauntlet tinha: duas versões do mesmo jogador (mesmo
+// BasePlayerEaID) preenchendo dois slots do XI sugerido. É escalação ilegal
+// no jogo, então a sugestão precisa escolher UMA e completar o outro slot
+// com outra carta — nem que seja pior.
+func TestOptimizeSquadNaoSugereDuasVersoesDoMesmoJogador(t *testing.T) {
+	versao := func(id int64, gg float64, pos domain.Position) domain.ClubPlayer {
+		p := mk(90, pos, 90, 88, 80, 88, 50, 80)
+		p.GGRating, p.GGRatingPos = gg, pos
+		p.BasePlayerEaID = 777
+		return starterCP(id, p)
+	}
+	outro := func(id int64, gg float64, pos domain.Position) domain.ClubPlayer {
+		p := mk(80, pos, 80, 76, 74, 80, 45, 75)
+		p.GGRating, p.GGRatingPos = gg, pos
+		p.BasePlayerEaID = id
+		return starterCP(id, p)
+	}
+
+	club := domain.Club{
+		Players: []domain.ClubPlayer{
+			versao(1, 95.0, domain.RM), versao(2, 94.0, domain.LM),
+			outro(3, 70.0, domain.RM), outro(4, 70.0, domain.LM),
+		},
+		Squad: domain.Squad{Starters: []domain.SquadSlot{
+			{Index: 0, Position: domain.RM, PlayerID: 3},
+			{Index: 1, Position: domain.LM, PlayerID: 4},
+		}},
+	}
+
+	plan := OptimizeSquad(club)
+	if plan.Status == "unavailable" {
+		t.Fatalf("esperava uma sugestão, veio unavailable: %q", plan.Reason)
+	}
+	bases := map[int64]int{}
+	for _, a := range plan.Starters {
+		bases[a.Player.BasePlayerEaID]++
+	}
+	if bases[777] > 1 {
+		t.Fatalf("o XI sugerido tem %d versões do jogador-base 777 — o jogo não aceita duas cartas do mesmo atleta no mesmo elenco: %+v",
+			bases[777], plan.Starters)
+	}
+
+	// A alternativa também é uma troca proposta: oferecer a versão sobrando
+	// para o outro slot seria propor a mesma escalação ilegal por outro
+	// caminho.
+	for _, alt := range plan.Alternatives {
+		for _, c := range alt.Players {
+			if c.Player.BasePlayerEaID == 777 {
+				t.Fatalf("slot %d oferece a carta %d como alternativa, mas o jogador-base 777 já está no XI sugerido",
+					alt.Index, c.Player.ID)
+			}
+		}
+	}
+}

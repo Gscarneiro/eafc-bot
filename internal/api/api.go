@@ -101,6 +101,12 @@ type ConfigEditor struct {
 	EnvLocked       []string
 	GetFavorites    func() []string
 	UpdateFavorites func([]string) error
+	// GetProgress/UpdateProgress são o progresso de evolução POR CARTA
+	// (slug) — nomes de evolução que o usuário marcou como já concluídos.
+	// Mesma classe de decisão manual que Favorites, chave diferente; ver
+	// docs/planos/copiloto/03-plano-evolucao-e-workbench.md.
+	GetProgress    func(slug string) []string
+	UpdateProgress func(slug string, completed []string) error
 }
 
 type ConfigResponse struct {
@@ -117,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/gauntlet", s.handleGauntlet)
 	mux.HandleFunc("GET /api/mercado", s.handleMercado)
 	mux.HandleFunc("GET /api/evolucoes", s.handleEvolucoes)
+	mux.HandleFunc("GET /api/evolucoes/{slug}/plano", s.handleEvolucoesPlano)
 	mux.HandleFunc("GET /api/investimentos", s.handleInvestimentos)
 	mux.HandleFunc("GET /api/elenco/titulares", s.handleTitulares)
 	mux.HandleFunc("GET /api/elenco/reservas", s.handleReservas)
@@ -137,6 +144,7 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("PUT /api/config", s.guardLocalWrite(s.handleConfigUpdate))
 		mux.HandleFunc("GET /api/evolucoes/favoritos", s.handleFavorites)
 		mux.HandleFunc("PUT /api/evolucoes/favoritos", s.guardLocalWrite(s.handleFavoritesUpdate))
+		mux.HandleFunc("PUT /api/evolucoes/{slug}/progresso", s.guardLocalWrite(s.handleEvolucoesProgressoUpdate))
 	}
 	return mux
 }
@@ -524,9 +532,18 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slugByID := make(map[int64]string, len(snap.Cards))
-	for _, c := range snap.Cards {
-		slugByID[c.Player.ID] = c.Slug
+	entries := cards.BuildCatalog(snap.Club, snap.Cards, snap.RoleCatalog)
+	slugByID := make(map[int64]string, len(entries))
+	if snap.PlayStyleCatalog != nil || snap.RoleCatalog.Plus != nil || snap.RoleCatalog.PlusPlus != nil {
+		for _, e := range entries {
+			if _, ok := slugByID[e.Player.ID]; !ok {
+				slugByID[e.Player.ID] = e.Slug
+			}
+		}
+	} else {
+		for _, c := range snap.Cards {
+			slugByID[c.Player.ID] = c.Slug
+		}
 	}
 
 	quimicaAtual := s.currentChemistry(snap)
@@ -680,7 +697,69 @@ func inferFormation(slots []domain.SquadSlot) string {
 // tagueados direto para o JSON de saída.
 type CardDetailResponse struct {
 	cards.CardReport
-	PriceSeries []store.PricePoint `json:"price_series"`
+	PriceSeries                   []store.PricePoint           `json:"price_series"`
+	GeneratedAt                   time.Time                    `json:"generated_at"`
+	PlayStyleCatalog              []domain.PlayStyleDefinition `json:"play_style_catalog,omitempty"`
+	PriceHistoryStatus            string                       `json:"price_history_status"`
+	RelatedCards                  []RosterCard                 `json:"related_cards,omitempty"`
+	PlayStyleRecommendations      []PlayStyleRecommendation    `json:"play_style_recommendations,omitempty"`
+	PlayStyleRecommendationSource string                       `json:"play_style_recommendation_source"`
+}
+
+type PlayStyleRecommendation struct {
+	Position domain.Position    `json:"position"`
+	Role     string             `json:"role,omitempty"`
+	Styles   []domain.PlayStyle `json:"styles"`
+	Source   string             `json:"source"`
+}
+
+var fallbackPlayStyles = map[domain.Position][]string{
+	domain.GK:  {"Far Reach", "Cross Claimer", "Footwork", "Rush Out"},
+	domain.CB:  {"Anticipate", "Intercept", "Block", "Bruiser"},
+	domain.RB:  {"Quick Step", "Rapid", "Intercept", "Anticipate"},
+	domain.LB:  {"Quick Step", "Rapid", "Intercept", "Anticipate"},
+	domain.CDM: {"Intercept", "Tiki Taka", "Pinged Pass", "Press Proven"},
+	domain.CM:  {"Tiki Taka", "Incisive Pass", "Pinged Pass", "Technical"},
+	domain.CAM: {"Technical", "Incisive Pass", "Tiki Taka", "Finesse Shot"},
+	domain.RM:  {"Rapid", "Quick Step", "Technical", "Whipped Pass"},
+	domain.LM:  {"Rapid", "Quick Step", "Technical", "Whipped Pass"},
+	domain.RW:  {"Rapid", "Quick Step", "Technical", "Finesse Shot"},
+	domain.LW:  {"Rapid", "Quick Step", "Technical", "Finesse Shot"},
+	domain.CF:  {"Technical", "First Touch", "Finesse Shot", "Low Driven Shot"},
+	domain.ST:  {"Finesse Shot", "Rapid", "First Touch", "Low Driven Shot"},
+}
+
+func recommendationFor(cp domain.ClubPlayer, pos domain.Position, roles []cards.PositionRoles, catalog []domain.PlayStyleDefinition) PlayStyleRecommendation {
+	roleName := ""
+	for _, role := range roles {
+		if role.Position == pos {
+			if len(role.PlusPlus) > 0 {
+				roleName = role.PlusPlus[0]
+			} else if len(role.Plus) > 0 {
+				roleName = role.Plus[0]
+			}
+			break
+		}
+	}
+	lookup := make(map[string]domain.PlayStyleDefinition, len(catalog))
+	for _, item := range catalog {
+		lookup[strings.ToLower(item.Name)] = item
+	}
+	present := make(map[string]domain.PlayStyle)
+	for _, ps := range cp.PlayStyles {
+		present[strings.ToLower(ps.Name)] = ps
+	}
+	styles := make([]domain.PlayStyle, 0, 4)
+	for _, name := range fallbackPlayStyles[pos] {
+		label := name
+		if item, ok := lookup[strings.ToLower(name)]; ok {
+			label = item.Name
+		}
+		ps := present[strings.ToLower(label)]
+		ps.Name = label
+		styles = append(styles, ps)
+	}
+	return PlayStyleRecommendation{Position: pos, Role: roleName, Styles: styles, Source: "bot"}
 }
 
 func (s *Server) handleTimeSlug(w http.ResponseWriter, r *http.Request) {
@@ -690,15 +769,59 @@ func (s *Server) handleTimeSlug(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := r.PathValue("slug")
 
-	for _, c := range snap.Cards {
-		if c.Slug != slug {
-			continue
-		}
+	entries := cards.BuildCatalog(snap.Club, snap.Cards, snap.RoleCatalog)
+	if entry, found := cards.FindCatalog(entries, slug); found {
+		c := entry.Report
+		c.Player.Foot = domain.NormalizeFoot(c.Player.Foot)
+		entry.Player.Foot = c.Player.Foot
 		var pts []store.PricePoint
+		status := "sem_historico"
 		if series, err := s.Store.PriceSeries(r.Context(), s.Cycle, []int64{c.Player.ID}, priceSeriesWindow); err == nil {
 			pts = series[c.Player.ID]
+			if len(pts) > 0 {
+				todosExtintos := true
+				for _, pt := range pts {
+					if !pt.Extinct {
+						todosExtintos = false
+						break
+					}
+				}
+				if todosExtintos {
+					status = "sem_oferta"
+				}
+			}
+			if len(pts) == 1 && status != "sem_oferta" {
+				status = "amostra_unica"
+			} else if len(pts) > 1 && status != "sem_oferta" {
+				status = "historico_parcial"
+			}
+		} else {
+			status = "falha_leitura"
 		}
-		writeJSON(w, CardDetailResponse{CardReport: c, PriceSeries: pts})
+		related := make([]RosterCard, 0)
+		for _, other := range entries {
+			if other.Slug != slug && other.Player.PlayerKey() == entry.Player.PlayerKey() && other.Player.PlayerKey() != "card:0" {
+				related = append(related, RosterCard{Player: other.Player, CardSlug: other.Slug})
+			}
+		}
+		positions := []domain.Position{c.Player.Position}
+		for _, alt := range c.Player.AltPositions {
+			seen := false
+			for _, existing := range positions {
+				if existing == alt {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				positions = append(positions, alt)
+			}
+		}
+		recommendations := make([]PlayStyleRecommendation, 0, len(positions))
+		for _, pos := range positions {
+			recommendations = append(recommendations, recommendationFor(c.Player, pos, c.ByPosition, snap.PlayStyleCatalog))
+		}
+		writeJSON(w, CardDetailResponse{CardReport: *c, PriceSeries: pts, GeneratedAt: snap.GeneratedAt, PlayStyleCatalog: snap.PlayStyleCatalog, PriceHistoryStatus: status, RelatedCards: related, PlayStyleRecommendations: recommendations, PlayStyleRecommendationSource: "fallback_bot_oficial_indisponivel"})
 		return
 	}
 	http.NotFound(w, r)

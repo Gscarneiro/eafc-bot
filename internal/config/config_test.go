@@ -141,3 +141,53 @@ func TestSaveEditablePreservaSegredosEBlocosNaoEditaveis(t *testing.T) {
 		t.Fatalf("market não foi atualizado: %s", b)
 	}
 }
+
+func TestSaveEvolutionProgressPreservaOutrasCartasEBlocos(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	original := []byte(`{"gamer_tag":"perfil","market":{"min_rating":80},"serve":{"evolution_progress":{"outra-carta":["Gold Standard"]}}}`)
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	if err := cfg.SaveEvolutionProgress(path, "26-1", []string{"Salto"}); err != nil {
+		t.Fatalf("SaveEvolutionProgress: %v", err)
+	}
+	var got map[string]any
+	b, _ := os.ReadFile(path)
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["gamer_tag"] != "perfil" || got["market"].(map[string]any)["min_rating"] != float64(80) {
+		t.Fatalf("blocos não relacionados foram perdidos: %s", b)
+	}
+	progress := got["serve"].(map[string]any)["evolution_progress"].(map[string]any)
+	if outra, _ := progress["outra-carta"].([]any); len(outra) != 1 || outra[0] != "Gold Standard" {
+		t.Fatalf("progresso de outra carta foi perdido: %s", b)
+	}
+	if nova, _ := progress["26-1"].([]any); len(nova) != 1 || nova[0] != "Salto" {
+		t.Fatalf("progresso novo não foi gravado: %s", b)
+	}
+}
+
+func TestSaveEvolutionProgressListaVaziaRemoveChave(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	original := []byte(`{"serve":{"evolution_progress":{"26-1":["Salto"]}}}`)
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	if err := cfg.SaveEvolutionProgress(path, "26-1", nil); err != nil {
+		t.Fatalf("SaveEvolutionProgress: %v", err)
+	}
+	var got map[string]any
+	b, _ := os.ReadFile(path)
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	progress := got["serve"].(map[string]any)["evolution_progress"].(map[string]any)
+	if _, ok := progress["26-1"]; ok {
+		t.Fatalf("chave deveria ter sido removida com lista vazia: %s", b)
+	}
+}

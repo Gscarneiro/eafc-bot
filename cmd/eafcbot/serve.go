@@ -119,6 +119,23 @@ func cmdServe(ctx context.Context, args []string) error {
 			d.setConfig(current)
 			return nil
 		},
+		GetProgress: func(slug string) []string { return d.config().Serve.EvolutionProgress[slug] },
+		UpdateProgress: func(slug string, completed []string) error {
+			current := d.config()
+			if err := current.SaveEvolutionProgress(*cfgPath, slug, completed); err != nil {
+				return fmt.Errorf("gravando progresso: %w", err)
+			}
+			if current.Serve.EvolutionProgress == nil {
+				current.Serve.EvolutionProgress = map[string][]string{}
+			}
+			if len(completed) == 0 {
+				delete(current.Serve.EvolutionProgress, slug)
+			} else {
+				current.Serve.EvolutionProgress[slug] = completed
+			}
+			d.setConfig(current)
+			return nil
+		},
 		Update: func(v config.UISettings) (config.UISettings, error) {
 			current := d.config()
 			if err := rejectEnvEdits(current.Editable(), v); err != nil {
@@ -229,6 +246,18 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 		GetFavorites: func() []string { return splitFavorites(demoCfg.Serve.EvolutionFavorites) },
 		UpdateFavorites: func(favorites []string) error {
 			demoCfg.Serve.EvolutionFavorites = strings.Join(favorites, ",")
+			return nil
+		},
+		GetProgress: func(slug string) []string { return demoCfg.Serve.EvolutionProgress[slug] },
+		UpdateProgress: func(slug string, completed []string) error {
+			if demoCfg.Serve.EvolutionProgress == nil {
+				demoCfg.Serve.EvolutionProgress = map[string][]string{}
+			}
+			if len(completed) == 0 {
+				delete(demoCfg.Serve.EvolutionProgress, slug)
+			} else {
+				demoCfg.Serve.EvolutionProgress[slug] = completed
+			}
 			return nil
 		},
 		Update: func(v config.UISettings) (config.UISettings, error) {

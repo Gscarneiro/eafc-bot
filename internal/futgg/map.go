@@ -45,7 +45,7 @@ func mapPlayer(n node, cycle string, l lens) domain.Player {
 		Nation:     n.str(l.k("nation", "nation.name", "nationName", "nation", "country")...),
 		WeakFoot:   n.int(l.k("weak_foot", "weakFoot", "weak_foot", "weakFootAbility")...),
 		SkillMoves: n.int(l.k("skill_moves", "skillMoves", "skill_moves", "skillMoveLevel")...),
-		Foot:       n.str("foot", "preferredFoot", "preferred_foot"),
+		Foot:       normalizeFoot(n),
 		Height:     n.int("height", "heightCm", "height_cm"),
 		Cycle:      cycle,
 	}
@@ -63,6 +63,7 @@ func mapPlayer(n node, cycle string, l lens) domain.Player {
 	}
 
 	p.Attributes = mapAttributes(n, l, p.Position)
+	p.DetailedAttributes = mapDetailedAttributes(n)
 	p.PlayStyles = mapPlayStyles(n, l)
 	p.Price = mapPrice(n, l)
 
@@ -83,6 +84,18 @@ func mapPlayer(n node, cycle string, l lens) domain.Player {
 	p.ImageURL = cardImageURL(n)
 	p.BasePlayerEaID = n.i64("basePlayerEaId", "base_player_ea_id")
 	p.BasePlayerSlug = n.str("basePlayerSlug", "base_player_slug")
+	if ts := n.str("dateOfBirth", "date_of_birth", "birthDate", "birth_date"); ts != "" {
+		if t, err := parseTime(ts); err == nil {
+			p.BirthDate = &t
+		}
+	}
+	if v, ok := optionalInt(n, "weight", "weightKg", "weight_kg"); ok {
+		p.WeightKg = &v
+	}
+	if v, ok := optionalBool(n, "isRealFace", "realFace", "real_face"); ok {
+		p.RealFace = &v
+	}
+	p.AccelerateType = n.str("accelerateType", "accelerate_type", "accelerateTypes")
 	p.RolesPlus = n.ints("rolesPlus", "roles_plus")
 	p.RolesPlusPlus = n.ints("rolesPlusPlus", "roles_plus_plus")
 
@@ -97,6 +110,94 @@ func mapPlayer(n node, cycle string, l lens) domain.Player {
 		}
 	}
 	return p
+}
+
+func normalizeFoot(n node) string {
+	if s := strings.TrimSpace(n.str("foot", "preferredFoot", "preferred_foot")); s != "" {
+		return domain.NormalizeFoot(s)
+	}
+	if v, ok := optionalInt(n, "foot", "preferredFoot", "preferred_foot"); ok {
+		return domain.NormalizeFoot(strconv.Itoa(v))
+	}
+	return ""
+}
+
+func optionalInt(n node, keys ...string) (int, bool) {
+	for _, k := range keys {
+		if v, ok := n.lookup(k); ok && v != nil {
+			if i, ok := toIntOK(v); ok {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
+func optionalBool(n node, keys ...string) (bool, bool) {
+	for _, k := range keys {
+		if v, ok := n.lookup(k); ok && v != nil {
+			switch x := v.(type) {
+			case bool:
+				return x, true
+			case string:
+				b, e := strconv.ParseBool(x)
+				return b, e == nil
+			case float64:
+				return x != 0, true
+			}
+		}
+	}
+	return false, false
+}
+
+func mapDetailedAttributes(n node) *domain.DetailedAttributes {
+	keys := map[string][]string{"Acceleration": {"attributeAcceleration", "acceleration"}, "SprintSpeed": {"attributeSprintSpeed", "sprintSpeed"}, "Agility": {"attributeAgility", "agility"}, "Balance": {"attributeBalance", "balance"}, "Jumping": {"attributeJumping", "jumping"}, "Stamina": {"attributeStamina", "stamina"}, "Strength": {"attributeStrength", "strength"}, "Reactions": {"attributeReactions", "reactions"}, "Aggression": {"attributeAggression", "aggression"}, "Composure": {"attributeComposure", "composure"}, "Interceptions": {"attributeInterceptions", "interceptions"}, "Positioning": {"attributePositioning", "positioning"}, "Vision": {"attributeVision", "vision"}, "BallControl": {"attributeBallControl", "ballControl"}, "Crossing": {"attributeCrossing", "crossing"}, "Dribbling": {"attributeDribbling", "dribbling"}, "Finishing": {"attributeFinishing", "finishing"}, "FKAccuracy": {"attributeFkAccuracy", "fkAccuracy"}, "HeadingAccuracy": {"attributeHeadingAccuracy", "headingAccuracy"}, "LongPassing": {"attributeLongPassing", "longPassing"}, "ShortPassing": {"attributeShortPassing", "shortPassing"}, "DefensiveAwareness": {"attributeDefensiveAwareness", "defensiveAwareness"}, "ShotPower": {"attributeShotPower", "shotPower"}, "LongShots": {"attributeLongShots", "longShots"}, "StandingTackle": {"attributeStandingTackle", "standingTackle"}, "SlidingTackle": {"attributeSlidingTackle", "slidingTackle"}, "Volleys": {"attributeVolleys", "volleys"}, "Curve": {"attributeCurve", "curve"}, "Penalties": {"attributePenalties", "penalties"}, "GKDiving": {"attributeGkDiving", "gkDiving"}, "GKHandling": {"attributeGkHandling", "gkHandling"}, "GKKicking": {"attributeGkKicking", "gkKicking"}, "GKReflexes": {"attributeGkReflexes", "gkReflexes"}, "GKSpeed": {"attributeGkSpeed", "gkSpeed"}, "GKPositioning": {"attributeGkPositioning", "gkPositioning"}}
+	d := &domain.DetailedAttributes{}
+	found := false
+	set := func(dst **int, names []string) {
+		if v, ok := optionalInt(n, names...); ok {
+			*dst = &v
+			found = true
+		}
+	}
+	set(&d.Acceleration, keys["Acceleration"])
+	set(&d.SprintSpeed, keys["SprintSpeed"])
+	set(&d.Agility, keys["Agility"])
+	set(&d.Balance, keys["Balance"])
+	set(&d.Jumping, keys["Jumping"])
+	set(&d.Stamina, keys["Stamina"])
+	set(&d.Strength, keys["Strength"])
+	set(&d.Reactions, keys["Reactions"])
+	set(&d.Aggression, keys["Aggression"])
+	set(&d.Composure, keys["Composure"])
+	set(&d.Interceptions, keys["Interceptions"])
+	set(&d.Positioning, keys["Positioning"])
+	set(&d.Vision, keys["Vision"])
+	set(&d.BallControl, keys["BallControl"])
+	set(&d.Crossing, keys["Crossing"])
+	set(&d.Dribbling, keys["Dribbling"])
+	set(&d.Finishing, keys["Finishing"])
+	set(&d.FKAccuracy, keys["FKAccuracy"])
+	set(&d.HeadingAccuracy, keys["HeadingAccuracy"])
+	set(&d.LongPassing, keys["LongPassing"])
+	set(&d.ShortPassing, keys["ShortPassing"])
+	set(&d.DefensiveAwareness, keys["DefensiveAwareness"])
+	set(&d.ShotPower, keys["ShotPower"])
+	set(&d.LongShots, keys["LongShots"])
+	set(&d.StandingTackle, keys["StandingTackle"])
+	set(&d.SlidingTackle, keys["SlidingTackle"])
+	set(&d.Volleys, keys["Volleys"])
+	set(&d.Curve, keys["Curve"])
+	set(&d.Penalties, keys["Penalties"])
+	set(&d.GKDiving, keys["GKDiving"])
+	set(&d.GKHandling, keys["GKHandling"])
+	set(&d.GKKicking, keys["GKKicking"])
+	set(&d.GKReflexes, keys["GKReflexes"])
+	set(&d.GKSpeed, keys["GKSpeed"])
+	set(&d.GKPositioning, keys["GKPositioning"])
+	if !found {
+		return nil
+	}
+	return d
 }
 
 func mapAttributes(n node, l lens, pos domain.Position) domain.Attributes {
@@ -186,12 +287,17 @@ func mapPlayStyles(n node, l lens) []domain.PlayStyle {
 	seen := map[string]bool{}
 
 	add := func(name string, plus bool) {
+		raw := strings.TrimSpace(name)
 		name = strings.TrimSpace(strings.TrimSuffix(resolvePlayStyleName(name, l), "+"))
 		if name == "" || seen[name] {
 			return
 		}
 		seen[name] = true
-		out = append(out, domain.PlayStyle{Name: name, Plus: plus})
+		ps := domain.PlayStyle{Name: name, Plus: plus}
+		if id, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+			ps.EAID = &id
+		}
+		out = append(out, ps)
 	}
 
 	// PlayStyles+ vêm em campo separado na maioria dos formatos.
@@ -293,6 +399,22 @@ func mapClubPlayer(n node, cycle string, l lens) domain.ClubPlayer {
 	if slot, err := domain.ParsePosition(n.str("squadPosition", "squad_position", "slotPosition", "slot", "preferredPosition")); err == nil {
 		cp.SquadSlot = slot
 		cp.OutOfPos = !cp.Player.PlaysAt(slot)
+	}
+	stats := &domain.ClubStats{}
+	set := func(dst **int, keys ...string) {
+		if v, ok := optionalInt(n, keys...); ok {
+			*dst = &v
+		}
+	}
+	set(&stats.Games, "gamesPlayed", "games_played", "games")
+	set(&stats.Goals, "goals")
+	set(&stats.Assists, "assists")
+	set(&stats.YellowCards, "yellowCards", "yellow_cards")
+	set(&stats.RedCards, "redCards", "red_cards")
+	set(&stats.PurchasedFor, "purchasedFor", "purchased_for")
+	set(&stats.KitNumber, "kitNumber", "kit_number")
+	if stats.Games != nil || stats.Goals != nil || stats.Assists != nil || stats.YellowCards != nil || stats.RedCards != nil || stats.PurchasedFor != nil || stats.KitNumber != nil {
+		cp.Stats = stats
 	}
 	return cp
 }

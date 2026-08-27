@@ -26,7 +26,9 @@ type Snapshot struct {
 	// cobertura, avisos, erro e estado (ver Observation). Errors continua
 	// existindo como a lista plana que o relatório já imprime; este mapa é o
 	// que /api/saude expõe estruturado.
-	Capabilities map[string]Observation `json:"capabilities"`
+	Capabilities     map[string]Observation       `json:"capabilities"`
+	PlayStyleCatalog []domain.PlayStyleDefinition `json:"play_style_catalog,omitempty"`
+	RoleCatalog      RolesTable                   `json:"role_catalog,omitempty"`
 }
 
 // formationByID traduz o identificador que o GG Club guarda na tática para

@@ -88,6 +88,46 @@ type Attributes struct {
 	Physical  int `json:"physical"`  // GK: Positioning
 }
 
+// DetailedAttributes preserva os subatributos publicados pela EA. Ponteiros
+// distinguem campo ausente de zero legítimo (por exemplo, uma defesa nula).
+type DetailedAttributes struct {
+	Acceleration       *int `json:"acceleration,omitempty"`
+	SprintSpeed        *int `json:"sprint_speed,omitempty"`
+	Agility            *int `json:"agility,omitempty"`
+	Balance            *int `json:"balance,omitempty"`
+	Jumping            *int `json:"jumping,omitempty"`
+	Stamina            *int `json:"stamina,omitempty"`
+	Strength           *int `json:"strength,omitempty"`
+	Reactions          *int `json:"reactions,omitempty"`
+	Aggression         *int `json:"aggression,omitempty"`
+	Composure          *int `json:"composure,omitempty"`
+	Interceptions      *int `json:"interceptions,omitempty"`
+	Positioning        *int `json:"positioning,omitempty"`
+	Vision             *int `json:"vision,omitempty"`
+	BallControl        *int `json:"ball_control,omitempty"`
+	Crossing           *int `json:"crossing,omitempty"`
+	Dribbling          *int `json:"dribbling,omitempty"`
+	Finishing          *int `json:"finishing,omitempty"`
+	FKAccuracy         *int `json:"fk_accuracy,omitempty"`
+	HeadingAccuracy    *int `json:"heading_accuracy,omitempty"`
+	LongPassing        *int `json:"long_passing,omitempty"`
+	ShortPassing       *int `json:"short_passing,omitempty"`
+	DefensiveAwareness *int `json:"defensive_awareness,omitempty"`
+	ShotPower          *int `json:"shot_power,omitempty"`
+	LongShots          *int `json:"long_shots,omitempty"`
+	StandingTackle     *int `json:"standing_tackle,omitempty"`
+	SlidingTackle      *int `json:"sliding_tackle,omitempty"`
+	Volleys            *int `json:"volleys,omitempty"`
+	Curve              *int `json:"curve,omitempty"`
+	Penalties          *int `json:"penalties,omitempty"`
+	GKDiving           *int `json:"gk_diving,omitempty"`
+	GKHandling         *int `json:"gk_handling,omitempty"`
+	GKKicking          *int `json:"gk_kicking,omitempty"`
+	GKReflexes         *int `json:"gk_reflexes,omitempty"`
+	GKSpeed            *int `json:"gk_speed,omitempty"`
+	GKPositioning      *int `json:"gk_positioning,omitempty"`
+}
+
 // Get devolve o atributo pelo nome curto usado nos pesos de função.
 func (a Attributes) Get(key string) int {
 	switch key {
@@ -111,6 +151,31 @@ func (a Attributes) Get(key string) int {
 type PlayStyle struct {
 	Name string `json:"name"`
 	Plus bool   `json:"plus"`
+	EAID *int   `json:"ea_id,omitempty"`
+}
+
+type PlayStyleDefinition struct {
+	EAID            int    `json:"ea_id"`
+	Name            string `json:"name"`
+	Category        string `json:"category,omitempty"`
+	ImageURL        string `json:"image_url,omitempty"`
+	Description     string `json:"description,omitempty"`
+	PlusDescription string `json:"plus_description,omitempty"`
+	URL             string `json:"url,omitempty"`
+}
+
+// NormalizeFoot aceita os códigos que aparecem em snapshots antigos e os
+// rótulos textuais enviados pelo fut.gg, preservando valores desconhecidos.
+func NormalizeFoot(value string) string {
+	s := strings.TrimSpace(value)
+	switch strings.ToLower(s) {
+	case "1", "r", "right", "direito":
+		return "Direito"
+	case "2", "l", "left", "esquerdo":
+		return "Esquerdo"
+	default:
+		return s
+	}
 }
 
 func (ps PlayStyle) String() string {
@@ -133,26 +198,31 @@ func (p Price) Tradeable() bool { return !p.IsSBC && p.Coins > 0 }
 
 // Player é uma carta do jogo, do jeito que o fut.gg a descreve.
 type Player struct {
-	ID           int64       `json:"id"`   // id do recurso na EA
-	FutGGSlug    string      `json:"slug"` // slug da página no fut.gg
-	Name         string      `json:"name"`
-	CommonName   string      `json:"common_name"`
-	Rating       int         `json:"rating"`
-	Position     Position    `json:"position"`
-	AltPositions []Position  `json:"alt_positions"`
-	Version      string      `json:"version"` // "Gold Rare", "TOTW", "Icon", "Hero"...
-	Club         string      `json:"club"`
-	League       string      `json:"league"`
-	Nation       string      `json:"nation"`
-	Attributes   Attributes  `json:"attributes"`
-	PlayStyles   []PlayStyle `json:"play_styles"`
-	WeakFoot     int         `json:"weak_foot"`
-	SkillMoves   int         `json:"skill_moves"`
-	Foot         string      `json:"foot"`
-	Height       int         `json:"height_cm"`
-	Price        Price       `json:"price"`
-	Cycle        string      `json:"cycle"` // "26", "27" — permite conviver com dois ciclos
-	ReleasedAt   time.Time   `json:"released_at"`
+	ID                 int64               `json:"id"`   // id do recurso na EA
+	FutGGSlug          string              `json:"slug"` // slug da página no fut.gg
+	Name               string              `json:"name"`
+	CommonName         string              `json:"common_name"`
+	Rating             int                 `json:"rating"`
+	Position           Position            `json:"position"`
+	AltPositions       []Position          `json:"alt_positions"`
+	Version            string              `json:"version"` // "Gold Rare", "TOTW", "Icon", "Hero"...
+	Club               string              `json:"club"`
+	League             string              `json:"league"`
+	Nation             string              `json:"nation"`
+	Attributes         Attributes          `json:"attributes"`
+	DetailedAttributes *DetailedAttributes `json:"detailed_attributes,omitempty"`
+	PlayStyles         []PlayStyle         `json:"play_styles"`
+	WeakFoot           int                 `json:"weak_foot"`
+	SkillMoves         int                 `json:"skill_moves"`
+	Foot               string              `json:"foot"`
+	Height             int                 `json:"height_cm"`
+	Price              Price               `json:"price"`
+	Cycle              string              `json:"cycle"` // "26", "27" — permite conviver com dois ciclos
+	ReleasedAt         time.Time           `json:"released_at"`
+	BirthDate          *time.Time          `json:"birth_date,omitempty"`
+	WeightKg           *int                `json:"weight_kg,omitempty"`
+	RealFace           *bool               `json:"real_face,omitempty"`
+	AccelerateType     string              `json:"accelerate_type,omitempty"`
 
 	// GGRating é a nota que o próprio fut.gg calcula pra carta — não o
 	// overall da EA, um número deles, ~0-99, achado NA MELHOR posição do

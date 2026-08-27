@@ -268,6 +268,8 @@ func runJob(ctx context.Context, cfg config.Config, st store.Store, outPath stri
 	if err != nil {
 		return report.Data{}, err
 	}
+	snap.PlayStyleCatalog = client.PlayStyleCatalog(ctx)
+	snap.RoleCatalog = client.Roles(ctx)
 	fmt.Printf("  %d cartas · %d evoluções · %d SBCs · %d notícias\n",
 		len(snap.Market), len(snap.Evolutions), len(snap.SBCs), len(snap.News))
 	if snap.Stats.RobotsBypassed > 0 {
@@ -438,32 +440,34 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 				diff = store.DiffClubs(prev, snap.Club)
 			}
 			err := st.SaveSnapshot(ctx, store.Snapshot{
-				GeneratedAt:  data.GeneratedAt,
-				Duration:     time.Since(started),
-				Cycle:        snap.Club.Cycle,
-				Club:         snap.Club,
-				Capital:      capital,
-				Market:       snap.Market,
-				Evolutions:   snap.Evolutions,
-				Objectives:   snap.Objectives,
-				SBCs:         snap.SBCs,
-				News:         snap.News,
-				Stats:        snap.Stats,
-				Errors:       snap.Errors,
-				Capabilities: snap.Capabilities,
-				Diff:         diff,
-				NewCards:     newCards,
-				FreshNews:    freshNews,
-				Upgrades:     upgrades,
-				MarketFunnel: upFunnel,
-				EvoMatches:   evos,
-				SquadSwaps:   data.SquadSwaps,
-				SquadPlan:    data.SquadPlan,
-				Trends:       trends,
-				SquadScore:   data.SquadScore,
-				Cards:        cardReports,
-				GauntletPlan: gauntletPlan,
-				Quimica:      chemistry.Avaliar(chemModel, snap.Club),
+				GeneratedAt:      data.GeneratedAt,
+				Duration:         time.Since(started),
+				Cycle:            snap.Club.Cycle,
+				Club:             snap.Club,
+				Capital:          capital,
+				Market:           snap.Market,
+				Evolutions:       snap.Evolutions,
+				Objectives:       snap.Objectives,
+				SBCs:             snap.SBCs,
+				News:             snap.News,
+				Stats:            snap.Stats,
+				Errors:           snap.Errors,
+				Capabilities:     snap.Capabilities,
+				PlayStyleCatalog: snap.PlayStyleCatalog,
+				RoleCatalog:      snap.RoleCatalog,
+				Diff:             diff,
+				NewCards:         newCards,
+				FreshNews:        freshNews,
+				Upgrades:         upgrades,
+				MarketFunnel:     upFunnel,
+				EvoMatches:       evos,
+				SquadSwaps:       data.SquadSwaps,
+				SquadPlan:        data.SquadPlan,
+				Trends:           trends,
+				SquadScore:       data.SquadScore,
+				Cards:            cardReports,
+				GauntletPlan:     gauntletPlan,
+				Quimica:          chemistry.Avaliar(chemModel, snap.Club),
 			})
 			if err != nil {
 				data.Errors = append(data.Errors, "gravando snapshot: "+err.Error())

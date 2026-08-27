@@ -199,7 +199,9 @@ type Snapshot struct {
 	// Cards é a análise carta-a-carta (atual x potencial) do elenco acima do
 	// min_rating configurado — o trabalho caro (~1,3 MB por carta contra o
 	// fut.gg) que o scheduler paga uma vez à noite em vez de sob demanda.
-	Cards []cards.CardReport `json:"cards"`
+	Cards            []cards.CardReport           `json:"cards"`
+	PlayStyleCatalog []domain.PlayStyleDefinition `json:"play_style_catalog,omitempty"`
+	RoleCatalog      futgg.RolesTable             `json:"role_catalog,omitempty"`
 
 	// GauntletPlan é o planejamento das quatro rodadas do modo Gauntlet
 	// (ver internal/analyze/gauntlet.go). Status vazio é o sentinela de

@@ -2,6 +2,8 @@ import type {
   CardDetailResponse,
   ConfigResponse,
   EvolutionFavoritesResponse,
+  EvolutionPlanResponse,
+  EvolutionProgressResponse,
   GauntletResponse,
   JobStatus,
   SquadPlanResponse,
@@ -56,6 +58,12 @@ export const fetchEvolutionFavorites = () => getJSON<EvolutionFavoritesResponse>
 export async function saveEvolutionFavorites(favorites: string[]): Promise<EvolutionFavoritesResponse> {
   const res = await fetch("/api/evolucoes/favoritos", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ favorites }) });
   if (!res.ok) throw new ApiError(res.status, `PUT /api/evolucoes/favoritos devolveu ${res.status}`);
+  return res.json();
+}
+export const fetchEvolutionPlan = (slug: string) => getJSON<EvolutionPlanResponse>(`/api/evolucoes/${encodeURIComponent(slug)}/plano`);
+export async function saveEvolutionProgress(slug: string, completed: string[]): Promise<EvolutionProgressResponse> {
+  const res = await fetch(`/api/evolucoes/${encodeURIComponent(slug)}/progresso`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ completed }) });
+  if (!res.ok) throw new ApiError(res.status, `PUT /api/evolucoes/${slug}/progresso devolveu ${res.status}`);
   return res.json();
 }
 export const fetchJob = () => getJSON<JobStatus>("/api/job");

@@ -83,6 +83,16 @@ type ServeConf struct {
 	// EvolutionFavorites é uma lista separada por vírgulas para manter Config
 	// comparável nos testes de edição atômica e simples no JSON de configuração.
 	EvolutionFavorites string `json:"evolution_favorites"`
+
+	// EvolutionProgress guarda, por slug de carta, os nomes de evolução que
+	// o usuário marcou como já concluídos — nunca aplicado na conta EA, só
+	// uma anotação local pro Workbench (/api/evolucoes/{slug}/plano) não
+	// perguntar de novo. Fica FORA de UISettingsServe/Editable/ApplyEditable
+	// de propósito: não é uma preferência de formulário, é estado que cresce
+	// um slug de cada vez (ver SaveEvolutionProgress) — colocar isto no
+	// formulário geral obrigaria reenviar o mapa inteiro a cada salvamento
+	// de qualquer outra preferência.
+	EvolutionProgress map[string][]string `json:"evolution_progress,omitempty"`
 }
 
 type PostgresConf struct {
@@ -406,6 +416,52 @@ func (c Config) SaveEditable(path string, v UISettings) error {
 	mergeBloco(raw, "report", v.Report)
 	mergeBloco(raw, "serve", v.Serve)
 	mergeBloco(raw, "chemistry", v.Chemistry)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
+// SaveEvolutionProgress grava o progresso de UM slug sem tocar o resto do
+// arquivo — mesma leitura-antes-de-escrever de SaveEditable, mas fora do
+// fluxo dos "três blocos editáveis pela UI": progresso não é um bloco de
+// formulário, é um mapa que cresce um slug de cada vez. Lista vazia REMOVE
+// a chave, para o arquivo não acumular lixo de progresso desmarcado.
+func (c Config) SaveEvolutionProgress(path, slug string, completed []string) error {
+	var raw map[string]any
+	if b, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(b, &raw); err != nil {
+			return fmt.Errorf("lendo %s para atualização parcial: %w", path, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("abrindo %s para atualização parcial: %w", path, err)
+	}
+	if raw == nil {
+		raw = make(map[string]any)
+	}
+	serve, _ := raw["serve"].(map[string]any)
+	if serve == nil {
+		serve = make(map[string]any)
+	}
+	progress, _ := serve["evolution_progress"].(map[string]any)
+	if progress == nil {
+		progress = make(map[string]any)
+	}
+	if len(completed) == 0 {
+		delete(progress, slug)
+	} else {
+		list := make([]any, len(completed))
+		for i, v := range completed {
+			list[i] = v
+		}
+		progress[slug] = list
+	}
+	serve["evolution_progress"] = progress
+	raw["serve"] = serve
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

@@ -177,6 +177,56 @@ func TestBuildReportsPreservaFalhaDePathComoEstado(t *testing.T) {
 	}
 }
 
+// CardReport.Graph precisa vir preenchido quando o path é confirmado — é o
+// que /api/evolucoes/{slug}/plano vai ler, sem precisar de rede.
+func TestBuildReportsPreenchaGraphQuandoPathConfirmado(t *testing.T) {
+	const evoPathsFixture = `{"data":[
+	 {"path":[
+	   {"id":900001,"eaId":7,"overall":90,"commonName":"Carta"},
+	   {"id":900002,"eaId":7,"overall":95,"ggRating":92.0,"commonName":"Carta"}
+	 ],"coinsCost":15000,"pointsCost":0,"isExpired":false,
+	  "readableTrainingTime":"3 days","evolutions":[{"name":"Salto"}]}
+	]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "roles") {
+			_, _ = w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(evoPathsFixture))
+	}))
+	defer srv.Close()
+
+	client := futgg.New(futgg.Config{BaseURL: srv.URL, Cycle: "26", Endpoints: map[string]string{
+		"roles":           "/api/fut/roles/",
+		"evolution_paths": "/api/fut/evolutions/{id}/",
+	}})
+	club := domain.Club{Players: []domain.ClubPlayer{{Player: domain.Player{
+		ID: 7, Name: "Carta", Rating: 90, GGRating: 88.4, Cycle: "26", BasePlayerEaID: 700,
+	}}}}
+	reports, err := BuildReports(context.Background(), client, club, 80, nil)
+	if err != nil {
+		t.Fatalf("BuildReports: %v", err)
+	}
+	if len(reports) != 1 {
+		t.Fatalf("esperava 1 relatório, achou %d", len(reports))
+	}
+	r := reports[0]
+	if r.Graph == nil {
+		t.Fatal("Graph veio nil com path confirmado")
+	}
+	if err := r.Graph.Validate(); err != nil {
+		t.Errorf("Graph inválido: %v", err)
+	}
+	linear := r.Graph.LinearPaths()
+	if len(linear) != 1 || linear[0].CoinsCost != 15000 {
+		t.Errorf("LinearPaths() = %+v, esperava 1 caminho de 15000 moedas", linear)
+	}
+	if r.EvolutionStatus != EvolutionConfirmed || r.Best == nil {
+		t.Errorf("status/Best = %v/%+v, esperava confirmed com Best preenchido", r.EvolutionStatus, r.Best)
+	}
+}
+
 // ggGain usa a carta REAL de hoje (com GGRating de verdade), não path[0] —
 // que a API sempre manda sem nota (ver domain.EvolutionPath.Initial).
 func TestGgGainUsaCartaAtualNaoPathInicial(t *testing.T) {

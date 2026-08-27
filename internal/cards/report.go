@@ -64,10 +64,16 @@ type CardReport struct {
 	// Best é nil quando a carta não tem nenhum caminho de evolução válido
 	// hoje — ela já está no teto que as evoluções ativas alcançam. Isso é
 	// uma resposta, não uma falha: aparece no relatório assim mesmo.
-	Best            *EvoPotential   `json:"best"`
-	Alternates      []EvoPotential  `json:"alternates"`
-	EvolutionStatus EvolutionStatus `json:"evolution_status"`
-	EvolutionError  string          `json:"evolution_error,omitempty"`
+	Best       *EvoPotential  `json:"best"`
+	Alternates []EvoPotential `json:"alternates"`
+	// Graph é o grafo confirmado por trás de Best/Alternates — nil quando
+	// EvolutionStatus não é confirmed/no_path (sem carta-base, inelegível,
+	// erro de coleta, não verificada). Best/Alternates continuam sendo a
+	// visão filtrada por ganho (ver bestPaths); Graph é a estrutura
+	// completa, sem esse filtro, para /api/evolucoes/{slug}/plano.
+	Graph           *domain.EvolutionGraph `json:"graph,omitempty"`
+	EvolutionStatus EvolutionStatus        `json:"evolution_status"`
+	EvolutionError  string                 `json:"evolution_error,omitempty"`
 }
 
 // BuildReports monta um CardReport para cada jogador do clube com rating
@@ -101,15 +107,19 @@ func BuildReports(ctx context.Context, client *futgg.Client, club domain.Club, m
 				out = append(out, r)
 				continue
 			}
-			paths, err := client.EvolutionPaths(ctx, cp.Player.BasePlayerEaID, cp.Player.ID)
+			graph, err := client.EvolutionGraph(ctx, cp.Player)
 			if err != nil {
 				// Uma fonte acessória falha sem derrubar as outras cartas, mas
 				// o relatório precisa conservar o erro para não tratar isso como
-				// "sem caminho" e sugerir uma venda.
+				// "sem caminho" e sugerir uma venda. Isto cobre tanto falha de
+				// rede/decode (EvolutionPaths) quanto o fail-closed de
+				// EvolutionGraph.Validate() (payload torto nunca vira grafo
+				// silencioso).
 				r.EvolutionStatus = EvolutionFetchError
 				r.EvolutionError = err.Error()
 			} else {
-				best, alts := bestPaths(paths, cp.Player)
+				r.Graph = &graph
+				best, alts := bestPaths(graph.LinearPaths(), cp.Player)
 				r.Best, r.Alternates = best, alts
 				if best != nil {
 					r.EvolutionStatus = EvolutionConfirmed

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"io"
 	"net/http"
 	"os"
@@ -187,8 +188,9 @@ type Client struct {
 	// dela. sync.Once garante que chamadas concorrentes (Club, Players e
 	// Evolutions rodam em paralelo em Collect) esperem a mesma busca em vez
 	// de disparar três.
-	psOnce  sync.Once
-	psTable map[int]string
+	psOnce    sync.Once
+	psTable   map[int]string
+	psCatalog []domain.PlayStyleDefinition
 
 	// rolesOnce/rolesTable seguem o mesmo padrão, para o catálogo de
 	// funções táticas (ver roles.go).
@@ -227,12 +229,21 @@ func (c *Client) ensurePlayStyles(ctx context.Context) {
 			name := n.str("name")
 			if name != "" {
 				table[id] = name
+				c.psCatalog = append(c.psCatalog, domain.PlayStyleDefinition{EAID: id, Name: name, Category: n.str("category"), ImageURL: n.str("imageUrl", "imageURL", "imagePath"), Description: n.str("playstyleDescription", "description"), PlusDescription: n.str("playstylePDescription", "plusDescription"), URL: n.str("url")})
 			}
 		}
 		if len(table) > 0 {
 			c.psTable = table
 		}
 	})
+}
+
+// PlayStyleCatalog devolve uma cópia estável do catálogo carregado nesta coleta.
+func (c *Client) PlayStyleCatalog(ctx context.Context) []domain.PlayStyleDefinition {
+	c.ensurePlayStyles(ctx)
+	out := make([]domain.PlayStyleDefinition, len(c.psCatalog))
+	copy(out, c.psCatalog)
+	return out
 }
 
 // Stats conta o que aconteceu na coleta, para o relatório dizer se os

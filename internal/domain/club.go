@@ -11,16 +11,27 @@ type ClubPlayer struct {
 	// fonte o fornece. Ele é diferente de Player.ID: duas cópias da mesma
 	// carta compartilham o segundo, mas não deveriam ser colapsadas no diff
 	// do elenco. Vazio significa que a fonte ainda não provou essa identidade.
-	ClubItemID   string    `json:"club_item_id,omitempty"`
-	Untradeable  bool      `json:"untradeable"`
-	InSquad      bool      `json:"in_squad"`
-	SquadSlot    Position  `json:"squad_slot"` // onde ele joga HOJE no seu time
-	OutOfPos     bool      `json:"out_of_pos"` // escalado fora da posição natural
-	Chemistry    int       `json:"chemistry"`  // pontos de química da carta (0-3)
-	EvosApplied  []string  `json:"evos_applied"`
-	EvoExhausted bool      `json:"evo_exhausted"` // já usou evolução, não aceita outra
-	Contracts    int       `json:"contracts"`
-	AcquiredAt   time.Time `json:"acquired_at"`
+	ClubItemID   string     `json:"club_item_id,omitempty"`
+	Untradeable  bool       `json:"untradeable"`
+	InSquad      bool       `json:"in_squad"`
+	SquadSlot    Position   `json:"squad_slot"` // onde ele joga HOJE no seu time
+	OutOfPos     bool       `json:"out_of_pos"` // escalado fora da posição natural
+	Chemistry    int        `json:"chemistry"`  // pontos de química da carta (0-3)
+	EvosApplied  []string   `json:"evos_applied"`
+	EvoExhausted bool       `json:"evo_exhausted"` // já usou evolução, não aceita outra
+	Contracts    int        `json:"contracts"`
+	AcquiredAt   time.Time  `json:"acquired_at"`
+	Stats        *ClubStats `json:"club_stats,omitempty"`
+}
+
+type ClubStats struct {
+	Games        *int `json:"games,omitempty"`
+	Goals        *int `json:"goals,omitempty"`
+	Assists      *int `json:"assists,omitempty"`
+	YellowCards  *int `json:"yellow_cards,omitempty"`
+	RedCards     *int `json:"red_cards,omitempty"`
+	PurchasedFor *int `json:"purchased_for,omitempty"`
+	KitNumber    *int `json:"kit_number,omitempty"`
 }
 
 // Evolvable diz se a carta ainda pode entrar numa evolução.

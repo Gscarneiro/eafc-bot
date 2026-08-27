@@ -9,7 +9,7 @@ Este diretório transforma o estudo de evolução do EA FC Bot e a pesquisa do F
 | 00 | [Estabilização da baseline](00-estabilizacao-da-baseline.md) | regressões fechadas e contrato de erro honesto | baseline atual | concluída (gate) |
 | 01 | [Fundação confiável](01-fundacao-confiavel.md) | identidade física, procedência, capital e segurança local | 00 | concluída (gate) |
 | 02 | [Plano de elenco e Gauntlet](02-plano-elenco-e-gauntlet.md) | cenários de XI, química, locks e regras de Gauntlet | 01 | concluída (gate) |
-| 03 | [Plano de Evolução e Workbench](03-plano-evolucao-e-workbench.md) | grafo, estados e caminhos confirmados | 01, 02 | planejada |
+| 03 | [Plano de Evolução e Workbench](03-plano-evolucao-e-workbench.md) | grafo, estados e caminhos confirmados | 01, 02 | concluída (gate) |
 | 04 | [Plano de mercado e ledger](04-plano-mercado-e-ledger.md) | plano global de capital, watchlist e ledger | 01, 02, 03 | planejada |
 | 05 | [Rating, Insights e memória](05-rating-insights-e-memoria.md) | notas explicáveis e histórico do clube | 01, 04 | planejada |
 | 06 | [Solver consultivo de SBC](06-solver-sbc-consultivo.md) | soluções locais validadas e exportáveis | 01, 02, 05 | planejada |

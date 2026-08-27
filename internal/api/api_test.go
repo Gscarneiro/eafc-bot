@@ -76,6 +76,133 @@ func fixtureSnapshotComEvolucaoFutGG() store.Snapshot {
 	return snap
 }
 
+// fixtureSnapshotComGrafoDeEvolucao monta uma carta com um grafo confirmado
+// (uma transição só, sem ramo) e duas evoluções no catálogo: uma que casa
+// com a transição confirmada (deve ficar de fora de EstimatedOnly) e outra
+// sem requisito nenhum — elegível pra qualquer carta — que não aparece em
+// nenhuma transição (deve entrar em EstimatedOnly como "no_path").
+func fixtureSnapshotComGrafoDeEvolucao() store.Snapshot {
+	snap := fixtureSnapshot()
+	confirmedEvo := domain.Evolution{ID: "evo-confirmada", Name: "Salto Confirmado"}
+	estimatedEvo := domain.Evolution{ID: "evo-estimada", Name: "Estimativa Solta"}
+	snap.Evolutions = []domain.Evolution{confirmedEvo, estimatedEvo}
+	// BuildCatalog só cria entrada de catálogo pra jogador que está no
+	// elenco — o CardReport sozinho não basta, precisa do ClubPlayer.
+	snap.Club.Players = append(snap.Club.Players, domain.ClubPlayer{
+		Player: domain.Player{ID: 10, CommonName: "Alvo do Plano", Rating: 88, Cycle: "26"},
+	})
+
+	graph := domain.EvolutionGraph{
+		Cycle:  "26",
+		RootID: "raiz",
+		Nodes: map[string]domain.EvolutionNode{
+			"raiz":  {ID: "raiz", Card: domain.Player{ID: 10, Rating: 88, Cycle: "26"}},
+			"final": {ID: "final", Card: domain.Player{ID: 10, Rating: 92, GGRating: 90, Cycle: "26"}},
+		},
+		Transitions: []domain.EvolutionTransition{
+			{
+				From: "raiz", To: "final", Evolution: confirmedEvo.Name, CoinsCost: 5000,
+				Source: &domain.EvolutionPath{Chain: []string{confirmedEvo.Name}},
+			},
+		},
+	}
+	snap.Cards = append(snap.Cards, cards.CardReport{
+		Slug:            "26-plano",
+		Player:          domain.ClubPlayer{Player: domain.Player{ID: 10, CommonName: "Alvo do Plano", Rating: 88, Cycle: "26"}},
+		Graph:           &graph,
+		EvolutionStatus: cards.EvolutionConfirmed,
+	})
+	return snap
+}
+
+func TestHandleEvolucoesPlanoRetornaRamosConfirmados(t *testing.T) {
+	srv, _ := newTestServerWithSnapshot(t, fixtureSnapshotComGrafoDeEvolucao())
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes/26-plano/plano", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[EvolutionPlanResponse](t, w)
+	if got.Status != cards.EvolutionConfirmed {
+		t.Errorf("status = %v, esperava confirmed", got.Status)
+	}
+	if got.Graph == nil || len(got.Graph.Transitions) != 1 {
+		t.Fatalf("Graph = %+v, esperava 1 transição confirmada", got.Graph)
+	}
+}
+
+func TestHandleEvolucoesPlanoMarcaEstimadoSemCaminhoConfirmado(t *testing.T) {
+	srv, _ := newTestServerWithSnapshot(t, fixtureSnapshotComGrafoDeEvolucao())
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes/26-plano/plano", nil))
+	got := decodeJSON[EvolutionPlanResponse](t, w)
+	if len(got.EstimatedOnly) != 1 || got.EstimatedOnly[0].Evolution.Name != "Estimativa Solta" {
+		t.Fatalf("EstimatedOnly = %+v, esperava só a evolução sem caminho confirmado", got.EstimatedOnly)
+	}
+	if got.EstimatedOnly[0].Status != cards.EvolutionNoPath {
+		t.Errorf("status estimado = %v, esperava no_path", got.EstimatedOnly[0].Status)
+	}
+}
+
+func TestHandleEvolucoesPlanoCartaInelegivelNaoListaEstimativas(t *testing.T) {
+	snap := fixtureSnapshot()
+	snap.Evolutions = []domain.Evolution{{ID: "solta", Name: "Solta"}}
+	inelegivel := domain.ClubPlayer{Player: domain.Player{ID: 99, Rating: 70}}
+	snap.Club.Players = append(snap.Club.Players, inelegivel)
+	snap.Cards = append(snap.Cards, cards.CardReport{
+		Slug: "26-inelegivel", Player: inelegivel,
+		EvolutionStatus: cards.EvolutionNotEligible,
+	})
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes/26-inelegivel/plano", nil))
+	got := decodeJSON[EvolutionPlanResponse](t, w)
+	if got.Status != cards.EvolutionNotEligible || len(got.EstimatedOnly) != 0 || got.Graph != nil {
+		t.Fatalf("esperava resposta mínima pra carta inelegível, veio %+v", got)
+	}
+}
+
+func TestHandleEvolucoesPlanoSlugInexistenteDevolve404(t *testing.T) {
+	srv, _ := newTestServer(t)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes/nao-existe/plano", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, esperava 404", w.Code)
+	}
+}
+
+func TestHandleEvolucoesProgressoPersisteEApareceNoPlano(t *testing.T) {
+	st, err := store.NewJSON(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewJSON: %v", err)
+	}
+	if err := st.SaveSnapshot(t.Context(), fixtureSnapshotComGrafoDeEvolucao()); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	progress := map[string][]string{}
+	srv := &Server{
+		Store: st, Cycle: "26", Trigger: func() {}, Status: func() JobStatus { return JobStatus{} },
+		Config: &ConfigEditor{
+			GetProgress:    func(slug string) []string { return progress[slug] },
+			UpdateProgress: func(slug string, completed []string) error { progress[slug] = completed; return nil },
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/evolucoes/26-plano/progresso", strings.NewReader(`{"completed":["Salto Confirmado"]}`))
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT progresso: status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/evolucoes/26-plano/plano", nil))
+	got := decodeJSON[EvolutionPlanResponse](t, w)
+	if len(got.Completed) != 1 || got.Completed[0] != "Salto Confirmado" {
+		t.Fatalf("Completed = %+v, esperava progresso persistido", got.Completed)
+	}
+}
+
 func TestHandleEvolucoesNaoDependeDaEstimativaDoAnalyze(t *testing.T) {
 	snap := fixtureSnapshotComEvolucaoFutGG()
 	snap.EvoMatches = nil
@@ -667,6 +794,8 @@ func TestGuardLocalWriteBloqueiaOrigemExternaEmTodasAsRotasDeEscrita(t *testing.
 		Config: &ConfigEditor{
 			GetFavorites:    func() []string { return nil },
 			UpdateFavorites: func([]string) error { return nil },
+			GetProgress:     func(string) []string { return nil },
+			UpdateProgress:  func(string, []string) error { return nil },
 		},
 	}
 
@@ -679,6 +808,7 @@ func TestGuardLocalWriteBloqueiaOrigemExternaEmTodasAsRotasDeEscrita(t *testing.
 		{"job", http.MethodPost, "/api/job", ""},
 		{"favoritos", http.MethodPut, "/api/evolucoes/favoritos", `{"favorites":[]}`},
 		{"planos_elenco", http.MethodPost, "/api/planos/elenco", "{}"},
+		{"progresso", http.MethodPut, "/api/evolucoes/26-1/progresso", `{"completed":[]}`},
 	}
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {

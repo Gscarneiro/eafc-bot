@@ -12,3 +12,7 @@ teste.json
 # via `npm run build` (ver web/vite.config.ts) e é o que o Go embute.
 web/node_modules/
 internal/webui/dist/
+
+# saída do driver de navegador (.claude/skills/run-web) — artefato de
+# verificação, não algo pra versionar.
+.claude/skills/run-web/screenshots/

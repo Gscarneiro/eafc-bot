@@ -33,11 +33,14 @@ export interface Attributes {
   defending: number;
   physical: number;
 }
+export interface DetailedAttributes { [key: string]: number | undefined }
 
 export interface PlayStyle {
   name: string;
   plus: boolean;
+  ea_id?: number;
 }
+export interface PlayStyleDefinition { ea_id: number; name: string; category?: string; image_url?: string; description?: string; plus_description?: string; url?: string }
 
 export interface Price {
   coins: number;
@@ -59,6 +62,7 @@ export interface Player {
   league: string;
   nation: string;
   attributes: Attributes;
+  detailed_attributes?: DetailedAttributes;
   play_styles: PlayStyle[] | null;
   weak_foot: number;
   skill_moves: number;
@@ -67,8 +71,13 @@ export interface Player {
   price: Price;
   cycle: string;
   released_at: string;
+  birth_date?: string;
+  weight_kg?: number;
+  real_face?: boolean;
+  accelerate_type?: string;
   gg_rating?: number;
   gg_rating_pos?: Position;
+  gg_ratings?: Partial<Record<Position, number>>;
   image_url?: string;
   base_player_ea_id?: number;
   base_player_slug?: string;
@@ -90,6 +99,7 @@ export interface ClubPlayer extends Player {
   evo_exhausted: boolean;
   contracts: number;
   acquired_at: string;
+  club_stats?: { games?: number; goals?: number; assists?: number; yellow_cards?: number; red_cards?: number; purchased_for?: number; kit_number?: number };
 }
 
 export interface EvolutionPath {
@@ -139,6 +149,71 @@ export interface PricePoint {
 
 export interface CardDetailResponse extends CardReport {
   price_series: PricePoint[] | null;
+  generated_at: string;
+  play_style_catalog?: PlayStyleDefinition[];
+  price_history_status: string;
+  related_cards?: { player: ClubPlayer; card_slug?: string }[];
+  play_style_recommendations?: PlayStyleRecommendation[];
+  play_style_recommendation_source?: string;
+}
+
+// EvolutionGraphNode/Transition espelham internal/domain/evolution_graph.go
+// — a visão estrutural completa (sem o filtro de ganho que Best/Alternates
+// já aplicam), usada pelo Workbench em /time/:slug.
+export interface EvolutionGraphNode {
+  id: string;
+  card: Player;
+}
+
+export interface EvolutionGraphTransition {
+  from: string;
+  to: string;
+  evolution: string;
+  coin_cost: number;
+  point_cost: number;
+  expires_at: string;
+  is_expired: boolean;
+  training_time: string;
+  repeatable: boolean;
+  lab: boolean;
+  source?: EvolutionPath;
+}
+
+export interface EvolutionGraph {
+  cycle: string;
+  root_id: string;
+  nodes: Record<string, EvolutionGraphNode>;
+  // null (não `[]`) quando a carta não tem nenhum caminho confirmado — o
+  // Go não usa omitempty aqui, mesma convenção de EvolutionPath.chain.
+  transitions: EvolutionGraphTransition[] | null;
+}
+
+// EstimatedEvolution é elegível pelas regras do catálogo, mas sem nenhuma
+// transição confirmada no Graph — "estimado", nunca misturado com o grafo.
+export interface EstimatedEvolution {
+  evolution: Evolution;
+  acquisition: string;
+  status: "no_path" | "fetch_error";
+}
+
+export interface EvolutionPlanResponse {
+  slug: string;
+  status: "confirmed" | "no_path" | "not_eligible" | "fetch_error" | "not_checked";
+  error?: string;
+  graph?: EvolutionGraph;
+  estimated_only?: EstimatedEvolution[];
+  completed?: string[];
+}
+
+export interface EvolutionProgressResponse {
+  completed: string[];
+}
+
+export interface PlayStyleRecommendation {
+  position: Position;
+  role?: string;
+  styles: PlayStyle[];
+  source: string;
 }
 
 export interface Reward {

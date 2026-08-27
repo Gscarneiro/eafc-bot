@@ -160,6 +160,9 @@ func demoClub() domain.Club {
 			starters = append(starters, domain.SquadSlot{Index: i, Position: cp.Position, PlayerID: cp.ID})
 		}
 	}
+	for i := range players {
+		players[i].DetailedAttributes = demoDetailedAttributes(players[i].Player)
+	}
 	// Untradeable típico de recompensa: entra no time mas não vira moeda.
 	players[6].Untradeable = true
 
@@ -171,6 +174,20 @@ func demoClub() domain.Club {
 		// true porque, no demo, "a coleta" é sempre completa por definição.
 		Squad: domain.Squad{Name: "Titular", Formation: "4-2-3-1", Chemistry: 33, ChemistrySynced: true, Starters: starters, SyncedAt: time.Now()},
 		Cycle: "26", SyncedAt: time.Now(), Source: "demo",
+	}
+}
+
+func demoDetailedAttributes(player domain.Player) *domain.DetailedAttributes {
+	acc, sprint := player.Attributes.Pace-2, player.Attributes.Pace+1
+	agility, balance := player.Attributes.Dribbling-3, player.Attributes.Dribbling-5
+	stamina, strength := player.Attributes.Physical-2, player.Attributes.Physical
+	vision, shortPass := player.Attributes.Passing-2, player.Attributes.Passing+2
+	finishing, shotPower := player.Attributes.Shooting-1, player.Attributes.Shooting+3
+	defensive, stand := player.Attributes.Defending-2, player.Attributes.Defending+1
+	return &domain.DetailedAttributes{
+		Acceleration: &acc, SprintSpeed: &sprint, Agility: &agility, Balance: &balance,
+		Stamina: &stamina, Strength: &strength, Vision: &vision, ShortPassing: &shortPass,
+		Finishing: &finishing, ShotPower: &shotPower, DefensiveAwareness: &defensive, StandingTackle: &stand,
 	}
 }
 
@@ -298,6 +315,40 @@ func demoEvolutions() []domain.Evolution {
 				}, Objectives: []string{"Vença 3 partidas"}},
 			},
 			URL: "https://www.fut.gg/evolutions/muralha/",
+		},
+		{
+			ID: "e4", Slug: "recompensa-futties", Name: "FUTTIES 5th Rapid+",
+			Description: "Recompensa de objetivo com PlayStyle+.", IsRewardEvolution: true,
+			ObjectiveGroupName: "FUTTIES 5th", ExpiresAt: time.Now().Add(96 * time.Hour),
+			Levels: []domain.EvoLevel{{Number: 1, Upgrades: []domain.EvoUpgrade{{Kind: "playstyle", PlayStyle: ps("Rapid", true)}, {Kind: "attribute", Attr: "pac", Amount: 2}}}},
+			URL:    "https://www.fut.gg/evolutions/recompensa-futties/",
+		},
+		{
+			ID: "e5", Slug: "tiki-taka-lab", Name: "Tiki Taka",
+			Description: "PlayStyles Lab: adicione Tiki Taka.", CategoryName: "PlayStyles Lab", CategorySlug: "playstyle-lab",
+			ExpiresAt: time.Now().Add(72 * time.Hour),
+			Levels:    []domain.EvoLevel{{Number: 1, Upgrades: []domain.EvoUpgrade{{Kind: "playstyle", PlayStyle: ps("Tiki Taka", false)}}}},
+			URL:       "https://www.fut.gg/evolutions/tiki-taka-lab/",
+		},
+		{
+			ID: "e6", Slug: "tiki-taka-plus-lab", Name: "Tiki Taka+",
+			Description: "PlayStyles Lab: eleve Tiki Taka a PlayStyle+.", CategoryName: "PlayStyles Lab", CategorySlug: "playstyle-lab",
+			ExpiresAt: time.Now().Add(72 * time.Hour),
+			Levels:    []domain.EvoLevel{{Number: 1, Upgrades: []domain.EvoUpgrade{{Kind: "playstyle", PlayStyle: ps("Tiki Taka", true)}}}},
+			URL:       "https://www.fut.gg/evolutions/tiki-taka-plus-lab/",
+		},
+		{
+			ID: "e7", Slug: "training-camp-finishing", Name: "Training Camp: Finalização",
+			Description: "Training Camp Evolutions: sessão curta de treino.", TotalTrainingTime: 86400,
+			ExpiresAt: time.Now().Add(44 * time.Hour),
+			Levels:    []domain.EvoLevel{{Number: 1, Upgrades: []domain.EvoUpgrade{{Kind: "attribute", Attr: "sho", Amount: 2}, {Kind: "ignored", Attr: "finishing", Amount: 4}}}},
+			URL:       "https://www.fut.gg/evolutions/training-camp-finishing/",
+		},
+		{
+			ID: "e8", Slug: "cosmetic-kit", Name: "Kit de Verão",
+			Description: "Cosmético desbloqueável para a carta.", CategoryName: "Cosmetics", CategorySlug: "cosmetics", DoesNotUpgradePlayer: true,
+			ExpiresAt: time.Now().Add(240 * time.Hour),
+			URL:       "https://www.fut.gg/evolutions/cosmetic-kit/",
 		},
 	}
 }

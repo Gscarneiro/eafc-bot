@@ -217,7 +217,8 @@ ar até `Ctrl+C`. Cinco telas, cada uma lendo só o endpoint que precisa:
 | `/time` | os titulares + reservas, com GG Rating |
 | `/time/:slug` | atual x potencial de uma carta — funções por posição (Role++/Role+), teto das evoluções disponíveis, preço no tempo |
 | `/mercado` | oportunidades de troca, ordenadas por ganho por moeda gasta |
-| `/evolucoes` | quais evoluções ativas valem a pena **no seu elenco** hoje |
+| `/evolucoes` | catálogo vivo por seção oficial (Evoluções, Rewards, PlayStyles, Roles++, Training Camp e outras) |
+| `/evolucoes/:slug` | laboratório de uma evolução: carta elegível, atributos e subatributos antes/depois, PlayStyles duplicados e fontes |
 
 Um scheduler embutido coleta sozinho, uma vez por dia, no horário de
 `serve.daily_at` (`config.json`, padrão `"05:00"`) — sem cron, sem Agendador
@@ -228,10 +229,31 @@ carta-a-carta (atual x potencial, o `cards_min_rating` mais caro de buscar —
 ~1,3 MB por carta contra o fut.gg) roda junto, à noite, para `/time/:slug`
 nunca esperar isso na hora do clique.
 
-`serve -demo` sobe as 5 telas com dado fictício, sem rede — útil para
+`serve -demo` sobe as telas com dado fictício, sem rede — útil para
 conhecer a interface antes de calibrar o `config.json` (a análise
 carta-a-carta não está disponível no demo, por depender do fut.gg de
-verdade).
+verdade; o catálogo de evoluções e o agente especialista têm fixtures para
+exercitar a experiência completa.
+
+### Catálogo e agente de evoluções
+
+O catálogo usa a categoria publicada pelo fut.gg como uma seção exclusiva:
+uma recompensa que adiciona PlayStyle+ continua em `Rewards`. `PlayStyles`
+e `PlayStyles+` são subdivisões do `PlayStyles Lab`; custo e origem aparecem
+como contexto secundário. A coleta pagina o catálogo inteiro e preserva a
+fonte no snapshot para a tela continuar auditável sem rede.
+
+Opcionalmente, configure um agente consultivo por webhook:
+
+```bash
+EAFC_EVO_AGENT_URL="https://seu-agente.example/analyze"
+EAFC_EVO_AGENT_TOKEN="token-opcional"
+```
+
+O contrato `evolution-analysis.v1` recebe a evolução, a carta selecionada,
+a projeção e as fontes; a resposta precisa trazer `verdict`, `summary` e ao
+menos uma fonte HTTPS. Resultados estruturados ficam no store local e são
+reutilizados quando o mesmo payload for analisado novamente.
 
 Para mexer na interface com hot-reload:
 

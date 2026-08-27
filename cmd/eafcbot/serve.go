@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gscarneiro/eafc-bot/internal/advisor"
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/api"
 	"github.com/gscarneiro/eafc-bot/internal/config"
@@ -63,6 +64,10 @@ func cmdServe(ctx context.Context, args []string) error {
 		return err
 	}
 	defer st.Close()
+	evolutionAdvisor, err := advisor.NewFromEnv()
+	if err != nil {
+		return err
+	}
 
 	d := &daemon{cfg: cfg, store: st}
 	// O status vive na memória do daemon, mas a coleta continua sendo um
@@ -101,11 +106,12 @@ func cmdServe(ctx context.Context, args []string) error {
 	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,
 		EvolutionMinRating: cfg.Serve.CardsMinRating, EvolutionExtraBudget: cfg.Market.ExtraBudget,
-		MarketReserve:  cfg.Market.Reserve,
-		ChemistryModel: cfg.ChemistryModel(),
-		CacheTTL:       10 * time.Second,
-		Trigger:        func() { go d.run(context.Background()) },
-		Status:         d.status,
+		MarketReserve:    cfg.Market.Reserve,
+		ChemistryModel:   cfg.ChemistryModel(),
+		CacheTTL:         10 * time.Second,
+		Trigger:          func() { go d.run(context.Background()) },
+		Status:           d.status,
+		EvolutionAdvisor: evolutionAdvisor,
 	}
 	apiSrv.Config = &api.ConfigEditor{
 		Get:          func() config.UISettings { return d.config().Editable() },
@@ -155,6 +161,12 @@ func cmdServe(ctx context.Context, args []string) error {
 			return current.Editable(), nil
 		},
 		EnvLocked: envLockedSettings(),
+	}
+	if host := listenHost(); host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		apiSrv.PairingToken = strings.TrimSpace(os.Getenv("EAFC_LAN_PAIRING_TOKEN"))
+		if apiSrv.PairingToken == "" {
+			return fmt.Errorf("EAFC_LISTEN_HOST fora de loopback exige EAFC_LAN_PAIRING_TOKEN; mantenha 127.0.0.1 para uso local")
+		}
 	}
 	return serveHTTP(ctx, cfg, dist, apiSrv, *open)
 }
@@ -240,6 +252,16 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 		CacheTTL:       10 * time.Second,
 		Trigger:        func() {}, // não há job de verdade para acionar no demo
 		Status:         func() api.JobStatus { return api.JobStatus{} },
+		EvolutionAdvisor: advisor.Func(func(_ context.Context, _ []byte) (advisor.AnalysisResult, error) {
+			return advisor.AnalysisResult{
+				Verdict:       "situacional",
+				Summary:       "No demo, a evolução parece interessante quando o jogador cobre uma lacuna do XI.",
+				Strengths:     []string{"ganho de atributos confirmado no catálogo"},
+				Risks:         []string{"confirme os objetivos antes de gastar recursos"},
+				BestPositions: []string{"ST", "CAM"},
+				Sources:       []advisor.Source{{Title: "Evoluções no fut.gg", URL: "https://www.fut.gg/evolutions/"}},
+			}, nil
+		}),
 	}
 	apiSrv.Config = &api.ConfigEditor{
 		Get:          func() config.UISettings { return demoCfg.Editable() },

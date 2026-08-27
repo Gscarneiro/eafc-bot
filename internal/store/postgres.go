@@ -548,4 +548,234 @@ func (s *PostgresStore) LatestMomentum(ctx context.Context, cycle string) ([]dom
 	return momentum, nil
 }
 
+func (s *PostgresStore) ListWatchlist(ctx context.Context, cycle string) ([]domain.WatchlistEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM market_watchlist WHERE cycle = $1 ORDER BY updated_at DESC`, cycle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var entries []domain.WatchlistEntry
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var entry domain.WatchlistEntry
+		if err := json.Unmarshal(payload, &entry); err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
+func (s *PostgresStore) UpsertWatchlist(ctx context.Context, cycle string, entry domain.WatchlistEntry) error {
+	if err := entry.Validate(); err != nil {
+		return err
+	}
+	now := time.Now()
+	if entry.CreatedAt.IsZero() {
+		entry.CreatedAt = now
+	}
+	entry.UpdatedAt = now
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO market_watchlist (cycle, id, updated_at, payload) VALUES ($1,$2,$3,$4)
+		ON CONFLICT (cycle,id) DO UPDATE SET updated_at = EXCLUDED.updated_at, payload = EXCLUDED.payload`, cycle, entry.ID, entry.UpdatedAt, payload)
+	return err
+}
+
+func (s *PostgresStore) DeleteWatchlist(ctx context.Context, cycle, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM market_watchlist WHERE cycle = $1 AND id = $2`, cycle, id)
+	return err
+}
+
+func (s *PostgresStore) ListLedger(ctx context.Context, cycle string) ([]domain.LedgerEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM market_ledger WHERE cycle = $1 ORDER BY recorded_at DESC`, cycle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var entries []domain.LedgerEntry
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var entry domain.LedgerEntry
+		if err := json.Unmarshal(payload, &entry); err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
+func (s *PostgresStore) AppendLedger(ctx context.Context, cycle string, entry domain.LedgerEntry) error {
+	if err := entry.Validate(); err != nil {
+		return err
+	}
+	if entry.RecordedAt.IsZero() {
+		entry.RecordedAt = time.Now()
+	}
+	if entry.OccurredAt.IsZero() {
+		entry.OccurredAt = entry.RecordedAt
+	}
+	if entry.Kind == domain.LedgerReversao {
+		var exists bool
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM market_ledger WHERE cycle = $1 AND id = $2)`, cycle, entry.ReversesID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("ledger: lançamento a reverter %q não existe neste ciclo", entry.ReversesID)
+		}
+	}
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO market_ledger (cycle, id, recorded_at, payload) VALUES ($1,$2,$3,$4)`, cycle, entry.ID, entry.RecordedAt, payload)
+	if err != nil && strings.Contains(err.Error(), "duplicate") {
+		return fmt.Errorf("ledger: id %q já existe; use reversão para corrigir", entry.ID)
+	}
+	return err
+}
+
+func (s *PostgresStore) SaveClubRollup(ctx context.Context, cycle string, rollup domain.ClubRollup) error {
+	if rollup.ObservedAt.IsZero() {
+		rollup.ObservedAt = time.Now()
+	}
+	rollup.Cycle = cycle
+	payload, err := json.Marshal(rollup)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO club_rollups (cycle, day, observed_at, payload)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (cycle,day) DO UPDATE SET observed_at = EXCLUDED.observed_at, payload = EXCLUDED.payload`,
+		cycle, rollup.ObservedAt.Format("2006-01-02"), rollup.ObservedAt, payload)
+	return err
+}
+
+func (s *PostgresStore) ClubRollups(ctx context.Context, cycle string, days int) ([]domain.ClubRollup, error) {
+	if days <= 0 {
+		days = clubRollupRetention
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM (
+		SELECT day, payload FROM club_rollups WHERE cycle = $1 ORDER BY day DESC LIMIT $2
+	) recent ORDER BY day ASC`, cycle, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.ClubRollup
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var rollup domain.ClubRollup
+		if err := json.Unmarshal(payload, &rollup); err != nil {
+			return nil, err
+		}
+		out = append(out, rollup)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) ListEvolutionAnalyses(ctx context.Context, cycle, inputHash string) ([]domain.EvolutionAnalysis, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT payload FROM evolution_analyses
+		WHERE cycle = $1 AND ($2 = '' OR input_hash = $2)
+		ORDER BY updated_at DESC`, cycle, inputHash)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.EvolutionAnalysis
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var analysis domain.EvolutionAnalysis
+		if err := json.Unmarshal(payload, &analysis); err != nil {
+			return nil, err
+		}
+		out = append(out, analysis)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) SaveEvolutionAnalysis(ctx context.Context, analysis domain.EvolutionAnalysis) error {
+	if analysis.ID == "" || analysis.Cycle == "" {
+		return fmt.Errorf("análise de evolução sem id ou ciclo")
+	}
+	if analysis.UpdatedAt.IsZero() {
+		analysis.UpdatedAt = time.Now()
+	}
+	if analysis.CreatedAt.IsZero() {
+		analysis.CreatedAt = analysis.UpdatedAt
+	}
+	payload, err := json.Marshal(analysis)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO evolution_analyses
+			(id, cycle, input_hash, status, created_at, updated_at, payload)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (id) DO UPDATE SET
+			status = EXCLUDED.status,
+			updated_at = EXCLUDED.updated_at,
+			payload = EXCLUDED.payload`,
+		analysis.ID, analysis.Cycle, analysis.InputHash, analysis.Status,
+		analysis.CreatedAt, analysis.UpdatedAt, payload)
+	return err
+}
+
+func (s *PostgresStore) ListFeedback(ctx context.Context, cycle string) ([]domain.DecisionFeedback, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM decision_feedback WHERE cycle = $1 ORDER BY recorded_at`, cycle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.DecisionFeedback
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var entry domain.DecisionFeedback
+		if err := json.Unmarshal(payload, &entry); err != nil {
+			return nil, err
+		}
+		out = append(out, entry)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) AppendFeedback(ctx context.Context, cycle string, entry domain.DecisionFeedback) error {
+	if err := entry.Validate(); err != nil {
+		return err
+	}
+	if entry.Cycle != cycle {
+		return fmt.Errorf("ciclo do feedback difere da colecao")
+	}
+	if entry.RecordedAt.IsZero() {
+		entry.RecordedAt = time.Now()
+	}
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO decision_feedback (cycle,id,recorded_at,payload) VALUES ($1,$2,$3,$4)`, cycle, entry.ID, entry.RecordedAt, payload)
+	if err != nil && strings.Contains(err.Error(), "duplicate") {
+		return fmt.Errorf("feedback %q ja existe; feedback e append-only", entry.ID)
+	}
+	return err
+}
+
 var _ Store = (*PostgresStore)(nil)

@@ -13,8 +13,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/gscarneiro/eafc-bot/internal/advisor"
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/cards"
 	"github.com/gscarneiro/eafc-bot/internal/chemistry"
@@ -80,6 +82,14 @@ type Server struct {
 	Trigger func()
 	Status  func() JobStatus
 	Config  *ConfigEditor
+	// PairingToken so e usado quando o processo foi explicitamente exposto na
+	// LAN. Em loopback fica vazio e nao muda a experiencia local.
+	PairingToken string
+	// EvolutionAdvisor é opcional. Quando configurado, a API dispara análises
+	// assíncronas para o webhook e guarda somente o resultado estruturado.
+	EvolutionAdvisor advisor.Client
+	analysisMu       sync.Mutex
+	analysisJobs     map[string]*domain.EvolutionAnalysis
 }
 
 // resolveChemistryModel cai no modelo padrão quando o Server não configurou
@@ -120,10 +130,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/saude", s.handleSaude)
 	mux.HandleFunc("GET /api/time", s.handleTime)
 	mux.HandleFunc("GET /api/time/{slug}", s.handleTimeSlug)
+	mux.HandleFunc("GET /api/clube/insights", s.handleClubInsights)
+	mux.HandleFunc("GET /api/clube/colecao", s.handleClubCollection)
 	mux.HandleFunc("GET /api/gauntlet", s.handleGauntlet)
 	mux.HandleFunc("GET /api/mercado", s.handleMercado)
+	mux.HandleFunc("GET /api/planos/mercado", s.handleMarketPlan)
+	mux.HandleFunc("GET /api/agenda", s.handleAgenda)
+	mux.HandleFunc("POST /api/watchlist", s.guardLocalWrite(s.handleWatchlistCreate))
+	mux.HandleFunc("PUT /api/watchlist/{id}", s.guardLocalWrite(s.handleWatchlistUpdate))
+	mux.HandleFunc("DELETE /api/watchlist/{id}", s.guardLocalWrite(s.handleWatchlistDelete))
+	mux.HandleFunc("POST /api/ledger", s.guardLocalWrite(s.handleLedgerAppend))
+	mux.HandleFunc("POST /api/planos/sbc", s.guardLocalWrite(s.handlePlanoSBC))
+	mux.HandleFunc("GET /api/feedback", s.handleFeedback)
+	mux.HandleFunc("POST /api/feedback", s.guardLocalWrite(s.handleFeedbackAppend))
+	mux.HandleFunc("POST /api/import/club", s.guardLocalWrite(s.handleClubImport))
 	mux.HandleFunc("GET /api/evolucoes", s.handleEvolucoes)
-	mux.HandleFunc("GET /api/evolucoes/{slug}/plano", s.handleEvolucoesPlano)
+	mux.HandleFunc("GET /api/evolucoes/catalogo", s.handleEvolutionCatalog)
+	mux.HandleFunc("GET /api/evolucoes/catalogo/{slug}", s.handleEvolutionCatalogDetail)
+	mux.HandleFunc("POST /api/evolucoes/catalogo/{slug}/analises", s.guardLocalWrite(s.handleEvolutionAnalysisCreate))
+	mux.HandleFunc("GET /api/evolucoes/analises/{id}", s.handleEvolutionAnalysis)
+	// O subtree handler mantém a rota legada /api/evolucoes/{slug}/plano
+	// sem conflitar com o detalhe novo /api/evolucoes/catalogo/{slug}.
+	mux.HandleFunc("GET /api/evolucoes/", s.handleEvolutionSubpath)
 	mux.HandleFunc("GET /api/investimentos", s.handleInvestimentos)
 	mux.HandleFunc("GET /api/elenco/titulares", s.handleTitulares)
 	mux.HandleFunc("GET /api/elenco/reservas", s.handleReservas)
@@ -146,7 +174,16 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("PUT /api/evolucoes/favoritos", s.guardLocalWrite(s.handleFavoritesUpdate))
 		mux.HandleFunc("PUT /api/evolucoes/{slug}/progresso", s.guardLocalWrite(s.handleEvolucoesProgressoUpdate))
 	}
-	return mux
+	if s.PairingToken == "" {
+		return mux
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-EAFC-Pairing-Token") != s.PairingToken {
+			http.Error(w, "pareamento LAN necessario", http.StatusUnauthorized)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // maxLocalWriteBody é o teto de corpo para toda escrita local — folgado o

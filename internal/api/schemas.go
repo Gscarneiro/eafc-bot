@@ -91,6 +91,33 @@ func reservasSchema() query.Schema[RosterCard] {
 	)
 }
 
+func clubInsightsSchema() query.Schema[analyze.ClubInsight] {
+	return query.NewSchema("clube/insights", "kind asc,headline asc", 100,
+		text("kind", func(v analyze.ClubInsight) string { return v.Kind }, true, false),
+		text("headline", func(v analyze.ClubInsight) string { return v.Headline }, false, true),
+		text("confidence", func(v analyze.ClubInsight) string { return v.Confidence }, true, false),
+		text("source", func(v analyze.ClubInsight) string { return v.Source }, true, false),
+		timeField("observed_at", func(v analyze.ClubInsight) time.Time { return v.ObservedAt }),
+	)
+}
+
+func clubCollectionSchema() query.Schema[analyze.CollectionCard] {
+	return query.NewSchema("clube/colecao", "player/rating desc,player/common_name asc", 500,
+		text("player/common_name", func(v analyze.CollectionCard) string { return v.Player.CommonName }, false, true),
+		text("player/name", func(v analyze.CollectionCard) string { return v.Player.Name }, false, true),
+		text("player/position", func(v analyze.CollectionCard) string { return string(v.Player.Position) }, true, false),
+		text("player/version", func(v analyze.CollectionCard) string { return v.Player.Version }, true, false),
+		integer("player/rating", func(v analyze.CollectionCard) int { return v.Player.Rating }),
+		integer("count", func(v analyze.CollectionCard) int { return v.Count }),
+		integer("permanence_days", func(v analyze.CollectionCard) int { return v.PermanenceDays }),
+		text("identity", func(v analyze.CollectionCard) string { return v.Identity }, true, false),
+		text("origin", func(v analyze.CollectionCard) string { return v.Origin }, true, false),
+		boolean("protected", func(v analyze.CollectionCard) bool { return v.Protected }, true),
+		boolean("fodder_candidate", func(v analyze.CollectionCard) bool { return v.Fodder }, true),
+		timeField("observed_at", func(v analyze.CollectionCard) time.Time { return v.ObservedAt }),
+	)
+}
+
 func investimentosSchema() query.Schema[analyze.Investment] {
 	return query.NewSchema("capital/investimentos", "momentum_pct desc,implied_average desc", 200,
 		text("candidate/common_name", func(v analyze.Investment) string { return v.Candidate.CommonName }, false, true),

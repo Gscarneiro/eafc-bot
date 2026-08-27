@@ -191,6 +191,13 @@ type Price struct {
 	Extinct   bool      `json:"extinct"` // sem oferta no mercado
 	IsSBC     bool      `json:"is_sbc"`  // carta de SBC, não é comprável
 	UpdatedAt time.Time `json:"updated_at"`
+	// Platform, Source, Coverage e Quality registram o que a cotação prova.
+	// Eles não inferem volume, spread ou liquidez: fut.gg não expõe esses dados
+	// de forma estável para o bot confirmar.
+	Platform string `json:"platform,omitempty"`
+	Source   string `json:"source,omitempty"`
+	Coverage int    `json:"coverage,omitempty"`
+	Quality  string `json:"quality,omitempty"`
 }
 
 // Tradeable diz se dá para simplesmente comprar a carta no mercado.

@@ -84,6 +84,33 @@ func TestAnalyzeAndBuildOrcamentoDescontaReserva(t *testing.T) {
 	}
 }
 
+// Um compromisso planejado no ledger é tão real para o orçamento quanto a
+// reserva: a coleta seguinte não pode voltar a recomendar gastar essas moedas
+// só porque o snapshot anterior foi criado antes do lançamento local.
+func TestAnalyzeAndBuildOrcamentoDescontaCompromissoDoLedger(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.NewJSON(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.AppendLedger(ctx, "26", domain.LedgerEntry{ID: "evo", Kind: domain.LedgerEvolucao, Status: domain.LedgerPlanejado, GrossCoins: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	titular := domain.Player{ID: 1, Rating: 70, Position: domain.CB, Attributes: domain.Attributes{Pace: 50, Shooting: 50, Passing: 50, Dribbling: 50, Defending: 50, Physical: 50}}
+	candidata := domain.Player{ID: 2, Rating: 90, Position: domain.CB, Attributes: domain.Attributes{Pace: 90, Shooting: 90, Passing: 90, Dribbling: 90, Defending: 90, Physical: 90}, Price: domain.Price{Coins: 5000}}
+	club := domain.Club{GamerTag: "BilingualBee", Cycle: "26", Coins: 5000, Players: []domain.ClubPlayer{{Player: titular, InSquad: true, SquadSlot: domain.CB}}, Squad: domain.Squad{Starters: []domain.SquadSlot{{Position: domain.CB, PlayerID: 1}}}}
+	cfg := config.Default()
+	cfg.GamerTag = club.GamerTag
+	data, err := analyzeAndBuild(ctx, cfg, st, &futgg.Snapshot{Club: club, Market: []domain.Player{candidata}}, time.Now(), true, nil, analyze.GauntletPlan{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Upgrades) != 1 || data.Upgrades[0].Affordable {
+		t.Fatalf("compromisso deveria deixar a carta fora do orçamento: %+v", data.Upgrades)
+	}
+}
+
 func TestClubeVazioNaoSobrescreveSnapshotBom(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.NewJSON(t.TempDir())

@@ -31,6 +31,8 @@ services:
       EAFC_GAMERTAG: ${EAFC_GAMERTAG:?defina EAFC_GAMERTAG no .env com o nome do seu perfil no fut.gg}
       EAFC_BUDGET: ${EAFC_BUDGET:-0}
       EAFC_DSN: ${EAFC_DSN:-}
+      EAFC_EVO_AGENT_URL: ${EAFC_EVO_AGENT_URL:-}
+      EAFC_EVO_AGENT_TOKEN: ${EAFC_EVO_AGENT_TOKEN:-}
       # Dentro do container o processo precisa aceitar a ponte publicada;
       # nativamente o padrão continua sendo loopback.
       EAFC_LISTEN_HOST: ${EAFC_LISTEN_HOST:-0.0.0.0}

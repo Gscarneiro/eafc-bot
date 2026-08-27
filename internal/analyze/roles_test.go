@@ -64,6 +64,34 @@ func TestScoreEhDeterministicoEntreChamadas(t *testing.T) {
 	}
 }
 
+func TestBotScoreBreakdownSomaExatamenteAoTotal(t *testing.T) {
+	p := mk(88, domain.CB, 84, 40, 65, 72, 87, 84, domain.PlayStyle{Name: "Anticipate", Plus: true})
+	p.Cycle, p.Version = "26", "TOTS"
+	score := EvaluateBotScore(p, domain.CB, DefaultBotScoreProfile)
+	var sum float64
+	for _, component := range score.Components {
+		sum += component.Value
+	}
+	if sum != score.Total {
+		t.Fatalf("componentes = %.17f, total = %.17f", sum, score.Total)
+	}
+	if score.Confidence != "confirmada" || score.Profile != DefaultBotScoreProfile || score.Version != "TOTS" {
+		t.Fatalf("metadados do BotScore = %+v", score)
+	}
+}
+
+func TestBotScoresDePerfisOuCiclosIncompativeisNaoComparam(t *testing.T) {
+	a := BotScore{Profile: DefaultBotScoreProfile, Cycle: "26", Position: domain.CB, Total: 90}
+	b := BotScore{Profile: DefaultBotScoreProfile, Cycle: "27", Position: domain.CB, Total: 80}
+	if _, ok := CompareBotScores(a, b); ok {
+		t.Fatal("ciclos diferentes não podem ser comparados")
+	}
+	b.Cycle, b.Profile = "26", "outro_perfil"
+	if _, ok := CompareBotScores(a, b); ok {
+		t.Fatal("perfis diferentes não podem ser comparados")
+	}
+}
+
 // A mesma carta rende diferente em funções diferentes: um volante marcador
 // não pode pontuar igual como CDM e como ponta.
 func TestMesmaCartaRendeDiferentePorFuncao(t *testing.T) {

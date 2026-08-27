@@ -4,11 +4,15 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import App from "./App";
 import Status from "./pages/Status";
 import Time from "./pages/Time";
+import ClubInsights from "./pages/ClubInsights";
 import Gauntlet from "./pages/Gauntlet";
 import PlanoElenco from "./pages/PlanoElenco";
 import CardDetail from "./pages/CardDetail";
 import Mercado from "./pages/Mercado";
+import PlanoMercado from "./pages/PlanoMercado";
+import Agenda from "./pages/Agenda";
 import Evolucoes from "./pages/Evolucoes";
+import EvolucaoDetalhe from "./pages/EvolucaoDetalhe";
 import Investimentos from "./pages/Investimentos";
 import Configuracoes from "./pages/Configuracoes";
 
@@ -19,11 +23,15 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route element={<App />}>
           <Route index element={<Status />} />
           <Route path="time" element={<Time />} />
+          <Route path="time/insights" element={<ClubInsights />} />
           <Route path="time/gauntlet" element={<Gauntlet />} />
           <Route path="time/planos" element={<PlanoElenco />} />
           <Route path="time/:slug" element={<CardDetail />} />
           <Route path="mercado" element={<Mercado />} />
+          <Route path="mercado/plano" element={<PlanoMercado />} />
+          <Route path="agenda" element={<Agenda />} />
           <Route path="evolucoes" element={<Evolucoes />} />
+          <Route path="evolucoes/:slug" element={<EvolucaoDetalhe />} />
           <Route path="capital/investimentos" element={<Investimentos section="investimentos" />} />
           <Route path="capital/vendas" element={<Investimentos section="vendas" />} />
           <Route path="capital/sbcs" element={<Investimentos section="sbcs" />} />

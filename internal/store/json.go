@@ -63,14 +63,16 @@ func (s *JSONStore) writeJSON(name string, v any) error {
 	return os.Rename(tmp, s.path(name))
 }
 
-func pricesFile(cycle string) string { return "prices_" + cycle + ".json" }
-func clubFile(cycle string) string   { return "club_" + cycle + ".json" }
-func seenFile(cycle string) string   { return "seen_" + cycle + ".json" }
+func pricesFile(cycle string) string   { return "prices_" + cycle + ".json" }
+func clubFile(cycle string) string     { return "club_" + cycle + ".json" }
+func seenFile(cycle string) string     { return "seen_" + cycle + ".json" }
+func feedbackFile(cycle string) string { return "feedback_" + cycle + ".json" }
 
 // snapshotRetention é quantos dias de snapshot ficam guardados — o bastante
 // para o gráfico de tendência de 30 dias do status diário, sem deixar o
 // diretório de dados crescer para sempre.
 const snapshotRetention = 30
+const clubRollupRetention = 365
 
 func snapshotsDir(cycle string) string { return filepath.Join("snapshots", cycle) }
 func snapshotFile(cycle string, day time.Time) string {
@@ -194,6 +196,36 @@ func (s *JSONStore) SaveClub(ctx context.Context, club domain.Club) error {
 		_ = os.WriteFile(s.path("prev_"+clubFile(club.Cycle)), prev, 0o644)
 	}
 	return s.writeJSON(clubFile(club.Cycle), club)
+}
+
+func (s *JSONStore) ListFeedback(ctx context.Context, cycle string) ([]domain.DecisionFeedback, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []domain.DecisionFeedback
+	if err := s.readJSON(feedbackFile(cycle), &out); err != nil {
+		return []domain.DecisionFeedback{}, nil
+	}
+	return out, nil
+}
+
+func (s *JSONStore) AppendFeedback(ctx context.Context, cycle string, entry domain.DecisionFeedback) error {
+	if err := entry.Validate(); err != nil {
+		return err
+	}
+	if entry.Cycle != cycle {
+		return fmt.Errorf("ciclo do feedback difere da colecao")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []domain.DecisionFeedback
+	_ = s.readJSON(feedbackFile(cycle), &out)
+	for _, old := range out {
+		if old.ID == entry.ID {
+			return fmt.Errorf("feedback %q ja existe; feedback e append-only", entry.ID)
+		}
+	}
+	out = append(out, entry)
+	return s.writeJSON(feedbackFile(cycle), out)
 }
 
 func (s *JSONStore) PreviousClub(ctx context.Context, gamerTag, cycle string) (domain.Club, bool, error) {
@@ -606,6 +638,217 @@ func (s *JSONStore) LatestMomentum(ctx context.Context, cycle string) ([]domain.
 		return nil, nil // ciclo rápido ainda não rodou não é erro
 	}
 	return momentum, nil
+}
+
+func watchlistFile(cycle string) string { return "watchlist_" + cycle + ".json" }
+func ledgerFile(cycle string) string    { return "ledger_" + cycle + ".json" }
+
+func (s *JSONStore) ListWatchlist(ctx context.Context, cycle string) ([]domain.WatchlistEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.WatchlistEntry
+	if err := s.readJSON(watchlistFile(cycle), &entries); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].UpdatedAt.After(entries[j].UpdatedAt) })
+	return entries, nil
+}
+
+func (s *JSONStore) UpsertWatchlist(ctx context.Context, cycle string, entry domain.WatchlistEntry) error {
+	if err := entry.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.WatchlistEntry
+	if err := s.readJSON(watchlistFile(cycle), &entries); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	now := time.Now()
+	for i := range entries {
+		if entries[i].ID == entry.ID {
+			entry.CreatedAt = entries[i].CreatedAt
+			entry.UpdatedAt = now
+			entries[i] = entry
+			return s.writeJSON(watchlistFile(cycle), entries)
+		}
+	}
+	if entry.CreatedAt.IsZero() {
+		entry.CreatedAt = now
+	}
+	entry.UpdatedAt = now
+	return s.writeJSON(watchlistFile(cycle), append(entries, entry))
+}
+
+func (s *JSONStore) DeleteWatchlist(ctx context.Context, cycle, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.WatchlistEntry
+	if err := s.readJSON(watchlistFile(cycle), &entries); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	kept := entries[:0]
+	for _, entry := range entries {
+		if entry.ID != id {
+			kept = append(kept, entry)
+		}
+	}
+	return s.writeJSON(watchlistFile(cycle), kept)
+}
+
+func (s *JSONStore) ListLedger(ctx context.Context, cycle string) ([]domain.LedgerEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.LedgerEntry
+	if err := s.readJSON(ledgerFile(cycle), &entries); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	domain.SortLedgerNewestFirst(entries)
+	return entries, nil
+}
+
+func (s *JSONStore) AppendLedger(ctx context.Context, cycle string, entry domain.LedgerEntry) error {
+	if err := entry.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.LedgerEntry
+	if err := s.readJSON(ledgerFile(cycle), &entries); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, old := range entries {
+		if old.ID == entry.ID {
+			return fmt.Errorf("ledger: id %q já existe; use reversão para corrigir", entry.ID)
+		}
+	}
+	if entry.Kind == domain.LedgerReversao {
+		found := false
+		for _, old := range entries {
+			if old.ID == entry.ReversesID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("ledger: lançamento a reverter %q não existe neste ciclo", entry.ReversesID)
+		}
+	}
+	if entry.RecordedAt.IsZero() {
+		entry.RecordedAt = time.Now()
+	}
+	if entry.OccurredAt.IsZero() {
+		entry.OccurredAt = entry.RecordedAt
+	}
+	return s.writeJSON(ledgerFile(cycle), append(entries, entry))
+}
+
+func clubRollupsFile(cycle string) string { return "club_rollups_" + cycle + ".json" }
+
+func evolutionAnalysesFile(cycle string) string { return "evolution_analyses_" + cycle + ".json" }
+
+// ListEvolutionAnalyses devolve resultados do mesmo hash do pedido mais
+// recente primeiro. A lista fica particionada por ciclo, como os snapshots,
+// para uma análise do FC 26 nunca ser reutilizada no FC 27.
+func (s *JSONStore) ListEvolutionAnalyses(ctx context.Context, cycle, inputHash string) ([]domain.EvolutionAnalysis, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.EvolutionAnalysis
+	if err := s.readJSON(evolutionAnalysesFile(cycle), &entries); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := entries[:0]
+	for _, entry := range entries {
+		if inputHash == "" || entry.InputHash == inputHash {
+			out = append(out, entry)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	return out, nil
+}
+
+// SaveEvolutionAnalysis faz upsert por id. O resultado é pequeno e separado
+// do snapshot diário para que novas análises não reescrevam dezenas de MB.
+func (s *JSONStore) SaveEvolutionAnalysis(ctx context.Context, analysis domain.EvolutionAnalysis) error {
+	if analysis.ID == "" || analysis.Cycle == "" {
+		return fmt.Errorf("análise de evolução sem id ou ciclo")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.EvolutionAnalysis
+	if err := s.readJSON(evolutionAnalysesFile(analysis.Cycle), &entries); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	found := false
+	for i := range entries {
+		if entries[i].ID == analysis.ID {
+			entries[i] = analysis
+			found = true
+			break
+		}
+	}
+	if !found {
+		entries = append(entries, analysis)
+	}
+	// Mantém um limite local para uma instalação que dispara análises todos os
+	// dias não crescer sem fim; IDs mais antigos continuam auditáveis por 365.
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].UpdatedAt.After(entries[j].UpdatedAt) })
+	if len(entries) > 365 {
+		entries = entries[:365]
+	}
+	return s.writeJSON(evolutionAnalysesFile(analysis.Cycle), entries)
+}
+
+func (s *JSONStore) SaveClubRollup(ctx context.Context, cycle string, rollup domain.ClubRollup) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rollup.ObservedAt.IsZero() {
+		rollup.ObservedAt = time.Now()
+	}
+	rollup.Cycle = cycle
+	var entries []domain.ClubRollup
+	if err := s.readJSON(clubRollupsFile(cycle), &entries); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	day := rollup.ObservedAt.Format("2006-01-02")
+	replaced := false
+	for i := range entries {
+		if entries[i].ObservedAt.Format("2006-01-02") == day {
+			entries[i] = rollup
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		entries = append(entries, rollup)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].ObservedAt.Before(entries[j].ObservedAt) })
+	if len(entries) > clubRollupRetention {
+		entries = entries[len(entries)-clubRollupRetention:]
+	}
+	return s.writeJSON(clubRollupsFile(cycle), entries)
+}
+
+func (s *JSONStore) ClubRollups(ctx context.Context, cycle string, days int) ([]domain.ClubRollup, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.ClubRollup
+	if err := s.readJSON(clubRollupsFile(cycle), &entries); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if days > 0 && len(entries) > days {
+		entries = entries[len(entries)-days:]
+	}
+	return entries, nil
 }
 
 func (s *JSONStore) Close() error { return nil }

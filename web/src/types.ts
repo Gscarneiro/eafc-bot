@@ -321,6 +321,21 @@ export interface Capital {
   available: number;
 }
 
+export type MarketActionKind = "comprar" | "vender" | "esperar" | "observar";
+export interface MarketAction { kind: MarketActionKind; ea_id?: number; name: string; position?: Position; gross_cost: number; net_cost: number; break_even_gross?: number; confidence: string; rationale: string[] | null; conflicts?: string[] | null }
+export interface MarketPlan { capital: Capital; actions: MarketAction[] | null; conflicts?: string[] | null }
+export interface WatchlistEntry { id: string; ea_id: number; name: string; target_coins?: number; note?: string; protected?: boolean; created_at: string; updated_at: string }
+export interface LedgerEntry { id: string; kind: string; status: string; ea_id?: number; gross_coins: number; note?: string; reverses_id?: string; occurred_at: string; recorded_at: string }
+export interface LedgerSummary { spent: number; raised_gross: number; raised_net: number; net_cash: number; pnl: number; committed: number }
+export interface PriceAssessment { ea_id: number; platform?: string; source?: string; observed_at: string; coverage?: number; quality: string; stale: boolean }
+export interface MarketPlanResponse { plan: MarketPlan; watchlist: WatchlistEntry[] | null; ledger: LedgerEntry[] | null; ledger_summary: LedgerSummary; price_assessment: PriceAssessment[] | null }
+
+export interface BotScoreComponent { key: string; label: string; value: number }
+export interface BotScore { profile: string; cycle: string; version: string; position: Position; total: number; components: BotScoreComponent[]; missing?: string[]; confidence: string }
+export interface FodderValue { cards: number; tradeable: number; untradeable: number; gross_coins: number; net_coins: number; missing_prices: number; confidence: string }
+export interface ClubInsight { kind: string; headline: string; detail: string; confidence: string; source?: string; observed_at?: string; bot_score?: BotScore; fodder_value?: FodderValue }
+export interface CollectionCard { player: ClubPlayer; count: number; first_observed?: string; last_observed?: string; permanence_days: number; identity: string; origin: string; source?: string; observed_at?: string; protected: boolean; fodder_candidate: boolean }
+
 export interface RosterCard {
   player: ClubPlayer;
   // Ausente (não vazio — `omitempty` do lado Go) quando a carta está abaixo
@@ -583,7 +598,141 @@ export interface Evolution {
   expires_at: string;
   cycle: string;
   url: string;
+  token_cost?: number;
+  event_token_id?: string;
+  repeatability_count?: number;
+  repeatable?: boolean;
+  allowed_prior_evolution_ids?: string[];
+  end_submission_at?: string;
+  category_id?: string;
+  category_name?: string;
+  category_slug?: string;
+  sbc_name?: string;
+  sbc_url?: string;
+  sbc_slug?: string;
+  objective_group_name?: string;
+  objective_group_url?: string;
+  objective_group_slug?: string;
+  timed_custom?: boolean;
+  custom_unlockable?: boolean;
+  is_timed?: boolean;
+  total_training_time?: number;
+  is_reward_evolution?: boolean;
+  classification?: EvolutionClassification;
 }
+
+export interface EvolutionClassification {
+  category: string;
+  category_label: string;
+  category_slug?: string;
+  category_source: string;
+  origin?: string;
+  origin_label?: string;
+  origin_source?: string;
+  evidence?: string[];
+  warnings?: string[];
+}
+
+export interface EvolutionCost { coins: number; points: number; tokens: number; free: boolean }
+export interface EvolutionCatalogItem {
+  evolution: Evolution;
+  category: string;
+  category_label: string;
+  category_source: string;
+  origin: string;
+  origin_label: string;
+  cost: EvolutionCost;
+  eligible_count: number;
+  eligible: boolean;
+  expired: boolean;
+  repeatable: boolean;
+  lab_subtype?: string;
+  sources: AnalysisSource[];
+  warnings?: string[];
+}
+export interface EvolutionCategoryCount { key: string; label: string; count: number }
+export interface EvolutionCatalogSummary {
+  total: number;
+  eligible: number;
+  expired: number;
+  categories: EvolutionCategoryCount[];
+  origins: Record<string, number>;
+}
+export interface EvolutionCatalogCollection extends ODataPage<EvolutionCatalogItem> {
+  "@eafc.summary": EvolutionCatalogSummary;
+  "@eafc.source": string;
+}
+
+export interface AnalysisSource { title: string; url: string }
+export interface EvolutionEligiblePlayer {
+  key: string;
+  identity_complete: boolean;
+  player: ClubPlayer;
+  card_slug?: string;
+  eligible: boolean;
+  reasons?: string[];
+}
+export interface EvolutionNumberChange {
+  key: string;
+  label: string;
+  group: string;
+  before: number;
+  after: number;
+  delta: number;
+  available: boolean;
+  capped?: boolean;
+}
+export interface EvolutionPlayStyleChange { name: string; plus: boolean; status: string; existing: boolean }
+export interface EvolutionProjection {
+  before: Player;
+  after: Player;
+  main_attributes: EvolutionNumberChange[];
+  detailed_attributes: EvolutionNumberChange[];
+  playstyles: EvolutionPlayStyleChange[];
+  positions_added: Position[];
+  overall_delta: number;
+  warnings?: string[];
+}
+export interface EvolutionPathEvidence {
+  card_slug?: string;
+  confirmed: boolean;
+  final_overall: number;
+  final_gg_rating: number;
+  gg_rating_gain: number;
+  path: EvolutionPath;
+  source_urls: AnalysisSource[];
+}
+export interface EvolutionAnalysis {
+  id: string;
+  cycle: string;
+  evolution_id: string;
+  evolution_slug: string;
+  player_key: string;
+  input_hash: string;
+  contract_version: string;
+  status: "queued" | "running" | "completed" | "failed";
+  created_at: string;
+  updated_at: string;
+  verdict?: "recomendada" | "situacional" | "nao_recomendada" | "dados_insuficientes";
+  summary?: string;
+  strengths?: string[];
+  risks?: string[];
+  best_positions?: string[];
+  sources?: AnalysisSource[];
+  error?: string;
+}
+export interface EvolutionCatalogDetailResponse {
+  item: EvolutionCatalogItem;
+  players: EvolutionEligiblePlayer[];
+  selected_player_key?: string;
+  projection?: EvolutionProjection;
+  paths?: EvolutionPathEvidence[];
+  warnings?: string[];
+  sources: AnalysisSource[];
+  agent_enabled: boolean;
+  analyses?: EvolutionAnalysis[];
+}
+export interface EvolutionAnalysisResponse { analysis: EvolutionAnalysis; reused?: boolean }
 
 export interface EvoMatch {
   evolution: Evolution;
@@ -637,6 +786,10 @@ export interface JobStatus {
   last_success?: string;
   last_error?: string;
 }
+
+export type AgendaFaixa = "agora" | "esta_semana" | "observando";
+export interface AcaoAgenda { id: string; faixa: AgendaFaixa; tipo: string; alvo: string; impacto: string; moedas?: number; prazo?: string; confianca: string; proveniencia: string; conflitos?: string[]; link: string; }
+export interface Agenda { agora: AcaoAgenda[]; esta_semana: AcaoAgenda[]; observando: AcaoAgenda[]; }
 
 export interface UISettings {
   market: {

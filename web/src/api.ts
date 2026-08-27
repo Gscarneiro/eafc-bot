@@ -4,8 +4,13 @@ import type {
   EvolutionFavoritesResponse,
   EvolutionPlanResponse,
   EvolutionProgressResponse,
+  EvolutionCatalogCollection,
+  EvolutionCatalogDetailResponse,
+  EvolutionAnalysisResponse,
   GauntletResponse,
   JobStatus,
+	Agenda,
+	MarketPlanResponse,
   SquadPlanResponse,
   StatusResponse,
   TimeResponse,
@@ -39,6 +44,23 @@ export const fetchCollection = <T,>(path: string, query: ODataQuery = {}) => {
 };
 
 export const fetchStatus = () => getJSON<StatusResponse>("/api/status");
+export const fetchMarketPlan = () => getJSON<MarketPlanResponse>("/api/planos/mercado");
+export const fetchAgenda = () => getJSON<Agenda>("/api/agenda");
+export async function appendFeedback(entry: { action_id: string; status: "aceita" | "adiada" | "descartada"; reason?: string }) {
+  const res = await fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+  if (!res.ok) throw new ApiError(res.status, "Não foi possível registrar o feedback local.");
+  return res.json();
+}
+export async function addWatchlist(entry: { ea_id: number; name: string; target_coins?: number; note?: string; protected?: boolean }) {
+  const res = await fetch("/api/watchlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+  if (!res.ok) throw new ApiError(res.status, "Não foi possível gravar a watchlist.");
+  return res.json();
+}
+export async function appendLedger(entry: { kind: string; status: string; gross_coins: number; note?: string }) {
+  const res = await fetch("/api/ledger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+  if (!res.ok) throw new ApiError(res.status, "Não foi possível gravar o lançamento.");
+  return res.json();
+}
 export const fetchTime = () => getJSON<TimeResponse>("/api/time");
 export const fetchGauntlet = () => getJSON<GauntletResponse>("/api/gauntlet");
 export async function fetchSquadPlan(): Promise<SquadPlanResponse> {
@@ -61,6 +83,24 @@ export async function saveEvolutionFavorites(favorites: string[]): Promise<Evolu
   return res.json();
 }
 export const fetchEvolutionPlan = (slug: string) => getJSON<EvolutionPlanResponse>(`/api/evolucoes/${encodeURIComponent(slug)}/plano`);
+export const fetchEvolutionCatalog = (query = "") => getJSON<EvolutionCatalogCollection>(`/api/evolucoes/catalogo${query ? `?${query}` : ""}`);
+export const fetchEvolutionCatalogDetail = (slug: string, playerKey?: string) => {
+  const query = playerKey ? `?player_key=${encodeURIComponent(playerKey)}` : "";
+  return getJSON<EvolutionCatalogDetailResponse>(`/api/evolucoes/catalogo/${encodeURIComponent(slug)}${query}`);
+};
+export async function requestEvolutionAnalysis(slug: string, playerKey: string, force = false): Promise<EvolutionAnalysisResponse> {
+  const res = await fetch(`/api/evolucoes/catalogo/${encodeURIComponent(slug)}/analises`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ player_key: playerKey, force }),
+  });
+  if (!res.ok) {
+    const text = (await res.text()).trim();
+    throw new ApiError(res.status, text || `POST análise devolveu ${res.status}`);
+  }
+  return res.json();
+}
+export const fetchEvolutionAnalysis = (id: string) => getJSON<EvolutionAnalysisResponse>(`/api/evolucoes/analises/${encodeURIComponent(id)}`);
 export async function saveEvolutionProgress(slug: string, completed: string[]): Promise<EvolutionProgressResponse> {
   const res = await fetch(`/api/evolucoes/${encodeURIComponent(slug)}/progresso`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ completed }) });
   if (!res.ok) throw new ApiError(res.status, `PUT /api/evolucoes/${slug}/progresso devolveu ${res.status}`);

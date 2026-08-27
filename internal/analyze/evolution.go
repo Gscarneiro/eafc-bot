@@ -101,7 +101,7 @@ func FindEvolutionsWithOptions(club domain.Club, evos []domain.Evolution, option
 			}
 			// A evolução vale muito mais se a carta final passa o titular atual.
 			if starter, ok := club.Starter(bestSlot); ok {
-				m.BeatsStarter = after > Score(starter.Player, bestSlot) && starter.ID != cp.ID
+				m.BeatsStarter = after > EvaluateBotScore(starter.Player, bestSlot, DefaultBotScoreProfile).Total && starter.ID != cp.ID
 			}
 			out = append(out, m)
 		}
@@ -130,8 +130,8 @@ func bestSlotGain(before, after domain.Player) (domain.Position, float64, float6
 	}
 
 	for slot := range slots {
-		a := Score(after, slot)
-		b := Score(before, slot)
+		a := EvaluateBotScore(after, slot, DefaultBotScoreProfile).Total
+		b := EvaluateBotScore(before, slot, DefaultBotScoreProfile).Total
 		if first || a > bestAfter {
 			bestSlot, bestBefore, bestAfter, first = slot, b, a, false
 		}

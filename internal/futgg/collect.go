@@ -99,6 +99,14 @@ func (c *Client) Collect(ctx context.Context, gamerTag string, marketFilter Play
 
 	run("evoluções", func() error {
 		evos, err := c.Evolutions(ctx)
+		if len(evos) > 0 {
+			// A paginação pode entregar dados válidos antes de uma falha
+			// posterior. Guardamos o parcial e ainda propagamos o erro para
+			// Capabilities/Errors, em vez de transformar a falha em lista vazia.
+			mu.Lock()
+			snap.Evolutions = evos
+			mu.Unlock()
+		}
 		if err != nil {
 			return err
 		}
@@ -627,20 +635,67 @@ func (c *Client) Evolutions(ctx context.Context) ([]domain.Evolution, error) {
 	if err != nil {
 		return nil, err
 	}
-	body, err := c.GetRaw(ctx, u)
-	if err != nil {
-		return nil, err
-	}
-	nodes, err := c.decodeList(body, "evolutions")
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.Evolution, 0, len(nodes))
-	for _, n := range nodes {
-		e := mapEvolution(n, c.cfg.Cycle, c.cfg.BaseURL, c.lensFor("evolutions"))
-		if e.Name != "" {
+
+	// O catálogo atual devolve {currentPage,next,totalPages,data:[...]};
+	// endpoints antigos continuam devolvendo uma lista única. Percorremos
+	// as páginas somente quando a própria resposta confirma que há outra,
+	// para não inventar paginação em uma rota legada.
+	const maxEvolutionPages = 100
+	var out []domain.Evolution
+	seen := map[string]bool{}
+	lens := c.lensFor("evolutions")
+	for page := 1; page <= maxEvolutionPages; page++ {
+		body, getErr := c.GetRaw(ctx, withPage(u, page))
+		if getErr != nil {
+			if page > 1 && len(out) > 0 {
+				// Uma falha posterior não apaga as páginas já
+				// confirmadas; o snapshot fica parcial e o
+				// capability registra a cobertura da coleta.
+				return out, fmt.Errorf("página %d: %w", page, getErr)
+			}
+			return nil, getErr
+		}
+		nodes, decodeErr := c.decodeList(body, "evolutions")
+		if decodeErr != nil {
+			if page > 1 && len(out) > 0 {
+				return out, fmt.Errorf("página %d: %w", page, decodeErr)
+			}
+			return nil, decodeErr
+		}
+		for _, n := range nodes {
+			e := mapEvolution(n, c.cfg.Cycle, c.cfg.BaseURL, lens)
+			if e.Name == "" {
+				continue
+			}
+			key := strings.ToLower(strings.TrimSpace(e.ID + "\x00" + e.Slug + "\x00" + e.Name))
+			if key != "\x00\x00" && seen[key] {
+				continue
+			}
+			if key != "\x00\x00" {
+				seen[key] = true
+			}
 			out = append(out, e)
 		}
+
+		var wrapper node
+		if err := jsonUnmarshalNode(body, &wrapper); err != nil {
+			break // lista pura/legada: não há metadado de página
+		}
+		totalPages := wrapper.int("totalPages", "total_pages", "pages")
+		next := strings.TrimSpace(wrapper.str("next", "nextPage", "next_page"))
+		// Algumas respostas usam next=false/0 em vez de omitirem o campo.
+		// toStr preserva o literal; tratá-lo como cursor faria a coleta
+		// repetir a última página até o teto de segurança.
+		if strings.EqualFold(next, "false") || next == "0" || strings.EqualFold(next, "null") {
+			next = ""
+		}
+		hasMore := next != "" || (totalPages > 0 && page < totalPages)
+		if len(nodes) == 0 || !hasMore {
+			break
+		}
+		// next pode ser um cursor/URL, mas a API observada usa apenas
+		// um indicador booleano. A próxima requisição sempre usa o
+		// parâmetro page para manter cache e limites determinísticos.
 	}
 	return out, nil
 }

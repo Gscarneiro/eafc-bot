@@ -136,7 +136,7 @@ func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) 
 			continue
 		}
 		slot := squadSlot.Position
-		curScore := Score(current.Player, slot)
+		curScore := EvaluateBotScore(current.Player, slot, DefaultBotScoreProfile).Total
 		recoup := current.NetSellValue()
 
 		var perSlot []Upgrade
@@ -147,7 +147,7 @@ func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) 
 			}
 			fitsSomeSlot[i] = true
 
-			candScore := Score(cand, slot)
+			candScore := EvaluateBotScore(cand, slot, DefaultBotScoreProfile).Total
 			gain := candScore - curScore
 			if gain < opt.MinGain {
 				if !funnel.HasBest || gain > funnel.BestGain {
@@ -419,7 +419,7 @@ func WeakestLinks(club domain.Club, n int) []struct {
 			continue
 		}
 		slot := squadSlot.Position
-		all = append(all, entry{Slot: slot, Player: p, Score: Score(p.Player, slot)})
+		all = append(all, entry{Slot: slot, Player: p, Score: EvaluateBotScore(p.Player, slot, DefaultBotScoreProfile).Total})
 		if p.GGRating <= 0 {
 			haveGG = false
 		}

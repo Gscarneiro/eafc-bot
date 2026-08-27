@@ -148,7 +148,32 @@ type Store interface {
 	// chamados sem `serve` no ar).
 	LatestMomentum(ctx context.Context, cycle string) ([]domain.Player, error)
 
+	// Watchlist e ledger são decisão manual local, particionada pelo ciclo.
+	// O ledger só aceita acréscimos; uma correção é outro lançamento do tipo
+	// reversão, para a auditoria nunca perder o que foi registrado.
+	ListWatchlist(ctx context.Context, cycle string) ([]domain.WatchlistEntry, error)
+	UpsertWatchlist(ctx context.Context, cycle string, entry domain.WatchlistEntry) error
+	DeleteWatchlist(ctx context.Context, cycle, id string) error
+	ListLedger(ctx context.Context, cycle string) ([]domain.LedgerEntry, error)
+	AppendLedger(ctx context.Context, cycle string, entry domain.LedgerEntry) error
+	ListFeedback(ctx context.Context, cycle string) ([]domain.DecisionFeedback, error)
+	AppendFeedback(ctx context.Context, cycle string, entry domain.DecisionFeedback) error
+
+	// ClubRollup preserva memória compacta da coleção além da retenção dos
+	// snapshots completos. É uma fotografia de identidade/multiplicidade, não
+	// outra cópia do mercado ou do relatório diário.
+	SaveClubRollup(ctx context.Context, cycle string, rollup domain.ClubRollup) error
+	ClubRollups(ctx context.Context, cycle string, days int) ([]domain.ClubRollup, error)
+
 	Close() error
+}
+
+// EvolutionAnalysisStore é uma extensão opcional do Store para o histórico
+// do agente. Mantê-la separada preserva implementações/fakes de Store antigas:
+// a API usa o cache em memória quando o backend não oferece persistência.
+type EvolutionAnalysisStore interface {
+	ListEvolutionAnalyses(ctx context.Context, cycle, inputHash string) ([]domain.EvolutionAnalysis, error)
+	SaveEvolutionAnalysis(ctx context.Context, analysis domain.EvolutionAnalysis) error
 }
 
 // Snapshot é o resultado completo de uma coleta+análise: os dados brutos que
@@ -160,9 +185,10 @@ type Store interface {
 // report.Build com estes mesmos campos, em vez deste tipo aprender a
 // calcular isso de novo.
 type Snapshot struct {
-	GeneratedAt time.Time     `json:"generated_at"`
-	Duration    time.Duration `json:"duration"`
-	Cycle       string        `json:"cycle"`
+	GeneratedAt     time.Time     `json:"generated_at"`
+	Duration        time.Duration `json:"duration"`
+	Cycle           string        `json:"cycle"`
+	BotScoreProfile string        `json:"bot_score_profile,omitempty"`
 
 	Club       domain.Club        `json:"club"`
 	Capital    domain.Capital     `json:"capital"`

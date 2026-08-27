@@ -68,6 +68,8 @@ func run() error {
 		return cmdDemo(args)
 	case "quimica":
 		return cmdQuimica(ctx, args)
+	case "import":
+		return cmdImportClub(ctx, args)
 	case "help", "-h", "--help":
 		usage()
 		return nil
@@ -101,6 +103,8 @@ func usage() {
                          (-modelo escolhe outro modelo; -calibrar reproduz o
                          modelo contra os snapshots guardados, -dias limita
                          quantos)
+  import club             valida e importa um JSON/CSV LOCAL do clube
+                         (-file; -dry-run nunca grava; rejeita segredos)
 
 Variáveis de ambiente:
   EAFC_GAMERTAG      o nome do seu perfil no fut.gg (não o EA ID)
@@ -338,7 +342,15 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 	// era cash+raisable ad-hoc, sem reserva nenhuma — orçamento de compra e
 	// capital exibido podiam divergir sobre quanto dava para gastar. Available
 	// já desconta reserva e comprometido (ver domain.Capital).
-	capital := snap.Club.Capital(cfg.Market.ExtraBudget, cfg.Market.Reserve, 0)
+	committed := 0
+	if st != nil {
+		if ledger, err := st.ListLedger(ctx, cfg.FutGG.Cycle); err != nil {
+			snap.Errors = append(snap.Errors, "lendo compromissos do ledger: "+err.Error())
+		} else {
+			committed = domain.SummarizeLedger(ledger).Committed
+		}
+	}
+	capital := snap.Club.Capital(cfg.Market.ExtraBudget, cfg.Market.Reserve, committed)
 	budget := capital.Available
 
 	upOpt := analyze.DefaultUpgradeOptions(budget)
@@ -443,6 +455,7 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 				GeneratedAt:      data.GeneratedAt,
 				Duration:         time.Since(started),
 				Cycle:            snap.Club.Cycle,
+				BotScoreProfile:  string(analyze.DefaultBotScoreProfile),
 				Club:             snap.Club,
 				Capital:          capital,
 				Market:           snap.Market,
@@ -471,6 +484,16 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 			})
 			if err != nil {
 				data.Errors = append(data.Errors, "gravando snapshot: "+err.Error())
+			}
+			// A memória da coleção não acompanha a poda dos snapshots grandes:
+			// guarda só identidade e multiplicidade por dia, portanto continua
+			// barata mesmo quando o relatório completo expira em 30 dias.
+			observedAt := snap.Club.SyncedAt
+			if observation, ok := snap.Capabilities["clube"]; ok && !observation.ObservedAt.IsZero() {
+				observedAt = observation.ObservedAt
+			}
+			if err := st.SaveClubRollup(ctx, cfg.FutGG.Cycle, domain.RollupFromClub(snap.Club, observedAt)); err != nil {
+				data.Errors = append(data.Errors, "gravando memória da coleção: "+err.Error())
 			}
 		}
 	}

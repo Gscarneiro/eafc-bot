@@ -110,6 +110,28 @@ func TestSaveSnapshotRespeitaRetencaoConfigurada(t *testing.T) {
 	}
 }
 
+func TestClubRollupNaoSeguePodaDoSnapshotCompleto(t *testing.T) {
+	st, err := NewJSONWithRetention(t.TempDir(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, 1, 1, 5, 0, 0, 0, time.UTC)
+	for i := 0; i < 4; i++ {
+		day := base.AddDate(0, 0, i)
+		if err := st.SaveSnapshot(ctx, Snapshot{GeneratedAt: day, Cycle: "26"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SaveClubRollup(ctx, "26", domain.ClubRollup{ObservedAt: day, Entries: []domain.ClubRollupEntry{{EAID: 1, Count: 1}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rollups, err := st.ClubRollups(ctx, "26", 0)
+	if err != nil || len(rollups) != 4 {
+		t.Fatalf("rollups deveriam sobreviver à poda de snapshots: %d, %v", len(rollups), err)
+	}
+}
+
 func TestDiffClubsPreservaCartasDuplicadas(t *testing.T) {
 	mesmaCarta := func(item string) domain.ClubPlayer {
 		return domain.ClubPlayer{Player: domain.Player{ID: 42, Name: "Carta repetida"}, ClubItemID: item}

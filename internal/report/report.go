@@ -209,7 +209,7 @@ func SquadSummary(club domain.Club) (avg float64, weakSlot domain.Position, weak
 		if !ok {
 			continue
 		}
-		scoreSum += analyze.Score(p.Player, squadSlot.Position)
+		scoreSum += analyze.EvaluateBotScore(p.Player, squadSlot.Position, analyze.DefaultBotScoreProfile).Total
 		scoreN++
 		if p.GGRating > 0 {
 			ggSum += p.GGRating

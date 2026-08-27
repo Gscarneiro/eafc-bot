@@ -421,19 +421,48 @@ func mapClubPlayer(n node, cycle string, l lens) domain.ClubPlayer {
 
 func mapEvolution(n node, cycle string, baseURL string, l lens) domain.Evolution {
 	e := domain.Evolution{
-		ID:          n.str(l.k("slug", "id", "eaId", "evolutionId")...),
-		Slug:        n.str(l.k("slug", "slug", "path")...),
-		Name:        n.str(l.k("name", "name", "title")...),
-		Description: n.str("description", "subtitle", "summary"),
-		CoinCost:    n.int(l.k("coin_cost", "coinCost", "coin_cost", "priceCoins", "costCoins")...),
-		PointCost:   n.int("pointCost", "point_cost", "pricePoints", "costPoints"),
-		Cycle:       cycle,
+		ID:                       n.str(l.k("slug", "id", "eaId", "evolutionId")...),
+		Slug:                     n.str(l.k("slug", "slug", "path")...),
+		Name:                     n.str(l.k("name", "name", "title")...),
+		Description:              n.str("description", "subtitle", "summary"),
+		CoinCost:                 n.int(l.k("coin_cost", "coinCost", "coin_cost", "priceCoins", "costCoins")...),
+		PointCost:                n.int(l.k("point_cost", "pointCost", "point_cost", "pointsCost", "pricePoints", "costPoints")...),
+		TokenCost:                n.int(l.k("token_cost", "tokenCost", "token_cost", "costTokens", "priceTokens")...),
+		EventTokenID:             n.str(l.k("event_token_id", "eventTokenId", "event_token_id", "tokenId")...),
+		RepeatabilityCount:       n.int(l.k("repeatability_count", "repeatabilityCount", "repeatability_count", "repeatableCount")...),
+		Repeatable:               n.bool_(l.k("repeatable", "isRepeatable", "repeatable")...),
+		AllowedPriorEvolutionIDs: n.strs(l.k("allowed_prior_evolution_ids", "allowedPriorEvolutionIds", "allowed_prior_evolution_ids", "priorEvolutionIds")...),
+		Cycle:                    cycle,
 	}
 	if ts := n.str(l.k("expires_at", "expiresAt", "expires_at", "endDate", "endsAt")...); ts != "" {
 		if t, err := parseTime(ts); err == nil {
 			e.ExpiresAt = t
 		}
 	}
+	if ts := n.str(l.k("end_submission_at", "endSubmissionTime", "end_submission_time", "endSubmissionAt")...); ts != "" {
+		if t, err := parseTime(ts); err == nil {
+			e.EndSubmissionAt = t
+		}
+	}
+	e.CategoryID = n.str(l.k("category_id", "categoryId", "category_id")...)
+	e.CategoryName = n.str(l.k("category_name", "categoryName", "category_name")...)
+	e.CategorySlug = n.str(l.k("category_slug", "categorySlug", "category_slug")...)
+	e.SBCName = n.str(l.k("sbc_name", "sbcName", "sbc_name")...)
+	e.SBCURL = n.str(l.k("sbc_url", "sbcUrl", "sbc_url")...)
+	e.SBCSlug = n.str(l.k("sbc_slug", "sbcSlug", "sbc_slug")...)
+	e.ObjectiveGroupName = n.str(l.k("objective_group_name", "objectiveGroupName", "objective_group_name")...)
+	e.ObjectiveGroupURL = n.str(l.k("objective_group_url", "objectiveGroupUrl", "objective_group_url")...)
+	e.ObjectiveGroupSlug = n.str(l.k("objective_group_slug", "objectiveGroupSlug", "objective_group_slug")...)
+	e.TimedCustom = n.bool_(l.k("timed_custom", "timedCustom", "timed_custom")...)
+	e.CustomUnlockable = n.bool_(l.k("custom_unlockable", "customUnlockable", "custom_unlockable")...)
+	e.IsTimed = n.bool_(l.k("is_timed", "isTimed", "is_timed")...)
+	e.TotalTrainingTime = n.int(l.k("total_training_time", "totalTrainingTime", "total_training_time")...)
+	e.HideFromFilters = n.bool_(l.k("hide_from_filters", "hideFromFilters", "hide_from_filters")...)
+	e.ExcludeFromActivePaths = n.bool_(l.k("exclude_from_active_paths", "excludeFromActivePaths", "exclude_from_active_paths")...)
+	e.IsGKEvolution = n.bool_(l.k("is_gk_evolution", "isGkEvolution", "is_gk_evolution")...)
+	e.IsNotInEvoLab = n.bool_(l.k("is_not_in_evo_lab", "isNotInEvoLab", "is_not_in_evo_lab")...)
+	e.DoesNotUpgradePlayer = n.bool_(l.k("does_not_upgrade_player", "doesNotUpgradePlayer", "does_not_upgrade_player")...)
+	e.IsRewardEvolution = n.bool_(l.k("is_reward_evolution", "isRewardEvolution", "is_reward_evolution")...)
 	if e.Slug != "" {
 		e.URL = strings.TrimRight(baseURL, "/") + "/evolutions/" + strings.Trim(e.Slug, "/") + "/"
 	}
@@ -451,7 +480,7 @@ func mapEvolution(n node, cycle string, baseURL string, l lens) domain.Evolution
 		}
 		e.Levels = append(e.Levels, level)
 	}
-	return e
+	return e.ClassifyEvolution()
 }
 
 // mapRequirement traduz o requisito para uma forma que o motor consegue
@@ -690,7 +719,14 @@ func mapUpgrade(n node, l lens) domain.EvoUpgrade {
 		// dobraria o ganho de passe. Este case tem que vir ANTES do
 		// default/attrKey, e captura só o prefixo "attribute_", deixando
 		// "face_*" cair no caminho normal logo abaixo.
+		// Mantemos Kind="ignored" por compatibilidade com snapshots e
+		// clientes antigos; Attr agora preserva o subatributo para a
+		// projeção detalhada (Apply trata ambos os nomes).
 		up.Kind = "ignored"
+		up.Attr = detailedAttrKey(strings.TrimPrefix(key, "attribute_"))
+		if up.Attr == "" {
+			up.Kind = "unknown"
+		}
 	default:
 		if attr := attrKey(key); attr != "" {
 			up.Kind, up.Attr, up.Amount = "attribute", attr, amount
@@ -699,6 +735,54 @@ func mapUpgrade(n node, l lens) domain.EvoUpgrade {
 		}
 	}
 	return up
+}
+
+// detailedAttrKey normaliza o nome explícito que o fut.gg usa no upgrade
+// para a chave estável de domain.DetailedAttributes. O mapa é deliberado:
+// um campo novo não pode cair em outro subatributo por substring.
+func detailedAttrKey(key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	key = strings.ReplaceAll(key, "-", "_")
+	key = strings.ReplaceAll(key, " ", "_")
+	switch key {
+	case "acceleration", "sprint_speed", "agility", "balance", "jumping", "stamina", "strength", "reactions", "aggression", "composure", "interceptions", "positioning", "vision", "ball_control", "crossing", "dribbling", "finishing", "fk_accuracy", "heading_accuracy", "long_passing", "short_passing", "defensive_awareness", "shot_power", "long_shots", "standing_tackle", "sliding_tackle", "volleys", "curve", "penalties":
+		return key
+	case "gk_diving", "gk_handling", "gk_kicking", "gk_reflexes", "gk_speed", "gk_positioning":
+		return key
+	case "fkaccuracy":
+		return "fk_accuracy"
+	case "headingaccuracy":
+		return "heading_accuracy"
+	case "longpassing":
+		return "long_passing"
+	case "shortpassing":
+		return "short_passing"
+	case "ballcontrol":
+		return "ball_control"
+	case "defensiveawareness":
+		return "defensive_awareness"
+	case "shotpower":
+		return "shot_power"
+	case "longshots":
+		return "long_shots"
+	case "standingtackle":
+		return "standing_tackle"
+	case "slidingtackle":
+		return "sliding_tackle"
+	case "gkdiving":
+		return "gk_diving"
+	case "gkhandling":
+		return "gk_handling"
+	case "gkkicking":
+		return "gk_kicking"
+	case "gkreflexes":
+		return "gk_reflexes"
+	case "gkspeed":
+		return "gk_speed"
+	case "gkpositioning":
+		return "gk_positioning"
+	}
+	return ""
 }
 
 func attrKey(key string) string {

@@ -28,14 +28,17 @@ const NAV = [
   { to: "/time", label: "Elenco", icon: "squad" as IconName },
   { to: "/mercado", label: "Mercado", icon: "market" as IconName },
 ];
+const HOJE_NAV = [{ to: "/agenda", label: "Agenda" }];
 
 const ELENCO_NAV = [
   { to: "/time", label: "Meu time", end: true },
+  { to: "/time/insights", label: "Insights" },
   { to: "/time/gauntlet", label: "Gauntlet" },
   { to: "/time/planos", label: "Planejador" },
 ];
 const AQUISICAO_NAV = [
   { to: "/mercado", label: "Oportunidades", end: true },
+  { to: "/mercado/plano", label: "Mesa de decisão" },
   { to: "/evolucoes", label: "Evoluções" },
 ];
 const CAPITAL_NAV = [
@@ -117,6 +120,7 @@ export default function App() {
           ))}
           <div className="subnav desktop-subnav">
             {location.pathname.startsWith("/time") && <SubNav title="Elenco" items={ELENCO_NAV} />}
+            {(location.pathname === "/" || location.pathname.startsWith("/agenda")) && <SubNav title="Hoje" items={HOJE_NAV} />}
             {(location.pathname.startsWith("/mercado") || location.pathname.startsWith("/evolucoes") || location.pathname.startsWith("/capital")) && (
               <>
                 <SubNav title="Aquisição" items={AQUISICAO_NAV} />
@@ -136,8 +140,8 @@ export default function App() {
           <div className="topbar-inner">
             <div className="mobile-brand"><span className="brand-mark">e</span><span><strong>eafc</strong><small>bot</small></span></div>
             <div className="topbar-context">
-              <span className="context-kicker">{location.pathname === "/" ? "Visão geral" : location.pathname.startsWith("/time") ? "Elenco" : location.pathname.startsWith("/configuracoes") ? "Preferências" : "Mercado"}</span>
-              <span className="context-title">{location.pathname === "/" ? "Hoje" : location.pathname.startsWith("/time") ? "Meu time" : location.pathname.startsWith("/configuracoes") ? "Configurações" : location.pathname.startsWith("/evolucoes") ? "Evoluções" : location.pathname.startsWith("/capital") ? "Capital" : "Oportunidades"}</span>
+              <span className="context-kicker">{location.pathname === "/" || location.pathname.startsWith("/agenda") ? "Visão geral" : location.pathname.startsWith("/time") ? "Elenco" : location.pathname.startsWith("/configuracoes") ? "Preferências" : "Mercado"}</span>
+              <span className="context-title">{location.pathname === "/" ? "Hoje" : location.pathname === "/agenda" ? "Agenda" : location.pathname === "/time/insights" ? "Insights" : location.pathname.startsWith("/time") ? "Meu time" : location.pathname.startsWith("/configuracoes") ? "Configurações" : location.pathname === "/mercado/plano" ? "Mesa de decisão" : location.pathname.startsWith("/evolucoes") ? "Evoluções" : location.pathname.startsWith("/capital") ? "Capital" : "Oportunidades"}</span>
             </div>
             <div className="job">
               <span className="job-status">
@@ -168,6 +172,7 @@ export default function App() {
             )}
           </div>
         )}
+        {location.pathname.startsWith("/agenda") && <div className="mobile-section-nav"><SubNav title="Hoje" items={HOJE_NAV} compact /></div>}
         <main className="content">
           <Outlet />
         </main>

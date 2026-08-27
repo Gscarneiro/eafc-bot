@@ -21,6 +21,52 @@ type RoleWeights struct {
 	MinPace int
 }
 
+// BotScoreProfile identifica a calibração usada para decidir compras. Ele
+// nunca deve ser confundido com o GG Rating, que é uma observação do fut.gg
+// para comparar cartas dentro do elenco.
+type BotScoreProfile string
+
+const DefaultBotScoreProfile BotScoreProfile = "mercado_v1"
+
+// BotScoreComponent é uma parcela aditiva da nota. O conjunto é mantido
+// pequeno de propósito: a soma reproduz exatamente Total sem esconder pesos
+// em uma string de explicação.
+type BotScoreComponent struct {
+	Key   string  `json:"key"`
+	Label string  `json:"label"`
+	Value float64 `json:"value"`
+}
+
+// BotScore é a opinião reproduzível do bot sobre uma carta em uma função.
+// Cycle e Version viajam junto para impedir uma comparação silenciosa entre
+// perfis ou ciclos distintos quando a configuração virar para o próximo FC.
+type BotScore struct {
+	Profile    BotScoreProfile     `json:"profile"`
+	Cycle      string              `json:"cycle"`
+	Version    string              `json:"version"`
+	Position   domain.Position     `json:"position"`
+	Total      float64             `json:"total"`
+	Components []BotScoreComponent `json:"components"`
+	Missing    []string            `json:"missing,omitempty"`
+	Confidence string              `json:"confidence"`
+}
+
+// CompatibleBotScores só permite comparação quando as duas notas têm o mesmo
+// perfil, ciclo e função. Misturar opinião de mercado com GG Rating — ou uma
+// calibração FC 26 com FC 27 — produz números atraentes, mas sem significado.
+func CompatibleBotScores(a, b BotScore) bool {
+	return a.Profile != "" && a.Profile == b.Profile &&
+		a.Cycle != "" && a.Cycle == b.Cycle && a.Position == b.Position
+}
+
+// CompareBotScores devolve a diferença somente quando a comparação é válida.
+func CompareBotScores(a, b BotScore) (float64, bool) {
+	if !CompatibleBotScores(a, b) {
+		return 0, false
+	}
+	return a.Total - b.Total, true
+}
+
 // roleTable é a tabela de funções. Ajustar aqui muda todo o ranking do bot,
 // então é o ponto natural para calibrar com a sua forma de jogar.
 var roleTable = map[domain.Position]RoleWeights{
@@ -147,18 +193,34 @@ func WeightsFor(pos domain.Position) (RoleWeights, bool) {
 // FindUpgrades/WeakestLinks de forma não-determinística entre execuções.
 var attrOrder = []string{"pac", "sho", "pas", "dri", "def", "phy"}
 
-// Score dá a nota de 0 a 100 de um jogador NUMA função específica.
-// É a métrica que o bot usa para dizer "esse é melhor que aquele",
-// e não o overall da carta.
+// Score mantém a API histórica dos analisadores. Todo cálculo novo deve usar
+// EvaluateBotScore quando precisar publicar perfil e breakdown; este wrapper
+// evita uma migração quebrar ranking já testado de uma vez.
 func Score(p domain.Player, pos domain.Position) float64 {
+	return EvaluateBotScore(p, pos, DefaultBotScoreProfile).Total
+}
+
+// EvaluateBotScore calcula a nota de mercado e deixa cada parcela auditável.
+// A ordem de soma é fixa, como Score sempre exigiu, para o breakdown ser
+// reproduzível bit a bit entre chamadas.
+func EvaluateBotScore(p domain.Player, pos domain.Position, profile BotScoreProfile) BotScore {
+	out := BotScore{Profile: profile, Cycle: p.Cycle, Version: p.Version, Position: pos, Confidence: "confirmada"}
 	rw, ok := roleTable[pos]
 	if !ok {
-		return float64(p.Rating)
+		out.Components = []BotScoreComponent{{Key: "overall_fallback", Label: "overall (função sem perfil)", Value: float64(p.Rating)}}
+		out.Total = float64(p.Rating)
+		out.Confidence = "estimada"
+		return out
 	}
 
-	var base float64
 	for _, attr := range attrOrder {
-		base += float64(p.Attributes.Get(attr)) * rw.Weights[attr]
+		value := p.Attributes.Get(attr)
+		if rw.Weights[attr] > 0 && value == 0 {
+			out.Missing = append(out.Missing, attr)
+		}
+		component := BotScoreComponent{Key: "atributo_" + attr, Label: attr, Value: float64(value) * rw.Weights[attr]}
+		out.Components = append(out.Components, component)
+		out.Total += component.Value
 	}
 
 	// Bônus de PlayStyle: cada PlayStyle relevante soma seu peso,
@@ -178,6 +240,8 @@ func Score(p domain.Player, pos domain.Position) float64 {
 	if psBonus > 12 {
 		psBonus = 12
 	}
+	out.Components = append(out.Components, BotScoreComponent{Key: "playstyles", Label: "PlayStyles relevantes", Value: psBonus})
+	out.Total += psBonus
 
 	// Drible ruim e perna ruim fraca punem mais no ataque que na defesa.
 	var techBonus float64
@@ -185,18 +249,28 @@ func Score(p domain.Player, pos domain.Position) float64 {
 		attacking := rw.Weights["dri"] + rw.Weights["sho"]
 		techBonus = (float64(p.SkillMoves-3)*0.8 + float64(p.WeakFoot-3)*0.5) * attacking
 	}
+	out.Components = append(out.Components, BotScoreComponent{Key: "tecnica", Label: "perna fraca e dribles", Value: techBonus})
+	out.Total += techBonus
 
 	// Corte de ritmo: carta lenta demais para a função é penalizada forte,
 	// em vez de descartada, para o relatório ainda poder citá-la.
-	penalty := 0.0
+	pacePenalty := 0.0
 	if rw.MinPace > 0 && p.Attributes.Pace < rw.MinPace {
-		penalty = float64(rw.MinPace-p.Attributes.Pace) * 0.6
+		pacePenalty = float64(rw.MinPace-p.Attributes.Pace) * 0.6
 	}
+	out.Components = append(out.Components, BotScoreComponent{Key: "corte_ritmo", Label: "ritmo abaixo do piso", Value: -pacePenalty})
+	out.Total -= pacePenalty
 
 	// Jogar fora da posição natural custa desempenho real em campo.
+	positionPenalty := 0.0
 	if !p.PlaysAt(pos) {
-		penalty += 4
+		positionPenalty = 4
 	}
+	out.Components = append(out.Components, BotScoreComponent{Key: "fora_posicao", Label: "fora da posição", Value: -positionPenalty})
+	out.Total -= positionPenalty
 
-	return base + psBonus + techBonus - penalty
+	if len(out.Missing) > 0 || p.Cycle == "" {
+		out.Confidence = "incompleta"
+	}
+	return out
 }

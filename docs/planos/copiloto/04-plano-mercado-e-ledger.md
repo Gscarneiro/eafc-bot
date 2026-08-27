@@ -17,3 +17,11 @@ O ledger é append-only para compra, venda, SBC, Evolução, ajuste e reversão.
 
 Casos de múltiplas compras, vendas planejadas, preço ausente/stale, taxa, reserva e conflito entre compra, proteção e Evolução são determinísticos e explicáveis.
 
+## Estado da implementação
+
+Em revisão. O plano é calculado localmente a partir do snapshot, da watchlist
+e do ledger do ciclo; lançamentos confirmados e planejados permanecem
+append-only, e uma correção é uma reversão explícita. A migração
+`005_market_ledger.sql` acrescenta as tabelas equivalentes para Postgres.
+Preço expõe plataforma, fonte, horário, cobertura e qualidade, mas não afirma
+liquidez ou causalidade sem volume e spread observados.

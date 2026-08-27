@@ -17,3 +17,13 @@ Memória do clube opera como multiconjunto: entradas, saídas, duplicatas, carta
 
 Breakdown soma exatamente ao total, perfis incompatíveis não são comparados e duas cópias geram deltas corretos.
 
+## Estado da implementação
+
+Em revisão. `BotScore` publica perfil, ciclo, versão, componentes aditivos,
+dados ausentes e confiança; `Score()` permanece somente como wrapper de
+compatibilidade. A memória da coleção é gravada como rollup compacto diário
+por até 365 dias, independente dos snapshots completos, e deixa explícitas a
+identidade física incompleta e a origem desconhecida. `/api/clube/insights` e
+`/api/clube/colecao` são coleções OData, com fonte e horário do retrato. A
+migração `006_club_rollups.sql` acrescenta a persistência equivalente em
+Postgres.

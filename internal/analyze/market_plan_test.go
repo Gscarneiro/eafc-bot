@@ -49,3 +49,25 @@ func TestPlanMarketNaoVendeCartaProtegidaParaEvolucao(t *testing.T) {
 		t.Fatalf("esperava venda bloqueada e conflito, veio %+v", plan)
 	}
 }
+
+func TestPlanMarketResumeEvolucoesPorCartaEIgnoraVendaSemCotacao(t *testing.T) {
+	semCotacao := domain.ClubPlayer{Player: domain.Player{ID: 1, Name: "Sem cotação"}}
+	candidata := domain.ClubPlayer{Player: domain.Player{ID: 2, Name: "Candidata", Price: domain.Price{Coins: 10_000}}}
+	plan := PlanMarket(MarketPlanInput{
+		Sells: []SellCandidate{
+			{Player: semCotacao, Recommendation: "vender"},
+			{Player: candidata, Recommendation: "vender", NetSellValue: 9_500},
+		},
+		Evolutions: []EvoMatch{
+			{Evolution: domain.Evolution{ID: "evo-menor", Name: "Evo menor"}, Player: candidata, Slot: domain.CM, Gain: 2},
+			{Evolution: domain.Evolution{ID: "evo-melhor", Name: "Evo melhor"}, Player: candidata, Slot: domain.CM, Gain: 5},
+		},
+	})
+
+	if len(plan.Actions) != 1 {
+		t.Fatalf("ações=%+v; esperava somente a melhor evolução acionável", plan.Actions)
+	}
+	if got := plan.Actions[0]; got.Name != "Evo melhor · Candidata" || got.Kind != MarketObserve {
+		t.Fatalf("ação=%+v; esperava a melhor evolução da carta", got)
+	}
+}

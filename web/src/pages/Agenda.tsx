@@ -17,6 +17,7 @@ const SECTIONS: { key: AgendaFaixa; title: string; note: string }[] = [
   { key: "esta_semana", title: "Esta semana", note: "Ações com prazo de até sete dias." },
   { key: "observando", title: "Observando", note: "Watchlist, dados antigos ou confiança ainda baixa." },
 ];
+const ACTIONS_PER_SECTION = 16;
 
 export default function Agenda() {
   const { data, loading, error, refetch } = useData(fetchAgenda, []);
@@ -25,8 +26,17 @@ export default function Agenda() {
   return <div className="wrap agenda">
     <PageHeader eyebrow="copiloto · agenda" title="O que merece sua atenção" meta="Uma sequência única de decisões já calculadas pelos módulos do bot. Nada é executado automaticamente." />
     <div className="agenda-rail" aria-label="Resumo da agenda">{SECTIONS.map((section) => <a key={section.key} href={`#${section.key}`}><span>{section.title}</span><strong>{rows[section.key].length}</strong></a>)}</div>
-    {SECTIONS.map((section) => <section id={section.key} key={section.key} className="agenda-section" aria-labelledby={`${section.key}-heading`}><header><div><Chip tone={TONE[section.key]}>{section.title}</Chip><h2 id={`${section.key}-heading`}>{section.note}</h2></div><strong>{rows[section.key].length} ações</strong></header>{rows[section.key].length === 0 ? <EmptyState message={`Nada em ${section.title.toLowerCase()} no snapshot atual.`} /> : <ol>{rows[section.key].map((action) => <li key={action.id}><AgendaCard action={action} /></li>)}</ol>}</section>)}
+    {SECTIONS.map((section) => <AgendaSection key={section.key} section={section} actions={rows[section.key]} />)}
   </div>;
+}
+
+function AgendaSection({ section, actions }: { section: typeof SECTIONS[number]; actions: AcaoAgenda[] }) {
+  const [visibleActions, setVisibleActions] = useState(ACTIONS_PER_SECTION);
+  const actionsToShow = actions.slice(0, visibleActions);
+  return <section id={section.key} className="agenda-section" aria-labelledby={`${section.key}-heading`}>
+    <header><div><Chip tone={TONE[section.key]}>{section.title}</Chip><h2 id={`${section.key}-heading`}>{section.note}</h2></div><strong>{actions.length} ações</strong></header>
+    {actions.length === 0 ? <EmptyState message={`Nada em ${section.title.toLowerCase()} no snapshot atual.`} /> : <><ol>{actionsToShow.map((action) => <li key={action.id}><AgendaCard action={action} /></li>)}</ol>{actionsToShow.length < actions.length ? <div className="agenda-more"><p aria-live="polite">Mostrando {actionsToShow.length} de {actions.length} ações.</p><button className="btn" type="button" onClick={() => setVisibleActions((count) => count + ACTIONS_PER_SECTION)}>mostrar mais {Math.min(ACTIONS_PER_SECTION, actions.length - actionsToShow.length)}</button></div> : null}</>}
+  </section>;
 }
 function AgendaCard({ action }: { action: AcaoAgenda }) {
   const [sent, setSent] = useState(false); const [sending, setSending] = useState(false);

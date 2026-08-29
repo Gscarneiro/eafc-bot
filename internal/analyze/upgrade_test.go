@@ -150,6 +150,12 @@ func TestFunilRegistraOMelhorReprovadoPorGanho(t *testing.T) {
 	}
 }
 
+func TestOpcoesPadraoDeUpgradeUsamGanhoMinimoDeUmDecimo(t *testing.T) {
+	if got := DefaultUpgradeOptions(0).MinGain; got != 0.1 {
+		t.Fatalf("ganho mínimo padrão = %v; esperava 0.1", got)
+	}
+}
+
 // Uma carta que não joga em nenhum slot titular não pode contaminar
 // BestGain — comparar Score() fora de posição não significa nada, porque a
 // penalidade de posição já distorce o número (ver TestForaDePosicaoPenaliza).

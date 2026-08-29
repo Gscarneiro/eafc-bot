@@ -17,6 +17,15 @@ const (
 	MarketObserve MarketActionKind = "observar"
 )
 
+// MarketActionOrigin identifica uma decisão que nasceu de um módulo mais
+// específico que o mercado. A mesa continua sendo o lugar que organiza a
+// decisão, sem apagar a procedência que a Agenda precisa exibir.
+type MarketActionOrigin string
+
+const (
+	MarketActionOriginEvolution MarketActionOrigin = "evolucao"
+)
+
 type MarketNeed struct {
 	Position domain.Position `json:"position"`
 	Reason   string          `json:"reason"`
@@ -33,16 +42,19 @@ type PriceAssessment struct {
 }
 
 type MarketAction struct {
-	Kind       MarketActionKind `json:"kind"`
-	EAID       int64            `json:"ea_id,omitempty"`
-	Name       string           `json:"name"`
-	Position   domain.Position  `json:"position,omitempty"`
-	GrossCost  int              `json:"gross_cost"`
-	NetCost    int              `json:"net_cost"`
-	BreakEven  int              `json:"break_even_gross,omitempty"`
-	Confidence string           `json:"confidence"`
-	Rationale  []string         `json:"rationale"`
-	Conflicts  []string         `json:"conflicts,omitempty"`
+	Kind       MarketActionKind   `json:"kind"`
+	Origin     MarketActionOrigin `json:"origin,omitempty"`
+	EAID       int64              `json:"ea_id,omitempty"`
+	Name       string             `json:"name"`
+	Position   domain.Position    `json:"position,omitempty"`
+	GrossCost  int                `json:"gross_cost"`
+	NetCost    int                `json:"net_cost"`
+	BreakEven  int                `json:"break_even_gross,omitempty"`
+	Confidence string             `json:"confidence"`
+	Rationale  []string           `json:"rationale"`
+	Conflicts  []string           `json:"conflicts,omitempty"`
+	Deadline   *time.Time         `json:"deadline,omitempty"`
+	priority   float64
 }
 
 type MarketPlanInput struct {
@@ -80,21 +92,35 @@ func PlanMarket(in MarketPlanInput) MarketPlan {
 
 	// Evoluções vencem uma venda da mesma carta: vender algo que já está
 	// reservado para evoluir é um conflito, não uma recomendação silenciosa.
-	evolving := make(map[int64]bool, len(in.Evolutions))
-	for _, evo := range in.Evolutions {
+	// O catálogo pode ter dezenas de caminhos para a mesma carta. A mesa de
+	// decisão deve propor UMA escolha comparável por jogador; os demais seguem
+	// disponíveis no catálogo de evoluções, sem explodir a Agenda.
+	evolutions := selectEvolutionsForPlan(in.Evolutions)
+	evolving := make(map[int64]bool, len(evolutions))
+	for _, evo := range evolutions {
 		evolving[evo.Player.ID] = true
 	}
+	evolutionConflicts := make(map[int64][]string, len(evolutions))
 	for _, sell := range in.Sells {
-		if sell.Recommendation != "vender" {
+		// Sem cotação, o valor líquido é zero. "Vender por 0" não é uma
+		// decisão acionável e escondia as recomendações reais num mar de cards.
+		if sell.Recommendation != "vender" || sell.NetSellValue <= 0 {
 			continue
 		}
-		if protected[sell.Player.ID] || evolving[sell.Player.ID] {
+		if protected[sell.Player.ID] {
 			why := "proteção na watchlist"
 			if evolving[sell.Player.ID] {
 				why = "evolução candidata para a mesma carta"
 			}
 			plan.Actions = append(plan.Actions, MarketAction{Kind: MarketWait, EAID: sell.Player.ID, Name: sell.Player.Name, GrossCost: sell.Player.SellValue(), NetCost: sell.NetSellValue, Confidence: "alta", Rationale: []string{"venda adiada para preservar a carta"}, Conflicts: []string{why}})
 			plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("%s: venda conflita com %s", sell.Player.Name, why))
+			continue
+		}
+		if evolving[sell.Player.ID] {
+			// A decisão principal é a evolução. Colocar também um card de
+			// "esperar" para a mesma carta duplicava a mesma escolha na mesa.
+			evolutionConflicts[sell.Player.ID] = append(evolutionConflicts[sell.Player.ID], "venda adiada para preservar a carta")
+			plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("%s: venda conflita com evolução candidata para a mesma carta", sell.Player.Name))
 			continue
 		}
 		plan.Actions = append(plan.Actions, MarketAction{Kind: MarketSell, EAID: sell.Player.ID, Name: sell.Player.Name, GrossCost: sell.Player.SellValue(), NetCost: sell.NetSellValue, Confidence: "média", Rationale: sell.Rationale})
@@ -127,8 +153,23 @@ func PlanMarket(in MarketPlanInput) MarketPlan {
 		plan.Actions = append(plan.Actions, action)
 	}
 
-	for _, evo := range in.Evolutions {
-		action := MarketAction{EAID: evo.Player.ID, Name: evo.Player.Name, Position: evo.Slot, GrossCost: evo.Cost, NetCost: evo.Cost, Confidence: "alta", Rationale: append([]string(nil), evo.Highlights...)}
+	for _, evo := range evolutions {
+		action := MarketAction{
+			Origin:     MarketActionOriginEvolution,
+			EAID:       evo.Player.ID,
+			Name:       evo.Evolution.Name + " · " + evo.Player.Name,
+			Position:   evo.Slot,
+			GrossCost:  evo.Cost,
+			NetCost:    evo.Cost,
+			Confidence: "alta",
+			Rationale:  append([]string(nil), evo.Highlights...),
+			Conflicts:  append([]string(nil), evolutionConflicts[evo.Player.ID]...),
+			priority:   evo.Gain,
+		}
+		if !evo.Evolution.ExpiresAt.IsZero() {
+			deadline := evo.Evolution.ExpiresAt
+			action.Deadline = &deadline
+		}
 		if chosenPosition[evo.Slot] != "" {
 			action.Kind = MarketWait
 			action.Conflicts = []string{"compra planejada para a mesma posição"}
@@ -151,7 +192,60 @@ func PlanMarket(in MarketPlanInput) MarketPlan {
 		if priority[plan.Actions[i].Kind] != priority[plan.Actions[j].Kind] {
 			return priority[plan.Actions[i].Kind] < priority[plan.Actions[j].Kind]
 		}
+		if plan.Actions[i].Kind == MarketSell && plan.Actions[i].NetCost != plan.Actions[j].NetCost {
+			return plan.Actions[i].NetCost > plan.Actions[j].NetCost
+		}
+		if plan.Actions[i].Origin == MarketActionOriginEvolution && plan.Actions[j].Origin == MarketActionOriginEvolution && plan.Actions[i].priority != plan.Actions[j].priority {
+			return plan.Actions[i].priority > plan.Actions[j].priority
+		}
 		return plan.Actions[i].Name < plan.Actions[j].Name
 	})
 	return plan
+}
+
+// selectEvolutionsForPlan preserva uma alternativa por carta na mesa. A
+// comparação privilegia a troca que melhora o titular, depois o ganho, custo
+// e prazo; empates fecham por IDs para a saída não variar entre coletas.
+func selectEvolutionsForPlan(matches []EvoMatch) []EvoMatch {
+	bestByPlayer := make(map[int64]EvoMatch, len(matches))
+	for _, candidate := range matches {
+		current, exists := bestByPlayer[candidate.Player.ID]
+		if !exists || evolutionPlanComesFirst(candidate, current) {
+			bestByPlayer[candidate.Player.ID] = candidate
+		}
+	}
+	out := make([]EvoMatch, 0, len(bestByPlayer))
+	for _, evo := range bestByPlayer {
+		out = append(out, evo)
+	}
+	sort.Slice(out, func(i, j int) bool { return evolutionPlanComesFirst(out[i], out[j]) })
+	return out
+}
+
+func evolutionPlanComesFirst(a, b EvoMatch) bool {
+	if a.BeatsStarter != b.BeatsStarter {
+		return a.BeatsStarter
+	}
+	if a.Gain != b.Gain {
+		return a.Gain > b.Gain
+	}
+	if a.Affordable != b.Affordable {
+		return a.Affordable
+	}
+	if a.Cost != b.Cost {
+		return a.Cost < b.Cost
+	}
+	if !a.Evolution.ExpiresAt.Equal(b.Evolution.ExpiresAt) {
+		if a.Evolution.ExpiresAt.IsZero() {
+			return false
+		}
+		if b.Evolution.ExpiresAt.IsZero() {
+			return true
+		}
+		return a.Evolution.ExpiresAt.Before(b.Evolution.ExpiresAt)
+	}
+	if a.Player.Name != b.Player.Name {
+		return a.Player.Name < b.Player.Name
+	}
+	return a.Evolution.ID < b.Evolution.ID
 }

@@ -63,6 +63,12 @@ func TestApplyEditableAtualizaAtomico(t *testing.T) {
 	}
 }
 
+func TestPadraoUsaGanhoMinimoDeUmDecimo(t *testing.T) {
+	if got := Default().Report.MinGain; got != 0.1 {
+		t.Fatalf("report.min_gain padrão = %v; esperava 0.1", got)
+	}
+}
+
 func TestApplyEditableDescartaConfiguracaoInvalida(t *testing.T) {
 	cfg := Default()
 	before := cfg.Editable()

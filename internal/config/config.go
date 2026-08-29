@@ -240,7 +240,7 @@ func Default() Config {
 		Report: ReportConf{
 			OutputDir:      filepath.Join(baseDir, "reports"),
 			MaxRows:        12,
-			MinGain:        2.0,
+			MinGain:        0.1,
 			TrendWindowHrs: 72,
 		},
 		Serve: ServeConf{

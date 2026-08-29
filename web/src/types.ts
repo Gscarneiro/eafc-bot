@@ -322,7 +322,7 @@ export interface Capital {
 }
 
 export type MarketActionKind = "comprar" | "vender" | "esperar" | "observar";
-export interface MarketAction { kind: MarketActionKind; ea_id?: number; name: string; position?: Position; gross_cost: number; net_cost: number; break_even_gross?: number; confidence: string; rationale: string[] | null; conflicts?: string[] | null }
+export interface MarketAction { kind: MarketActionKind; origin?: "evolucao"; ea_id?: number; name: string; position?: Position; gross_cost: number; net_cost: number; break_even_gross?: number; confidence: string; rationale: string[] | null; conflicts?: string[] | null; deadline?: string }
 export interface MarketPlan { capital: Capital; actions: MarketAction[] | null; conflicts?: string[] | null }
 export interface WatchlistEntry { id: string; ea_id: number; name: string; target_coins?: number; note?: string; protected?: boolean; created_at: string; updated_at: string }
 export interface LedgerEntry { id: string; kind: string; status: string; ea_id?: number; gross_coins: number; note?: string; reverses_id?: string; occurred_at: string; recorded_at: string }

@@ -54,10 +54,20 @@ func MontarAgenda(in AgendaInput) Agenda {
 		in.Agora = time.Now()
 	}
 	all := make([]AcaoAgenda, 0)
+	plannedEvolutionPlayers := make(map[int64]bool)
 	for _, a := range in.Mercado.Actions {
 		all = append(all, acaoAgendaMercado(a, in.Agora))
+		if a.Origin == MarketActionOriginEvolution {
+			plannedEvolutionPlayers[a.EAID] = true
+		}
 	}
 	for _, e := range in.Evolucoes {
+		// PlanMarket já escolhe a melhor alternativa por carta. Sem esta
+		// guarda, a Agenda acrescentava de novo todos os caminhos alternativos
+		// do catálogo para o mesmo jogador.
+		if plannedEvolutionPlayers[e.Player.ID] {
+			continue
+		}
 		if !e.Evolution.ExpiresAt.IsZero() {
 			all = append(all, AcaoAgenda{ID: fmt.Sprintf("evo:%d:%s", e.Player.ID, e.Evolution.ID), Tipo: "evolucao", Alvo: e.Evolution.Name, Impacto: fmt.Sprintf("%+.1f BotScore", e.Gain), Moedas: e.Cost, Prazo: prazoAgenda(e.Evolution.ExpiresAt), Confianca: "alta", Proveniencia: "plano_evolucao", Link: "/evolucoes"})
 		}
@@ -93,7 +103,15 @@ func acaoAgendaMercado(a MarketAction, now time.Time) AcaoAgenda {
 	if a.Kind == MarketWait || a.Kind == MarketObserve {
 		faixa = AgendaObservando
 	}
-	return AcaoAgenda{ID: fmt.Sprintf("mercado:%s:%d:%s", a.Kind, a.EAID, strings.ToLower(a.Name)), Faixa: faixa, Tipo: string(a.Kind), Alvo: a.Name, Impacto: strings.Join(a.Rationale, "; "), Moedas: a.NetCost, Confianca: a.Confidence, Proveniencia: "plano_mercado", Conflitos: a.Conflicts, Link: "/mercado/plano"}
+	tipo, proveniencia, link := string(a.Kind), "plano_mercado", "/mercado/plano"
+	if a.Origin != "" {
+		tipo = string(a.Origin)
+		proveniencia = "plano_" + tipo
+		if a.Origin == MarketActionOriginEvolution {
+			link = "/evolucoes"
+		}
+	}
+	return AcaoAgenda{ID: fmt.Sprintf("mercado:%s:%d:%s", tipo, a.EAID, strings.ToLower(a.Name)), Faixa: faixa, Tipo: tipo, Alvo: a.Name, Impacto: strings.Join(a.Rationale, "; "), Moedas: a.NetCost, Prazo: a.Deadline, Confianca: a.Confidence, Proveniencia: proveniencia, Conflitos: a.Conflicts, Link: link}
 }
 func faixaAgenda(a AcaoAgenda, now time.Time) FaixaAgenda {
 	if a.Prazo != nil {

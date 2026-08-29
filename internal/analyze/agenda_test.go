@@ -16,3 +16,22 @@ func TestMontarAgendaAgrupaSemRecalcular(t *testing.T) {
 		t.Fatal("acao sem rastreabilidade")
 	}
 }
+
+func TestMontarAgendaNaoRepeteEvolucaoJaRepresentadaNoPlano(t *testing.T) {
+	now := time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)
+	evo := EvoMatch{
+		Evolution: domain.Evolution{ID: "evo", Name: "Evolução principal", ExpiresAt: now.Add(48 * time.Hour)},
+		Player:    domain.ClubPlayer{Player: domain.Player{ID: 7, Name: "Carta base"}},
+	}
+	got := MontarAgenda(AgendaInput{
+		Agora: now,
+		Mercado: MarketPlan{Actions: []MarketAction{{
+			Kind: MarketObserve, Origin: MarketActionOriginEvolution, EAID: 7, Name: "Evolução principal · Carta base",
+		}}},
+		Evolucoes: []EvoMatch{evo},
+	})
+
+	if total := len(got.Agora) + len(got.EstaSemana) + len(got.Observando); total != 1 {
+		t.Fatalf("agenda repetiu a evolução: %+v", got)
+	}
+}

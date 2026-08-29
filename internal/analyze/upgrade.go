@@ -41,11 +41,11 @@ type UpgradeOptions struct {
 	AllowUnpriced bool
 }
 
-// DefaultUpgradeOptions são padrões conservadores: só sugere troca que
-// muda alguma coisa de verdade em campo.
+// DefaultUpgradeOptions deixa visíveis ganhos pequenos, para que a tela de
+// oportunidades não esconda uma melhoria mensurável por um corte arbitrário.
 func DefaultUpgradeOptions(budget int) UpgradeOptions {
 	return UpgradeOptions{
-		MinGain:             2.0,
+		MinGain:             0.1,
 		MaxPerSlot:          3,
 		IncludeUnaffordable: true,
 		Budget:              budget,

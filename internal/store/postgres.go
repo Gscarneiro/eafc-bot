@@ -778,4 +778,46 @@ func (s *PostgresStore) AppendFeedback(ctx context.Context, cycle string, entry 
 	return err
 }
 
+func (s *PostgresStore) ListSavedEvolutionPaths(ctx context.Context, cycle string) ([]domain.SavedEvolutionPath, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM saved_evolution_paths WHERE cycle = $1 ORDER BY saved_at DESC`, cycle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.SavedEvolutionPath
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var entry domain.SavedEvolutionPath
+		if err := json.Unmarshal(payload, &entry); err != nil {
+			return nil, err
+		}
+		out = append(out, entry)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) SaveEvolutionPath(ctx context.Context, path domain.SavedEvolutionPath) error {
+	if err := path.Validate(); err != nil {
+		return err
+	}
+	if path.SavedAt.IsZero() {
+		path.SavedAt = time.Now()
+	}
+	payload, err := json.Marshal(path)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO saved_evolution_paths (cycle,id,saved_at,payload) VALUES ($1,$2,$3,$4)
+		ON CONFLICT (cycle,id) DO UPDATE SET saved_at = EXCLUDED.saved_at, payload = EXCLUDED.payload`, path.Cycle, path.ID, path.SavedAt, payload)
+	return err
+}
+
+func (s *PostgresStore) DeleteSavedEvolutionPath(ctx context.Context, cycle, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM saved_evolution_paths WHERE cycle = $1 AND id = $2`, cycle, id)
+	return err
+}
+
 var _ Store = (*PostgresStore)(nil)

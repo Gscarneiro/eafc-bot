@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import App from "./App";
 import Status from "./pages/Status";
 import Time from "./pages/Time";
@@ -13,8 +13,13 @@ import PlanoMercado from "./pages/PlanoMercado";
 import Agenda from "./pages/Agenda";
 import Evolucoes from "./pages/Evolucoes";
 import EvolucaoDetalhe from "./pages/EvolucaoDetalhe";
+import AnaliseEvolucoes from "./pages/AnaliseEvolucoes";
+import PathsSalvos from "./pages/PathsSalvos";
 import Investimentos from "./pages/Investimentos";
 import Configuracoes from "./pages/Configuracoes";
+import { inicializarTema } from "./theme";
+
+inicializarTema();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -30,8 +35,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="mercado" element={<Mercado />} />
           <Route path="mercado/plano" element={<PlanoMercado />} />
           <Route path="agenda" element={<Agenda />} />
-          <Route path="evolucoes" element={<Evolucoes />} />
-          <Route path="evolucoes/:slug" element={<EvolucaoDetalhe />} />
+          <Route path="evolucoes" element={<AnaliseEvolucoes />} />
+          <Route path="evolucoes/catalogo" element={<Evolucoes />} />
+          <Route path="evolucoes/catalogo/:slug" element={<EvolucaoDetalhe />} />
+          <Route path="evolucoes/salvos" element={<PathsSalvos />} />
+          <Route path="evolucoes/:slug" element={<EvolucaoLegadaRedirect />} />
           <Route path="capital/investimentos" element={<Investimentos section="investimentos" />} />
           <Route path="capital/vendas" element={<Investimentos section="vendas" />} />
           <Route path="capital/sbcs" element={<Investimentos section="sbcs" />} />
@@ -43,3 +51,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </BrowserRouter>
   </React.StrictMode>,
 );
+
+function EvolucaoLegadaRedirect() {
+  const { slug } = useParams();
+  return <Navigate to={`/evolucoes/catalogo/${encodeURIComponent(slug ?? "")}`} replace />;
+}

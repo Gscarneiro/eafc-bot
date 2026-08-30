@@ -115,7 +115,27 @@
 .topbar-context { display: flex; flex-direction: column; gap: 2px; }
 .context-kicker { color: var(--turf); font: 600 10px/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
 .context-title { font: 700 16px/1.1 var(--font-body); }
-.job { margin-left: auto; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.theme-toggle {
+  min-height: 44px;
+  padding: 8px 11px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--ink-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font: 600 11px/1 var(--font-mono);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease), background-color var(--duration) var(--ease);
+}
+.theme-toggle:hover { border-color: var(--turf); color: var(--turf); background: var(--turf-bg); }
+.theme-toggle[aria-pressed="true"] { border-color: var(--turf); color: var(--turf); background: var(--turf-bg); }
+.theme-toggle-icon { width: 18px; height: 18px; flex: 0 0 18px; }
+.job { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
 .job-status .chip { max-width: 34vw; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; }
 .btn {
   min-height: 40px;
@@ -149,12 +169,15 @@
     z-index: 20;
   }
   .rail-brand, .nav-label, .desktop-subnav, .rail-footer { display: none; }
-  .rail-nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+  .rail-nav { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
   .rail-nav > a { min-height: 48px; padding: 5px 4px; justify-content: center; flex-direction: column; gap: 3px; font-size: 10px; }
   .nav-icon { width: 20px; height: 20px; }
   .mobile-brand { display: flex; }
   .topbar-inner { min-height: 60px; padding: 8px 16px; }
   .topbar-context { display: none; }
+  .topbar-actions { gap: 6px; }
+  .theme-toggle { width: 44px; padding: 8px; }
+  .theme-toggle-label { display: none; }
   .job { gap: 6px; }
   .job-status .chip { max-width: 45vw; font-size: 10px; }
   .btn { min-height: 38px; padding: 7px 9px; font-size: 10px; }
@@ -172,4 +195,8 @@
   .mobile-section-nav .subnav-items { flex-direction: row; gap: 5px; }
   .mobile-section-nav .subnav-items a { padding: 5px 7px 9px; border-left: 0; border-bottom: 2px solid transparent; white-space: nowrap; border-radius: 0; }
   .mobile-section-nav .subnav-items a.active { border-bottom-color: var(--turf); }
+}
+
+@media (max-width: 520px) {
+  .job-status { display: none; }
 }

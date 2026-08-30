@@ -12,6 +12,7 @@
    "em andamento" ao mesmo tempo — cinco significados por trás de uma cor
    não são hierarquia, são ruído. */
 :root {
+  color-scheme: light;
   --paper: #f6f2e7;
   --panel: #ffffff;
   --sunk: #ece5d3;
@@ -43,6 +44,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --paper: #12140f;
     --panel: #1b1f17;
     --sunk: #23281e;
@@ -74,6 +76,7 @@
   }
 }
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --paper: #12140f;
   --panel: #1b1f17;
   --sunk: #23281e;

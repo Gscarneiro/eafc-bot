@@ -113,6 +113,10 @@ func p(id int64, name string, rating int, pos domain.Position, version string,
 		WeakFoot:   4, SkillMoves: 4,
 		Price: domain.Price{Coins: price, UpdatedAt: time.Now()},
 		Cycle: "26",
+		// O demo precisa de GG posicional confirmado para a comparação do XI;
+		// overall continua sendo só o dado de entrada, como na coleta real.
+		GGRating: float64(rating) - 1.2, GGRatingPos: pos,
+		GGRatings: map[domain.Position]float64{pos: float64(rating) - 1.2},
 	}
 }
 
@@ -146,6 +150,9 @@ func demoClub() domain.Club {
 		// Reservas: dão para vender e financiar as trocas.
 		{Player: p(12, "Reijnders", 84, domain.CM, "Ouro Raro", 78, 76, 83, 84, 72, 76, 18_000)},
 		{Player: p(13, "Kolo Muani", 83, domain.ST, "Ouro Raro", 89, 81, 72, 80, 40, 82, 14_000)},
+		// Reserva 88+ para a Análise demonstrar uma evolução que toma a vaga
+		// do XI sem depender de uma coleta externa.
+		{Player: p(16, "J. David", 88, domain.ST, "Ouro Raro", 88, 86, 75, 86, 43, 78, 54_000, ps("Finesse Shot", false))},
 		// Base barata e sem PlayStyle+ — o alvo natural das evoluções.
 		{Player: p(14, "Yildiz", 79, domain.LW, "Ouro Raro", 86, 76, 77, 85, 32, 65, 3_200)},
 		{Player: p(15, "Zaïre-Emery", 80, domain.CM, "Ouro Raro", 80, 71, 79, 82, 76, 78, 4_100)},
@@ -203,16 +210,25 @@ func demoCardReports(club domain.Club) []cards.CardReport {
 	for _, cp := range club.Players {
 		byID[cp.ID] = cp
 	}
-	osimhen, rodri := byID[11], byID[6]
+	osimhen, rodri, david := byID[11], byID[6], byID[16]
 
 	evoluido := osimhen.Player
 	evoluido.Rating = 90
+	evoluido.GGRating, evoluido.GGRatingPos = 90.5, domain.ST
+	evoluido.GGRatings = map[domain.Position]float64{domain.ST: 90.5}
+	alternativo := evoluido
+	alternativo.GGRating = 91.0
+	alternativo.GGRatings = map[domain.Position]float64{domain.ST: 91.0}
+	davidFinal := david.Player
+	davidFinal.Rating, davidFinal.GGRating, davidFinal.GGRatingPos = 92, 93.2, domain.ST
+	davidFinal.GGRatings = map[domain.Position]float64{domain.ST: 93.2}
 
 	return []cards.CardReport{
 		{
-			Slug:       "osimhen-88",
-			Player:     osimhen,
-			ByPosition: []cards.PositionRoles{{Position: domain.ST, PlusPlus: []string{"Finalizador"}, Plus: []string{"Alvo Avançado"}}},
+			Slug:            "osimhen-88",
+			Player:          osimhen,
+			EvolutionStatus: cards.EvolutionConfirmed,
+			ByPosition:      []cards.PositionRoles{{Position: domain.ST, PlusPlus: []string{"Finalizador"}, Plus: []string{"Alvo Avançado"}}},
 			Best: &cards.EvoPotential{
 				Path: domain.EvolutionPath{
 					Steps:        []domain.Player{osimhen.Player, evoluido},
@@ -227,12 +243,24 @@ func demoCardReports(club domain.Club) []cards.CardReport {
 				CoinsCost:        25_000,
 				TrainingTime:     "2 dias",
 			},
+			Alternates: []cards.EvoPotential{{
+				Path:         domain.EvolutionPath{Steps: []domain.Player{osimhen.Player, alternativo}, Chain: []string{"Ponta Explosiva", "Finalizador Livre"}, CoinsCost: 45_000, TrainingTime: "4 dias"},
+				FinalOverall: 91, FinalGGRating: 91.0, GGRatingGain: 4.2, CoinsCost: 45_000, TrainingTime: "4 dias",
+			}},
 		},
 		{
-			Slug:       "rodri-89",
-			Player:     rodri,
-			ByPosition: []cards.PositionRoles{{Position: domain.CDM, PlusPlus: []string{"Âncora"}, Plus: []string{"Armador Recuado"}}},
-			Best:       nil,
+			Slug:            "rodri-89",
+			Player:          rodri,
+			EvolutionStatus: cards.EvolutionNoPath,
+			ByPosition:      []cards.PositionRoles{{Position: domain.CDM, PlusPlus: []string{"Âncora"}, Plus: []string{"Armador Recuado"}}},
+			Best:            nil,
+		},
+		{
+			Slug: "j-david-88", Player: david, EvolutionStatus: cards.EvolutionConfirmed,
+			Best: &cards.EvoPotential{
+				Path:         domain.EvolutionPath{Steps: []domain.Player{david.Player, davidFinal}, Chain: []string{"Caçador de área"}, CoinsCost: 18_000, TrainingTime: "3 dias"},
+				FinalOverall: 92, FinalGGRating: 93.2, GGRatingGain: 6.4, CoinsCost: 18_000, TrainingTime: "3 dias",
+			},
 		},
 	}
 }

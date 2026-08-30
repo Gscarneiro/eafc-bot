@@ -34,6 +34,15 @@ test("evoluções permanecem explicitamente finais", async () => {
   assert.match(gauntlet, /GG final/);
 });
 
+test("filtro de posição da análise usa o resultado final de cada path", async () => {
+  const analysis = await read("src/pages/AnaliseEvolucoes.tsx");
+  assert.match(analysis, /function finalPathPosition/);
+  assert.match(analysis, /final\?\.gg_rating_pos \|\| final\?\.position/);
+  assert.match(analysis, /some\(path => finalPathPosition\(path\) === position\)/);
+  assert.match(analysis, /const visiblePaths = position === "todas" \? paths : paths\.filter\(path => finalPathPosition\(path\) === position\)/);
+  assert.match(analysis, /posição final do path/);
+});
+
 test("fixture Vite/Playwright mantém cópia atual, posicional e ausente", async () => {
   const vite = await createViteServer({ root: fileURLToPath(new URL("..", import.meta.url)), server: { middlewareMode: true }, appType: "spa" });
   const http = createHttpServer((req, res) => vite.middlewares(req, res, () => { res.statusCode = 404; res.end(); }));

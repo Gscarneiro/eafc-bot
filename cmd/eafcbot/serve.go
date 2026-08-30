@@ -240,9 +240,8 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 		return err
 	}
 
-	fmt.Println("modo demo: dados fictícios, sem rede — a análise carta-a-carta de")
-	fmt.Println("verdade precisa do fut.gg, então só Osimhen e Rodri têm CardReport")
-	fmt.Println("simulado à mão (/api/time/osimhen-88, /api/time/rodri-89).")
+	fmt.Println("modo demo: dados fictícios, sem rede — a análise mostra paths")
+	fmt.Println("confirmados, alternativos, sem path e um candidato que entra no XI.")
 	demoCfg := cfg
 	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,

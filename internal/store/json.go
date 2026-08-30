@@ -750,6 +750,63 @@ func clubRollupsFile(cycle string) string { return "club_rollups_" + cycle + ".j
 
 func evolutionAnalysesFile(cycle string) string { return "evolution_analyses_" + cycle + ".json" }
 
+func savedEvolutionPathsFile(cycle string) string { return "evolution_paths_" + cycle + ".json" }
+
+func (s *JSONStore) ListSavedEvolutionPaths(ctx context.Context, cycle string) ([]domain.SavedEvolutionPath, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.SavedEvolutionPath
+	if err := s.readJSON(savedEvolutionPathsFile(cycle), &entries); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].SavedAt.After(entries[j].SavedAt) })
+	return entries, nil
+}
+
+func (s *JSONStore) SaveEvolutionPath(ctx context.Context, path domain.SavedEvolutionPath) error {
+	if err := path.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.SavedEvolutionPath
+	if err := s.readJSON(savedEvolutionPathsFile(path.Cycle), &entries); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if path.SavedAt.IsZero() {
+		path.SavedAt = time.Now()
+	}
+	for i := range entries {
+		if entries[i].ID == path.ID {
+			entries[i] = path
+			return s.writeJSON(savedEvolutionPathsFile(path.Cycle), entries)
+		}
+	}
+	return s.writeJSON(savedEvolutionPathsFile(path.Cycle), append(entries, path))
+}
+
+func (s *JSONStore) DeleteSavedEvolutionPath(ctx context.Context, cycle, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.SavedEvolutionPath
+	if err := s.readJSON(savedEvolutionPathsFile(cycle), &entries); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	kept := entries[:0]
+	for _, entry := range entries {
+		if entry.ID != id {
+			kept = append(kept, entry)
+		}
+	}
+	return s.writeJSON(savedEvolutionPathsFile(cycle), kept)
+}
+
 // ListEvolutionAnalyses devolve resultados do mesmo hash do pedido mais
 // recente primeiro. A lista fica particionada por ciclo, como os snapshots,
 // para uma análise do FC 26 nunca ser reutilizada no FC 27.

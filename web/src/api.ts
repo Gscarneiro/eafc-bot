@@ -7,6 +7,9 @@ import type {
   EvolutionCatalogCollection,
   EvolutionCatalogDetailResponse,
   EvolutionAnalysisResponse,
+  EvolutionPathsCollection,
+  SavedEvolutionPathView,
+  SavedEvolutionPathsResponse,
   GauntletResponse,
   JobStatus,
 	Agenda,
@@ -101,6 +104,17 @@ export async function requestEvolutionAnalysis(slug: string, playerKey: string, 
   return res.json();
 }
 export const fetchEvolutionAnalysis = (id: string) => getJSON<EvolutionAnalysisResponse>(`/api/evolucoes/analises/${encodeURIComponent(id)}`);
+export const fetchEvolutionPaths = (query = "") => getJSON<EvolutionPathsCollection>(`/api/evolucoes/caminhos${query ? `?${query}` : ""}`);
+export const fetchSavedEvolutionPaths = () => getJSON<SavedEvolutionPathsResponse>("/api/evolucoes/caminhos/salvos");
+export async function saveEvolutionPath(pathID: string): Promise<SavedEvolutionPathView> {
+  const res = await fetch("/api/evolucoes/caminhos/salvos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path_id: pathID }) });
+  if (!res.ok) { const text = (await res.text()).trim(); throw new ApiError(res.status, text || "NÃ£o foi possÃ­vel salvar o path."); }
+  return res.json();
+}
+export async function deleteSavedEvolutionPath(id: string): Promise<void> {
+  const res = await fetch(`/api/evolucoes/caminhos/salvos/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) { const text = (await res.text()).trim(); throw new ApiError(res.status, text || "NÃ£o foi possÃ­vel remover o path salvo."); }
+}
 export async function saveEvolutionProgress(slug: string, completed: string[]): Promise<EvolutionProgressResponse> {
   const res = await fetch(`/api/evolucoes/${encodeURIComponent(slug)}/progresso`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ completed }) });
   if (!res.ok) throw new ApiError(res.status, `PUT /api/evolucoes/${slug}/progresso devolveu ${res.status}`);

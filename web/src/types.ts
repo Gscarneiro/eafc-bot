@@ -126,6 +126,75 @@ export interface EvoPotential {
   training_time: string;
 }
 
+export type EvolutionPathImpactKind = "entra_no_xi" | "melhora_titular" | "nao_supera" | "sem_comparacao";
+export interface EvolutionPathImpact {
+  kind: EvolutionPathImpactKind;
+  slot_index?: number;
+  position?: Position;
+  starter?: ClubPlayer;
+  starter_gg_rating?: number;
+  final_gg_rating?: number;
+  gain?: number;
+}
+export interface EvolutionPathCandidate {
+  id: string;
+  potential: EvoPotential;
+  impact: EvolutionPathImpact;
+  version_hash: string;
+  saved: boolean;
+}
+export interface EvolutionPlayerAnalysis {
+  player: ClubPlayer;
+  card_slug?: string;
+  identity_complete: boolean;
+  status: "confirmed" | "no_path" | "not_eligible" | "fetch_error" | "not_checked";
+  paths: EvolutionPathCandidate[] | null;
+  best_final_gg_rating?: number;
+  best_xi_gain?: number;
+  entra_no_xi: boolean;
+}
+export interface EvolutionPathsSummary {
+  players: number;
+  confirmed: number;
+  no_path: number;
+  not_eligible: number;
+  fetch_error: number;
+  not_checked: number;
+  entra_no_xi: number;
+  melhora_titular: number;
+}
+export interface EvolutionPathsCollection extends ODataPage<EvolutionPlayerAnalysis> {
+  "@eafc.summary": EvolutionPathsSummary;
+}
+export interface SavedEvolutionImpact {
+  kind: EvolutionPathImpactKind;
+  slot_index?: number;
+  position?: Position;
+  starter?: ClubPlayer;
+  starter_gg_rating?: number;
+  final_gg_rating?: number;
+  gain?: number;
+}
+export interface SavedEvolutionPath {
+  id: string;
+  path_id: string;
+  cycle: string;
+  card_key: string;
+  card_slug?: string;
+  identity_complete: boolean;
+  player: ClubPlayer;
+  path: EvolutionPath;
+  current_gg_rating?: number;
+  final_overall: number;
+  final_gg_rating: number;
+  gg_rating_gain: number;
+  impact: SavedEvolutionImpact;
+  version_hash: string;
+  saved_at: string;
+}
+export interface SavedEvolutionPathView { saved: SavedEvolutionPath; status: "disponivel" | "alterado" | "expirado" | "indisponivel"; }
+export interface SavedEvolutionPathsResponse { value: SavedEvolutionPathView[] | null; "@odata.count": number; }
+
 export interface PositionRoles {
   position: Position;
   plus_plus: string[] | null;

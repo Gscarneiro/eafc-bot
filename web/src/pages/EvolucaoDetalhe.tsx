@@ -117,7 +117,7 @@ export default function EvolucaoDetalhe() {
   };
   return (
     <div className="wrap evo-detail-page">
-      <Link className="evo-detail-crumb" to="/evolucoes">← voltar ao catálogo</Link>
+      <Link className="evo-detail-crumb" to="/evolucoes/catalogo">← voltar ao catálogo</Link>
       <PageHeader eyebrow={data.item.category_label || "evolução"} title={data.item.evolution.name} meta="Laboratório carta a carta · projeção estimada + evidência do fut.gg." />
       <section className="evo-detail-hero">
         <div className="evo-detail-title">

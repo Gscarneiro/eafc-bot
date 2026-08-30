@@ -105,6 +105,76 @@
 .evo-path-row { display:flex; justify-content:space-between; gap:12px; padding:10px; border:1px solid var(--rule); border-radius:var(--radius-md); }
 .evo-path-row strong { font:700 12px var(--font-mono); }
 .evo-path-row span { color:var(--gain); font:700 12px var(--font-mono); }
+
+/* análise: a rota é uma trilha física, não uma tabela de números soltos. */
+.evo-analysis-page, .evo-saved-page { max-width:1240px; }
+.evo-analysis-hero { display:grid; grid-template-columns:minmax(0,1fr) 210px; gap:24px; align-items:stretch; margin:22px 0 18px; padding:26px 30px; border:1px solid var(--rule-strong); border-radius:var(--radius-lg); background:linear-gradient(118deg, var(--turf-bg), var(--panel) 62%); box-shadow:var(--shadow-sm); }
+.evo-analysis-hero h2 { margin:6px 0 8px; font-size:clamp(25px,4vw,40px); letter-spacing:-.04em; }
+.evo-analysis-hero p { max-width:700px; margin:0; color:var(--ink-2); font-size:15px; line-height:1.55; }
+.evo-analysis-scoreboard { display:grid; align-content:center; gap:3px; padding:16px 18px; border:1px dashed var(--turf); color:var(--turf); text-align:center; }
+.evo-analysis-scoreboard strong { font:34px var(--font-display); letter-spacing:-.05em; }
+.evo-analysis-scoreboard span { font:700 11px var(--font-mono); text-transform:uppercase; letter-spacing:.06em; }
+.evo-analysis-scoreboard small { color:var(--ink-3); font:11px var(--font-body); }
+.evo-analysis-stats { margin-bottom:18px; }
+.evo-analysis-controls { display:flex; flex-wrap:wrap; align-items:end; gap:10px 12px; margin:18px 0 10px; padding:14px; border:1px solid var(--rule); border-radius:var(--radius-lg); background:var(--panel); }
+.evo-analysis-controls label { display:grid; gap:5px; color:var(--ink-3); font:10px var(--font-mono); text-transform:uppercase; letter-spacing:.06em; }
+.evo-analysis-controls input:not([type="checkbox"]), .evo-analysis-controls select { min-height:40px; padding:8px 10px; border:1px solid var(--rule-strong); border-radius:var(--radius-md); background:var(--panel); color:var(--ink); font:13px var(--font-body); }
+.evo-analysis-controls label:first-child { flex:1 1 230px; }
+.evo-analysis-controls .evo-toggle { display:flex; grid-template-columns:auto 1fr; align-items:center; gap:7px; min-height:40px; color:var(--ink-2); font:600 11px var(--font-body); text-transform:none; letter-spacing:0; cursor:pointer; }
+.evo-toggle input { accent-color:var(--turf); }
+.evo-analysis-controls input:focus, .evo-analysis-controls select:focus, .evo-player-summary:focus-visible, .evo-save-path:focus-visible, .evo-remove-path:focus-visible { outline:3px solid color-mix(in srgb, var(--turf) 38%, transparent); outline-offset:2px; }
+.evo-analysis-count { margin:14px 0 9px; color:var(--ink-3); font:11px var(--font-mono); }
+.evo-analysis-list, .evo-saved-list { display:grid; gap:10px; }
+.evo-player-analysis { overflow:hidden; border:1px solid var(--rule); border-radius:var(--radius-lg); background:var(--panel); box-shadow:var(--shadow-sm); }
+.evo-player-analysis.is-xi { border-color:color-mix(in srgb, var(--gain) 54%, var(--rule)); }
+.evo-player-summary { display:grid; grid-template-columns:48px minmax(170px,1fr) minmax(150px,.75fr) auto auto; align-items:center; width:100%; gap:13px; padding:12px 14px; border:0; background:transparent; color:var(--ink); text-align:left; cursor:pointer; }
+.evo-player-summary:hover { background:color-mix(in srgb, var(--turf-bg) 42%, transparent); }
+.evo-player-thumb { display:grid; place-items:center; width:48px; height:48px; overflow:hidden; border:1px solid var(--rule); border-radius:var(--radius-md); background:var(--sunk); color:var(--ink-3); font:700 11px var(--font-mono); }
+.evo-player-thumb img { width:100%; height:100%; object-fit:cover; }
+.evo-player-name { display:grid; gap:3px; min-width:0; }
+.evo-player-name strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; }
+.evo-player-name span, .evo-player-name small { overflow:hidden; color:var(--ink-3); font:11px var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
+.evo-player-name small { color:var(--cost); }
+.evo-player-numbers { display:flex; justify-content:flex-end; gap:16px; color:var(--ink-2); font:700 13px var(--font-mono); text-align:right; }
+.evo-player-numbers span { display:grid; gap:2px; }
+.evo-player-numbers small { color:var(--ink-3); font:10px var(--font-mono); text-transform:uppercase; }
+.evo-player-numbers .is-gain { color:var(--gain); }
+.evo-expand { color:var(--turf); font:700 11px var(--font-mono); white-space:nowrap; }
+.evo-player-routes { display:grid; gap:9px; padding:0 14px 14px 75px; border-top:1px solid var(--rule); }
+.evo-route { display:grid; grid-template-columns:18px minmax(0,1fr) auto; gap:10px; align-items:center; padding:13px; border:1px solid var(--rule); border-radius:var(--radius-md); background:var(--sunk); }
+.evo-route.is-xi { border-color:color-mix(in srgb, var(--gain) 58%, var(--rule)); background:linear-gradient(90deg, var(--gain-bg), var(--sunk) 42%); }
+.evo-route-rail { display:grid; grid-template-rows:12px 1fr 12px; justify-items:center; align-self:stretch; padding:4px 0; }
+.evo-route-rail span, .evo-route-rail b { width:10px; height:10px; border-radius:50%; background:var(--turf); box-shadow:0 0 0 3px var(--turf-bg); }
+.evo-route-rail b { background:var(--gain); box-shadow:0 0 0 3px var(--gain-bg); }
+.evo-route-rail i { width:1px; min-height:18px; background:linear-gradient(var(--turf), var(--gain)); }
+.evo-route-main { display:grid; gap:9px; min-width:0; }
+.evo-route-head { display:flex; align-items:start; justify-content:space-between; gap:9px; }
+.evo-route-head > div { display:grid; gap:3px; min-width:0; }
+.evo-route-label { color:var(--turf); font:700 10px var(--font-mono); text-transform:uppercase; letter-spacing:.06em; }
+.evo-route-head strong { overflow:hidden; font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
+.evo-route-outcome { display:flex; flex-wrap:wrap; align-items:end; gap:10px; color:var(--ink-2); font:700 13px var(--font-mono); }
+.evo-route-outcome span:not([aria-hidden]) { display:grid; gap:2px; }
+.evo-route-outcome small { color:var(--ink-3); font:10px var(--font-mono); text-transform:uppercase; }
+.evo-route-xi { margin-left:auto; color:var(--gain); text-align:right; }
+.evo-route-meta, .evo-saved-meta { display:flex; flex-wrap:wrap; gap:6px 12px; color:var(--ink-3); font:11px var(--font-mono); }
+.evo-route-expired { color:var(--cost); }
+.evo-save-path, .evo-remove-path { min-height:34px; padding:7px 10px; border:1px solid var(--turf); border-radius:var(--radius-sm); background:transparent; color:var(--turf); cursor:pointer; font:700 10px var(--font-mono); text-transform:uppercase; white-space:nowrap; }
+.evo-save-path:hover, .evo-remove-path:hover { background:var(--turf-bg); }
+.evo-save-path:disabled, .evo-remove-path:disabled { opacity:.58; cursor:wait; }
+.evo-no-routes { padding:14px 0 4px; color:var(--ink-2); }
+.evo-no-routes strong { color:var(--ink); font:700 12px var(--font-mono); }
+.evo-no-routes p { margin:6px 0 0; font-size:13px; line-height:1.5; }
+.evo-card-link { color:var(--turf); font:700 11px var(--font-mono); text-decoration:none; }
+.evo-card-link:hover { text-decoration:underline; }
+.evo-saved-card { padding:17px; border:1px solid var(--rule); border-radius:var(--radius-lg); background:var(--panel); box-shadow:var(--shadow-sm); }
+.evo-saved-head, .evo-saved-head > div { display:flex; align-items:start; justify-content:space-between; gap:12px; }
+.evo-saved-head img { width:54px; height:54px; object-fit:cover; border:1px solid var(--rule); border-radius:var(--radius-md); background:var(--sunk); }
+.evo-saved-head h2 { margin:3px 0; font-size:18px; letter-spacing:-.025em; }
+.evo-saved-head p { margin:0; color:var(--ink-2); font:12px var(--font-mono); }
+.evo-saved-chain { margin:14px 0 10px; padding:10px 12px; border-left:3px solid var(--turf); background:var(--sunk); color:var(--ink); font:700 12px var(--font-mono); }
+.evo-saved-meta { margin-bottom:14px; }
+.evo-remove-path { border-color:var(--cost); color:var(--cost); }
+.evo-remove-path:hover { background:var(--cost-bg); }
 @media (max-width: 930px) { .evo-detail-layout { grid-template-columns:1fr; } .evo-detail-sidebar { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; } .evo-detail-sidebar .evo-panel + .evo-panel { margin-top:0; } }
-@media (max-width: 720px) { .evo-catalog-hero, .evo-detail-hero { grid-template-columns:1fr; display:grid; } .evo-hero-stamp { justify-self:start; transform:none; } .evo-catalog-grid { grid-template-columns:1fr; } .evo-detail-sidebar { grid-template-columns:1fr; } .evo-change { grid-template-columns:100px minmax(55px,1fr) 50px; gap:7px; } }
+@media (max-width: 720px) { .evo-catalog-hero, .evo-detail-hero, .evo-analysis-hero { grid-template-columns:1fr; display:grid; } .evo-hero-stamp { justify-self:start; transform:none; } .evo-catalog-grid { grid-template-columns:1fr; } .evo-detail-sidebar { grid-template-columns:1fr; } .evo-change { grid-template-columns:100px minmax(55px,1fr) 50px; gap:7px; } .evo-analysis-scoreboard { justify-self:start; min-width:190px; } .evo-player-summary { grid-template-columns:44px minmax(0,1fr) auto; gap:10px; } .evo-player-thumb { width:44px; height:44px; } .evo-player-numbers { grid-column:2; justify-content:start; text-align:left; } .evo-player-summary > .chip { grid-column:3; grid-row:1; } .evo-expand { grid-column:3; grid-row:2; text-align:right; } .evo-player-routes { padding-left:14px; } .evo-route { grid-template-columns:16px minmax(0,1fr); } .evo-save-path { grid-column:2; justify-self:start; } .evo-route-xi { margin-left:0; } }
 @media (max-width: 480px) { .evo-catalog-hero { padding:20px; } .evo-detail-title { padding:19px; } .evo-panel-head, .evo-panel-body { padding-left:14px; padding-right:14px; } .evo-catalog-toolbar { display:grid; align-items:start; } .evo-agent-columns { grid-template-columns:1fr; } }

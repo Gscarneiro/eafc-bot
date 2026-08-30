@@ -304,8 +304,15 @@ func runJob(ctx context.Context, cfg config.Config, st store.Store, outPath stri
 
 	var cardReports []cards.CardReport
 	if !dryRun && len(snap.Club.Players) > 0 {
-		fmt.Printf("analisando cartas a partir de %d de overall (atual x potencial)...\n", cfg.Serve.CardsMinRating)
-		if cardReports, err = cards.BuildReports(ctx, client, snap.Club, cfg.Serve.CardsMinRating, gauntletPlan.StarterIDs()); err != nil {
+		cardsMinRating := cfg.Serve.CardsMinRating
+		// A Ã¡rea de EvoluÃ§Ãµes promete revisar todas as cartas 88+. A
+		// configuraÃ§Ã£o ainda pode baixar esse piso para ampliar detalhes de
+		// carta, mas um valor maior nÃ£o pode esconder a cobertura combinada.
+		if cardsMinRating > 88 {
+			cardsMinRating = 88
+		}
+		fmt.Printf("analisando cartas a partir de %d de overall (atual x potencial)...\n", cardsMinRating)
+		if cardReports, err = cards.BuildReports(ctx, client, snap.Club, cardsMinRating, gauntletPlan.StarterIDs()); err != nil {
 			snap.Errors = append(snap.Errors, "análise carta-a-carta: "+err.Error())
 		}
 	}

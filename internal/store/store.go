@@ -176,6 +176,16 @@ type EvolutionAnalysisStore interface {
 	SaveEvolutionAnalysis(ctx context.Context, analysis domain.EvolutionAnalysis) error
 }
 
+// SavedEvolutionPathStore Ã© a extensÃ£o opcional que guarda os caminhos que o
+// usuÃ¡rio decidiu acompanhar. SeparÃ¡-la de Store conserva fakes antigos e
+// permite que a leitura da anÃ¡lise continue disponÃ­vel mesmo num backend sem
+// persistÃªncia manual.
+type SavedEvolutionPathStore interface {
+	ListSavedEvolutionPaths(ctx context.Context, cycle string) ([]domain.SavedEvolutionPath, error)
+	SaveEvolutionPath(ctx context.Context, path domain.SavedEvolutionPath) error
+	DeleteSavedEvolutionPath(ctx context.Context, cycle, id string) error
+}
+
 // Snapshot é o resultado completo de uma coleta+análise: os dados brutos que
 // futgg.Collect trouxe, mais tudo que internal/analyze decidiu em cima
 // deles. É deliberadamente PLANO em vez de embutir futgg.Snapshot ou

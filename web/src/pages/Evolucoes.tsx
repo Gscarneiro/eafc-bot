@@ -55,7 +55,7 @@ function CatalogCard({ item }: { item: EvolutionCatalogItem }) {
           {item.repeatable && <span>repetível</span>}
         </div>
         <div className="evo-card-actions">
-          <Link className="btn btn-primary" to={`/evolucoes/${encodeURIComponent(slug)}`}>abrir laboratório</Link>
+          <Link className="btn btn-primary" to={`/evolucoes/catalogo/${encodeURIComponent(slug)}`}>abrir laboratório</Link>
           {item.sources?.[0]?.url && <a className="evo-source-link" href={item.sources[0].url} target="_blank" rel="noreferrer">fonte fut.gg ↗</a>}
         </div>
       </div>

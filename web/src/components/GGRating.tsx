@@ -22,7 +22,10 @@ export function formatGGRating(value?: number | null): string {
 export function shouldShowPositionalGGRating(current?: number | null, positional?: number | null): boolean {
   if (!isKnownGGRating(positional)) return false;
   if (!isKnownGGRating(current)) return true;
-  return formatGGRating(current) !== formatGGRating(positional);
+  // Se a cópia já supera a referência posicional, a referência menor só
+  // acrescentaria ruído. Quando a referência é maior, mantemos as duas para
+  // deixar explícito o espaço que ainda pode ser ganho naquela posição.
+  return positional > current && formatGGRating(current) !== formatGGRating(positional);
 }
 
 export default function GGRating({ current, currentPosition, positional, positionalPosition, variant = "inline" }: GGRatingProps) {

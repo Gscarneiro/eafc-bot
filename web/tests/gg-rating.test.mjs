@@ -54,8 +54,9 @@ test("fixture Vite/Playwright mantém cópia atual, posicional e ausente", async
     const page = await browser.newPage();
     await page.goto(`http://127.0.0.1:${port}/tests/fixtures/gg-rating.html`);
     await page.waitForSelector("[data-testid=different] .gg-rating");
-    assert.match(await page.locator("[data-testid=different]").innerText(), /atual.*88\.0.*pos\..*97\.7/is);
-    assert.doesNotMatch(await page.locator("[data-testid=equal]").innerText(), /pos\./);
+  assert.match(await page.locator("[data-testid=different]").innerText(), /atual.*88\.0.*pos\..*97\.7/is);
+    assert.doesNotMatch(await page.locator("[data-testid=current-higher]").innerText(), /pos\./i);
+    assert.doesNotMatch(await page.locator("[data-testid=equal]").innerText(), /pos\./i);
     assert.match(await page.locator("[data-testid=missing]").innerText(), /atual.*—.*pos\..*97\.7/is);
   } finally {
     await browser.close();

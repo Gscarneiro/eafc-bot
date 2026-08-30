@@ -1,0 +1,7 @@
+{
+  "name": "eafc-bot",
+  "private": true,
+  "scripts": {
+    "serve": "node scripts/build-and-serve.mjs"
+  }
+}

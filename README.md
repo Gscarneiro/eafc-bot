@@ -13,18 +13,11 @@ inclui deleção do clube e ban da conta em todos os jogos EA.
 ## Começando
 
 ```bash
-# A UI React (web/) é embutida no binário via go:embed — e o embed exige
-# que o build já exista. Sem este passo, o `go build` abaixo nem compila
-# (falta o que embutir), não só o comando `serve`.
-cd web && npm install && npm run build && cd ..
+# Instale as dependências da UI uma vez.
+npm install --prefix web
 
-# Sem -o: o Go nomeia o binário pelo diretório e acrescenta .exe no Windows
-# sozinho. Com "-o eafcbot" você ganha um arquivo sem extensão que o Windows
-# não executa.
-go build ./cmd/eafcbot
-
-# 1. Ver a UI funcionando, sem rede e sem configuração:
-./eafcbot serve -demo   # Windows: .\eafcbot.exe — abre sozinho no navegador
+# 1. Compilar a UI e o binário Go e ver tudo funcionando, sem rede:
+npm run serve -- -demo
 
 # 2. Sincronizar o clube em https://www.fut.gg/gg-club/ (login pela EA)
 
@@ -34,8 +27,13 @@ $EDITOR .eafc-bot/config.json   # preencha "gamer_tag"
 
 # 4. Descobrir as rotas do fut.gg sozinho, e subir o bot de vez:
 ./eafcbot autoconfig
-./eafcbot serve
+npm run serve
 ```
+
+Tudo depois de `--` é repassado ao servidor. Por exemplo,
+`npm run serve -- -demo -port 4180` inicia o modo demo na porta 4180. A UI
+React é sempre compilada primeiro porque seu resultado é embutido no binário
+via `go:embed`.
 
 `serve` é o comando do dia a dia: sobe a API + a UI numa porta só
 (`http://localhost:4173`, `-port` muda) e tem um scheduler embutido que

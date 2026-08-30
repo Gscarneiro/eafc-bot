@@ -115,6 +115,28 @@ func fixtureSnapshotComGrafoDeEvolucao() store.Snapshot {
 	return snap
 }
 
+func TestCardSlugLookupPreservaCopiasFisicas(t *testing.T) {
+	low := domain.ClubPlayer{Player: domain.Player{ID: 117683408, Name: "Cópia", GGRating: 87.99}, ClubItemID: "item-baixo"}
+	high := domain.ClubPlayer{Player: domain.Player{ID: 117683408, Name: "Cópia", GGRating: 97.73}, ClubItemID: "item-alto"}
+	lookup := newCardSlugLookup([]cards.CardReport{
+		{Slug: "26-117683408", Player: high},
+		{Slug: "26-117683408-96", Player: low},
+	})
+	if got := lookup.slug(low); got != "26-117683408-96" {
+		t.Fatalf("slug da cópia baixa = %q", got)
+	}
+	if got := lookup.slug(high); got != "26-117683408" {
+		t.Fatalf("slug da cópia alta = %q", got)
+	}
+	if report, ok := lookup.report(low); !ok || report.Player.GGRating != 87.99 {
+		t.Fatalf("relatório da cópia baixa não preservou GG atual: %#v, %v", report, ok)
+	}
+	ambiguous := domain.ClubPlayer{Player: domain.Player{ID: 117683408}}
+	if got := lookup.slug(ambiguous); got != "" {
+		t.Fatalf("cópia sem identidade física recebeu slug arbitrário %q", got)
+	}
+}
+
 func TestHandleEvolucoesPlanoRetornaRamosConfirmados(t *testing.T) {
 	srv, _ := newTestServerWithSnapshot(t, fixtureSnapshotComGrafoDeEvolucao())
 	w := httptest.NewRecorder()

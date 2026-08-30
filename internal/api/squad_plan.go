@@ -120,24 +120,21 @@ func (s *Server) handleSquadPlan(w http.ResponseWriter, r *http.Request) {
 
 	plan := analyze.BuildSquadPlan(snap.Club, req)
 
-	slugByID := make(map[int64]string, len(snap.Cards))
-	for _, c := range snap.Cards {
-		slugByID[c.Player.ID] = c.Slug
-	}
+	lookup := newCardSlugLookup(snap.Cards)
 
 	writeJSON(w, SquadPlanResponse{
 		GeneratedAt: snap.GeneratedAt,
 		Status:      plan.Status,
 		Reason:      plan.Reason,
 		Formation:   plan.Formation,
-		Scenarios:   squadPlanScenarioViews(plan.Scenarios, slugByID),
+		Scenarios:   squadPlanScenarioViews(plan.Scenarios, lookup),
 		Needs:       plan.Needs,
 		Warnings:    plan.Warnings,
 		Capital:     snap.Club.Capital(s.EvolutionExtraBudget, s.MarketReserve, 0),
 	})
 }
 
-func squadPlanScenarioViews(scenarios []analyze.SquadPlanScenario, slugByID map[int64]string) []SquadPlanScenarioView {
+func squadPlanScenarioViews(scenarios []analyze.SquadPlanScenario, lookup cardSlugLookup) []SquadPlanScenarioView {
 	out := make([]SquadPlanScenarioView, 0, len(scenarios))
 	for _, sc := range scenarios {
 		view := SquadPlanScenarioView{
@@ -145,7 +142,7 @@ func squadPlanScenarioViews(scenarios []analyze.SquadPlanScenario, slugByID map[
 			TotalRating: sc.TotalRating, AverageRating: sc.AverageRating, Quimica: sc.Quimica,
 		}
 		for _, a := range sc.Starters {
-			view.Starters = append(view.Starters, squadPlanStarterView(a, slugByID))
+			view.Starters = append(view.Starters, squadPlanStarterView(a, lookup))
 		}
 		for _, m := range sc.Moves {
 			view.Moves = append(view.Moves, SquadPlanMoveView{
@@ -153,10 +150,10 @@ func squadPlanScenarioViews(scenarios []analyze.SquadPlanScenario, slugByID map[
 				Position: m.Position,
 				Current: squadPlanStarterView(analyze.SquadAssignment{
 					Index: m.Index, Position: m.Position, Player: m.Current, Rating: m.CurrentRating,
-				}, slugByID),
+				}, lookup),
 				Suggested: squadPlanStarterView(analyze.SquadAssignment{
 					Index: m.Index, Position: m.Position, Player: m.Suggested, Rating: m.SuggestedRating,
-				}, slugByID),
+				}, lookup),
 				CurrentRating: m.CurrentRating, SuggestedRating: m.SuggestedRating, Gain: m.Gain,
 			})
 		}
@@ -165,9 +162,9 @@ func squadPlanScenarioViews(scenarios []analyze.SquadPlanScenario, slugByID map[
 	return out
 }
 
-func squadPlanStarterView(a analyze.SquadAssignment, slugByID map[int64]string) SquadPlanStarterView {
+func squadPlanStarterView(a analyze.SquadAssignment, lookup cardSlugLookup) SquadPlanStarterView {
 	return SquadPlanStarterView{
 		Index: a.Index, Position: a.Position, Player: a.Player, Rating: a.Rating,
-		CardSlug: slugByID[a.Player.ID],
+		CardSlug: lookup.slug(a.Player),
 	}
 }

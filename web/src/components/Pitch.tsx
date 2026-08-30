@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { StarterCard } from "../types";
+import GGRating, { formatGGRating, shouldShowPositionalGGRating } from "./GGRating";
 import "./Pitch.css";
 
 interface PitchProps {
@@ -33,7 +34,7 @@ export default function Pitch({ formation, starters }: PitchProps) {
 
   return <div className="pitch"><div className="pitch-field">
     {[...lines].reverse().map((line, index) => <div className="pitch-row" key={index}>
-      {line.slice().reverse().map((card) => <PlayerChit key={`${card.index}-${card.player.id}`} card={card} />)}
+      {line.slice().reverse().map((card) => <PlayerChit key={card.player.club_item_id || `${card.index}-${card.player.id}`} card={card} />)}
     </div>)}
     <div className="pitch-row pitch-row-gk"><PlayerChit card={goalkeeper} /></div>
   </div></div>;
@@ -41,13 +42,16 @@ export default function Pitch({ formation, starters }: PitchProps) {
 
 function PlayerChit({ card }: { card: StarterCard }) {
   const player = card.player;
-  const rating = card.position_gg_rating ?? player.gg_rating;
   const chem = card.chemistry;
   // Fora de posição é a ÚNICA forma de perder entrosamento sob o modelo
   // padrão (ver internal/chemistry) — é o dado mais acionável que existe
   // aqui, então ganha destaque visual próprio, não só um número a mais.
   const chemLabel = chem ? (chem.fora_de_posicao ? "fora de posição — sem entrosamento" : `entrosamento ${chem.pontos}/3`) : "";
-  const label = `${player.common_name || player.name}, ${card.position}, ${rating ? `GG ${rating.toFixed(1)}` : "GG indisponível"}${chemLabel ? `, ${chemLabel}` : ""}`;
+  const currentLabel = `GG atual ${formatGGRating(player.gg_rating)}${player.gg_rating_pos ? ` · ${player.gg_rating_pos}` : ""}`;
+  const positionalLabel = shouldShowPositionalGGRating(player.gg_rating, card.position_gg_rating)
+    ? `, GG posicional ${formatGGRating(card.position_gg_rating)} · ${card.position}`
+    : "";
+  const label = `${player.common_name || player.name}, ${card.position}, ${currentLabel}${positionalLabel}${chemLabel ? `, ${chemLabel}` : ""}`;
   const content = <>
     {player.image_url && <img className="chit-image" src={player.image_url} alt="" loading="lazy" />}
     {!player.image_url && <span className="chit-fallback"><strong>{player.common_name || player.name}</strong><small>{card.position}</small></span>}
@@ -56,7 +60,7 @@ function PlayerChit({ card }: { card: StarterCard }) {
         {chem.fora_de_posicao ? "!" : chem.pontos}
       </span>
     )}
-    <span className="chit-gg">{rating ? rating.toFixed(1) : "—"}</span>
+    <GGRating current={player.gg_rating} currentPosition={player.gg_rating_pos} positional={card.position_gg_rating} positionalPosition={card.position} variant="pitch" />
   </>;
   return <div className="pitch-chit">
     {card.card_slug ? <Link to={`/time/${card.card_slug}`} className="chit-link" aria-label={label}>{content}</Link> : <div className="chit-link" title={label}>{content}</div>}

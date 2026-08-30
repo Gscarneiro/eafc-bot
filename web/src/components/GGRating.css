@@ -1,0 +1,25 @@
+.gg-rating { display: inline-flex; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gg-rating-current, .gg-rating-positional { display: inline-flex; align-items: baseline; gap: 4px; }
+.gg-rating-current { color: var(--gain); font-weight: 700; }
+.gg-rating-positional { color: var(--ink-3); font-size: .9em; }
+.gg-rating-label { color: var(--ink-2); font: 10px var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
+.gg-rating-current strong, .gg-rating-positional strong { font-family: var(--font-mono); }
+.gg-rating-current small { color: var(--ink-3); font: 10px var(--font-mono); }
+.gg-rating-positional::before { content: "·"; color: var(--rule-strong); margin-right: 1px; }
+
+.gg-rating-pitch { position: absolute; right: -4px; bottom: 4px; min-width: 39px; padding: 2px 4px; border: 1px solid color-mix(in srgb, var(--panel) 36%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--ink) 82%, transparent); color: #fff; display: flex; flex-direction: column; align-items: center; gap: 1px; box-shadow: 0 2px 7px rgba(0,0,0,.25); }
+.gg-rating-pitch .gg-rating-current, .gg-rating-pitch .gg-rating-positional { display: flex; gap: 1px; color: #fff; line-height: 1.1; }
+.gg-rating-pitch .gg-rating-current { flex-direction: column; align-items: center; font: 700 10px var(--font-mono); }
+.gg-rating-pitch .gg-rating-positional { font: 8px var(--font-mono); }
+.gg-rating-pitch .gg-rating-positional::before { content: ""; margin: 0; }
+.gg-rating-pitch .gg-rating-label { color: rgba(255,255,255,.75); font-size: 7px; line-height: 1; }
+.gg-rating-pitch .gg-rating-current strong, .gg-rating-pitch .gg-rating-positional strong { font-size: inherit; }
+.gg-rating-detail { display: inline-flex; padding: 5px 7px; border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--sunk); }
+.gg-rating-detail .gg-rating-label { font-size: 9px; }
+
+@media (max-width: 560px) {
+  .gg-rating-pitch { right: -2px; bottom: 1px; min-width: 34px; padding: 2px 3px; }
+  .gg-rating-pitch .gg-rating-current { font-size: 9px; }
+  .gg-rating-pitch .gg-rating-positional { font-size: 7px; }
+  .gg-rating-pitch .gg-rating-label { font-size: 6px; }
+}

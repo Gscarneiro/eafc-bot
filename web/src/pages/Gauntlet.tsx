@@ -5,6 +5,7 @@ import { asyncGate } from "../components/asyncGate";
 import Chip from "../components/Chip";
 import EmptyState from "../components/EmptyState";
 import ExpandIcon from "../components/ExpandIcon";
+import GGRating from "../components/GGRating";
 import PageHeader from "../components/PageHeader";
 import Pitch, { canDrawPitch } from "../components/Pitch";
 import { formatCoins, formatDateTime, formatSigned, isZeroTime, styleNames } from "../format";
@@ -101,7 +102,7 @@ export default function Gauntlet() {
                 }}
               >
                 <span className="gauntlet-round-tab-label">Rodada {r.round}</span>
-                <span className="gauntlet-round-tab-value">{r.average_rating.toFixed(1)} GG</span>
+                <span className="gauntlet-round-tab-value">{r.average_rating.toFixed(1)} GG posicional</span>
               </button>
             ))}
           </div>
@@ -117,7 +118,7 @@ export default function Gauntlet() {
                   <Chip tone="flat">química indisponível</Chip>
                 )}
                 <span className="gauntlet-round-stats">
-                  força total {round.total_rating.toFixed(1)} · média {round.average_rating.toFixed(1)} GG
+                  força total {round.total_rating.toFixed(1)} · média {round.average_rating.toFixed(1)} GG posicional
                 </span>
                 {round.chemistry?.verificacao.status === "diverge" && (
                   <span className="gauntlet-round-note">
@@ -143,7 +144,7 @@ export default function Gauntlet() {
                 <div className="gauntlet-starter-list">
                   {(round.starters ?? []).map((s, i) => (
                     <StarterRow
-                      key={`${round.round}-${s.player.id}`}
+                      key={`${round.round}-${s.player.club_item_id || s.player.id}-${s.index}`}
                       starter={s}
                       open={openStarter === i}
                       onToggle={() => setOpenStarter(openStarter === i ? null : i)}
@@ -158,8 +159,8 @@ export default function Gauntlet() {
                   <span className="count-label">{round.bench?.length ?? 0} cartas</span>
                 </div>
                 <div className="gauntlet-bench-grid">
-                  {(round.bench ?? []).map((b) => (
-                    <BenchChit key={b.player.id} card={b} />
+                  {(round.bench ?? []).map((b, index) => (
+                    <BenchChit key={b.player.club_item_id || `${b.player.id}-${index}`} card={b} />
                   ))}
                 </div>
               </section>
@@ -183,9 +184,7 @@ function StarterRow({ starter, open, onToggle }: { starter: GauntletStarterView;
           {p.image_url && <img src={p.image_url} alt="" loading="lazy" />}
           <div className="gauntlet-starter-player-text">
             <strong>{p.common_name || p.name}</strong>
-            <span>
-              {p.rating} OVR · GG {starter.rating.toFixed(1)}
-            </span>
+            <GGRating current={p.gg_rating} currentPosition={p.gg_rating_pos} positional={starter.rating} positionalPosition={starter.position} />
           </div>
         </div>
         {starter.card_slug && (
@@ -210,7 +209,7 @@ function StarterRow({ starter, open, onToggle }: { starter: GauntletStarterView;
             <div className="gauntlet-potential" key={i}>
               <div className="gauntlet-potential-head">
                 <span className="gauntlet-potential-gain">
-                  {formatSigned(potential.gg_rating_gain)} GG · final {potential.final_gg_rating.toFixed(1)}
+                  {formatSigned(potential.gg_rating_gain)} GG · GG final {potential.final_gg_rating.toFixed(1)}
                 </span>
                 <span>{potential.training_time || "tempo não informado"}</span>
               </div>
@@ -240,7 +239,8 @@ function BenchChit({ card }: { card: RosterCard }) {
       {p.image_url && <img src={p.image_url} alt="" loading="lazy" />}
       <div className="gauntlet-bench-chit-text">
         <strong>{p.common_name || p.name}</strong>
-        <span>{p.gg_rating ? `GG ${p.gg_rating.toFixed(1)}` : `${p.rating} OVR`}</span>
+        <GGRating current={p.gg_rating} currentPosition={p.gg_rating_pos} />
+        <span>{p.rating} OVR</span>
       </div>
     </>
   );

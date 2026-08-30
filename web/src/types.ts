@@ -75,8 +75,10 @@ export interface Player {
   weight_kg?: number;
   real_face?: boolean;
   accelerate_type?: string;
+  /** GG atual desta cópia física; não substituir pela nota posicional. */
   gg_rating?: number;
   gg_rating_pos?: Position;
+  /** Notas posicionais do fut.gg, calculadas no nível do EA ID e compartilháveis entre cópias. */
   gg_ratings?: Partial<Record<Position, number>>;
   image_url?: string;
   base_player_ea_id?: number;
@@ -90,6 +92,8 @@ export interface Player {
 }
 
 export interface ClubPlayer extends Player {
+  /** Identifica a cópia física; a nota posicional pode ser compartilhada por EA ID. */
+  club_item_id?: string;
   untradeable: boolean;
   in_squad: boolean;
   squad_slot: Position | "";

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { fetchCollection, fetchTime } from "../api";
 import { asyncGate } from "../components/asyncGate";
 import Chip from "../components/Chip";
+import GGRating from "../components/GGRating";
 import PageHeader from "../components/PageHeader";
 import Pitch, { canDrawPitch } from "../components/Pitch";
 import type { Filter } from "../odata";
@@ -92,11 +93,11 @@ export default function Time() {
         {showPitch ? (
           <Pitch formation={data.formation} starters={displayedStarters} />
         ) : (
-          <RosterTable rows={displayedStarters.map((s) => ({ player: s.player, cardSlug: s.card_slug, position: s.position, chemistry: s.chemistry }))} showChemistry />
+          <RosterTable rows={displayedStarters.map((s) => ({ player: s.player, cardSlug: s.card_slug, position: s.position, positionalGGRating: s.position_gg_rating, chemistry: s.chemistry }))} showChemistry />
         )}
         {data.optimization?.status === "improved" && (
           <div className="banner">
-            <strong>Melhor encaixe: +{data.optimization.gain.toFixed(1)} GG</strong>
+            <strong>Melhor encaixe: +{data.optimization.gain.toFixed(1)} GG posicional</strong>
             {data.optimization.chemistry_note && <><br />{data.optimization.chemistry_note}</>}
           </div>
         )}
@@ -105,7 +106,7 @@ export default function Time() {
       {(benchCollection.count > 0 || search || position || tradeable !== "all") && (
         <section>
           <div className="section-title-row">
-            <div><h2>Reservas</h2><p className="section-note">Cartas 88+ do clube, ordenadas por GG Rating.</p></div>
+            <div><h2>Reservas</h2><p className="section-note">Cartas 88+ do clube, ordenadas por GG atual.</p></div>
             <span className="count-label">{benchCollection.count} encontradas</span>
           </div>
           <div className="roster-filters" aria-label="Filtrar reservas">
@@ -130,6 +131,7 @@ interface Row {
   player: ClubPlayer;
   cardSlug?: string;
   position?: Position;
+  positionalGGRating?: number;
   chemistry?: ChemistryPlayer;
 }
 
@@ -148,13 +150,13 @@ function RosterTable({ rows, showChemistry = false }: { rows: Row[]; showChemist
             <th>Posição</th>
             <th>Carta</th>
             <th className="num">Overall</th>
-            <th className="num">GG Rating</th>
+            <th className="num">GG atual · posição</th>
             {showChemistry && <th>Química</th>}
           </tr>
         </thead>
         <tbody>
-          {rows.map(({ player: p, cardSlug, position, chemistry }) => (
-            <tr key={p.id}>
+          {rows.map(({ player: p, cardSlug, position, positionalGGRating, chemistry }, index) => (
+            <tr key={p.club_item_id || `${p.id}-${index}`}>
               <td>{p.image_url && <img className="thumb" src={p.image_url} alt="" loading="lazy" />}</td>
               <td>
                 {position ?? p.position}
@@ -169,7 +171,7 @@ function RosterTable({ rows, showChemistry = false }: { rows: Row[]; showChemist
                 {p.untradeable && <Chip tone="flat"> untradeable</Chip>}
               </td>
               <td className="num">{p.rating}</td>
-              <td className="num">{p.gg_rating ? p.gg_rating.toFixed(1) : "—"}</td>
+              <td className="num"><GGRating current={p.gg_rating} currentPosition={p.gg_rating_pos} positional={positionalGGRating} positionalPosition={position} variant="inline" /></td>
               {showChemistry && (
                 <td>
                   {chemistry ? (

@@ -224,9 +224,9 @@ func (s *Server) handleReservas(w http.ResponseWriter, r *http.Request) {
 	}
 	players := filteredBench(snap.Club.Players, starters, httptestRequestWithoutLegacyFilters(r))
 	rows := make([]RosterCard, 0, len(players))
-	slugByID := cardSlugs(snap.Cards)
+	lookup := newCardSlugLookup(snap.Cards)
 	for _, player := range players {
-		rows = append(rows, RosterCard{Player: player, CardSlug: slugByID[player.ID]})
+		rows = append(rows, RosterCard{Player: player, CardSlug: lookup.slug(player)})
 	}
 	page, ok := serveList(w, r, reservasSchema(), rows)
 	if !ok {
@@ -243,21 +243,58 @@ func httptestRequestWithoutLegacyFilters(r *http.Request) *http.Request {
 	return clone
 }
 
-func cardSlugs(cardsReports []cards.CardReport) map[int64]string {
-	result := make(map[int64]string, len(cardsReports))
-	for _, card := range cardsReports {
-		result[card.Player.ID] = card.Slug
+type cardSlugLookup struct {
+	byItem map[string]cards.CardReport
+	byID   map[int64][]cards.CardReport
+}
+
+func newCardSlugLookup(reports []cards.CardReport) cardSlugLookup {
+	lookup := cardSlugLookup{byItem: make(map[string]cards.CardReport), byID: make(map[int64][]cards.CardReport)}
+	for _, report := range reports {
+		if report.Player.ClubItemID != "" {
+			lookup.byItem[report.Player.ClubItemID] = report
+		}
+		lookup.byID[report.Player.ID] = append(lookup.byID[report.Player.ID], report)
 	}
-	return result
+	return lookup
+}
+
+// slug resolve primeiro a cópia física; quando a fonte não provou essa
+// identidade, só usa EA ID se houver uma única carta. Assim uma cópia
+// duplicada nunca abre silenciosamente o detalhe de outra.
+func (lookup cardSlugLookup) slug(player domain.ClubPlayer) string {
+	if player.ClubItemID != "" {
+		if report, ok := lookup.byItem[player.ClubItemID]; ok {
+			return report.Slug
+		}
+	}
+	candidates := lookup.byID[player.ID]
+	if len(candidates) == 1 {
+		return candidates[0].Slug
+	}
+	return ""
+}
+
+func (lookup cardSlugLookup) report(player domain.ClubPlayer) (cards.CardReport, bool) {
+	if player.ClubItemID != "" {
+		if report, ok := lookup.byItem[player.ClubItemID]; ok {
+			return report, true
+		}
+	}
+	candidates := lookup.byID[player.ID]
+	if len(candidates) == 1 {
+		return candidates[0], true
+	}
+	return cards.CardReport{}, false
 }
 
 func buildStarters(snap store.Snapshot, quimicaPorCarta map[int64]chemistry.Jogador) ([]StarterCard, string) {
-	slugByID := cardSlugs(snap.Cards)
+	lookup := newCardSlugLookup(snap.Cards)
 	main := reportMainSquad(snap.Club)
 	starters := make([]StarterCard, 0, len(main))
 	for _, card := range main {
 		rating, _ := card.Player.GGRatingAt(card.Position)
-		sc := StarterCard{RosterCard: RosterCard{Player: card.Player, CardSlug: slugByID[card.Player.ID]}, Index: card.Index, Position: card.Position, PositionGGRating: rating}
+		sc := StarterCard{RosterCard: RosterCard{Player: card.Player, CardSlug: lookup.slug(card.Player)}, Index: card.Index, Position: card.Position, PositionGGRating: rating}
 		if j, ok := quimicaPorCarta[card.Player.ID]; ok {
 			sc.Quimica = &j
 		}
@@ -399,13 +436,13 @@ func (s *Server) handleHojeMovimentacao(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	slugByID := cardSlugs(snap.Cards)
+	lookup := newCardSlugLookup(snap.Cards)
 	items := make([]movimentoCard, 0, len(snap.Diff.Added)+len(snap.Diff.Removed))
 	for _, player := range snap.Diff.Added {
-		items = append(items, movimentoCard{RosterCard: RosterCard{Player: player, CardSlug: slugByID[player.ID]}, Movimento: "entrou"})
+		items = append(items, movimentoCard{RosterCard: RosterCard{Player: player, CardSlug: lookup.slug(player)}, Movimento: "entrou"})
 	}
 	for _, player := range snap.Diff.Removed {
-		items = append(items, movimentoCard{RosterCard: RosterCard{Player: player, CardSlug: slugByID[player.ID]}, Movimento: "saiu"})
+		items = append(items, movimentoCard{RosterCard: RosterCard{Player: player, CardSlug: lookup.slug(player)}, Movimento: "saiu"})
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].Movimento != items[j].Movimento {

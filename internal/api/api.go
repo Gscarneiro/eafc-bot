@@ -569,19 +569,15 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries := cards.BuildCatalog(snap.Club, snap.Cards, snap.RoleCatalog)
-	slugByID := make(map[int64]string, len(entries))
-	if snap.PlayStyleCatalog != nil || snap.RoleCatalog.Plus != nil || snap.RoleCatalog.PlusPlus != nil {
-		for _, e := range entries {
-			if _, ok := slugByID[e.Player.ID]; !ok {
-				slugByID[e.Player.ID] = e.Slug
+	reports := snap.Cards
+	if len(reports) == 0 {
+		for _, entry := range cards.BuildCatalog(snap.Club, nil, snap.RoleCatalog) {
+			if entry.Report != nil {
+				reports = append(reports, *entry.Report)
 			}
 		}
-	} else {
-		for _, c := range snap.Cards {
-			slugByID[c.Player.ID] = c.Slug
-		}
 	}
+	lookup := newCardSlugLookup(reports)
 
 	quimicaAtual := s.currentChemistry(snap)
 	quimicaPorCarta := chemistryByPlayer(quimicaAtual)
@@ -592,7 +588,7 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 	for i, c := range main {
 		j, temQuimica := quimicaPorCarta[c.Player.ID]
 		starters[i] = StarterCard{
-			RosterCard:       RosterCard{Player: c.Player, CardSlug: slugByID[c.Player.ID]},
+			RosterCard:       RosterCard{Player: c.Player, CardSlug: lookup.slug(c.Player)},
 			Index:            c.Index,
 			Position:         c.Position,
 			PositionGGRating: func() float64 { v, _ := c.Player.GGRatingAt(c.Position); return v }(),
@@ -616,7 +612,7 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 	}
 	bench := make([]RosterCard, 0, to-from)
 	for _, p := range benchPlayers[from:to] {
-		bench = append(bench, RosterCard{Player: p, CardSlug: slugByID[p.ID]})
+		bench = append(bench, RosterCard{Player: p, CardSlug: lookup.slug(p)})
 	}
 
 	// snap.SquadPlan.Quimica nil é o sentinela de snapshot gravado antes
@@ -634,10 +630,10 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 		Quimica:       squadPlan.Quimica,
 	}
 	toCard := func(a analyze.SquadAssignment) StarterCard {
-		return StarterCard{RosterCard: RosterCard{Player: a.Player, CardSlug: slugByID[a.Player.ID]}, Index: a.Index, Position: a.Position, PositionGGRating: a.Rating}
+		return StarterCard{RosterCard: RosterCard{Player: a.Player, CardSlug: lookup.slug(a.Player)}, Index: a.Index, Position: a.Position, PositionGGRating: a.Rating}
 	}
 	for _, m := range squadPlan.Moves {
-		cur := StarterCard{RosterCard: RosterCard{Player: m.Current, CardSlug: slugByID[m.Current.ID]}, Index: m.Index, Position: m.Position, PositionGGRating: m.CurrentRating}
+		cur := StarterCard{RosterCard: RosterCard{Player: m.Current, CardSlug: lookup.slug(m.Current)}, Index: m.Index, Position: m.Position, PositionGGRating: m.CurrentRating}
 		opt.Moves = append(opt.Moves, SquadMoveView{m.Index, m.Position, cur, toCard(analyze.SquadAssignment{Index: m.Index, Position: m.Position, Player: m.Suggested, Rating: m.SuggestedRating}), m.CurrentRating, m.SuggestedRating, m.Gain})
 	}
 	for _, a := range squadPlan.Alternatives {
@@ -994,12 +990,7 @@ func (s *Server) handleGauntlet(w http.ResponseWriter, r *http.Request) {
 		plan = analyze.BuildGauntletPlanFromRequest(snap.Club, req)
 	}
 
-	slugByID := make(map[int64]string, len(snap.Cards))
-	cardByID := make(map[int64]cards.CardReport, len(snap.Cards))
-	for _, c := range snap.Cards {
-		slugByID[c.Player.ID] = c.Slug
-		cardByID[c.Player.ID] = c
-	}
+	lookup := newCardSlugLookup(snap.Cards)
 
 	resp := GauntletResponse{
 		GeneratedAt: snap.GeneratedAt,
@@ -1023,15 +1014,15 @@ func (s *Server) handleGauntlet(w http.ResponseWriter, r *http.Request) {
 		for _, a := range round.Starters {
 			sv := GauntletStarterView{
 				Index: a.Index, Position: a.Position, Player: a.Player, Rating: a.Rating,
-				CardSlug: slugByID[a.Player.ID],
+				CardSlug: lookup.slug(a.Player),
 			}
-			if report, ok := cardByID[a.Player.ID]; ok {
+			if report, ok := lookup.report(a.Player); ok {
 				sv.Potentials = gauntletPotentials(report, a.Position)
 			}
 			rv.Starters = append(rv.Starters, sv)
 		}
 		for _, b := range round.Bench {
-			rv.Bench = append(rv.Bench, RosterCard{Player: b, CardSlug: slugByID[b.ID]})
+			rv.Bench = append(rv.Bench, RosterCard{Player: b, CardSlug: lookup.slug(b)})
 		}
 		resp.Rounds = append(resp.Rounds, rv)
 	}

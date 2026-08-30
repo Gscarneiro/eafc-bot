@@ -236,7 +236,10 @@ type Player struct {
 	// cartão (que é GGRatingPos, e pode ser diferente de Position: o
 	// Mbappé, por exemplo, tem Position ST mas GGRatingPos RM). Zero
 	// significa "essa fonte não trouxe" — só a listagem de elenco do GG
-	// Club manda esse campo; a listagem de mercado não manda.
+	// Club manda esse campo; a listagem de mercado não manda. As notas
+	// posicionais/metarank são calculadas no nível do EA ID e podem ser
+	// compartilhadas por cópias físicas; a cópia continua identificada por
+	// ClubItemID no elenco.
 	//
 	// É deliberadamente um número DIFERENTE do Score() deste pacote:
 	// Score() pesa atributo e PlayStyle do jeito que ESTE bot decidiu que

@@ -62,6 +62,16 @@
   color: var(--alert);
   font-size: var(--text-xs);
 }
+.plano-elenco-move-ratings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.plano-elenco-move-ratings > span[aria-hidden="true"] {
+  color: var(--ink-3);
+}
 
 @media (max-width: 620px) {
   .plano-elenco-tabs {

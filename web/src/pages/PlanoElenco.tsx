@@ -3,6 +3,7 @@ import { fetchSquadPlan } from "../api";
 import { asyncGate } from "../components/asyncGate";
 import Chip from "../components/Chip";
 import EmptyState from "../components/EmptyState";
+import GGRating from "../components/GGRating";
 import PageHeader from "../components/PageHeader";
 import Pitch, { canDrawPitch } from "../components/Pitch";
 import { formatSigned } from "../format";
@@ -89,7 +90,7 @@ export default function PlanoElenco() {
                 onClick={() => setScenarioIndex(i)}
               >
                 <span className="plano-elenco-tab-label">{sc.label || `cenário ${i + 1}`}</span>
-                <span className="plano-elenco-tab-value">{sc.average_rating.toFixed(1)} GG</span>
+                <span className="plano-elenco-tab-value">{sc.average_rating.toFixed(1)} GG posicional</span>
               </button>
             ))}
           </div>
@@ -105,7 +106,7 @@ export default function PlanoElenco() {
                   <Chip tone="flat">química indisponível</Chip>
                 )}
                 <span className="plano-elenco-stats">
-                  força total {scenario.total_rating.toFixed(1)} · média {scenario.average_rating.toFixed(1)} GG
+                  força total {scenario.total_rating.toFixed(1)} · média {scenario.average_rating.toFixed(1)} GG posicional
                 </span>
                 {scenario.chemistry?.verificacao.status === "diverge" && (
                   <span className="plano-elenco-note">
@@ -134,15 +135,20 @@ export default function PlanoElenco() {
                 ) : (
                   <div className="card-list">
                     {(scenario.moves ?? []).map((m, i) => (
-                      <div className="list-row" key={i}>
+                      <div className="list-row" key={m.current.player.club_item_id || m.suggested.player.club_item_id || `${m.position}-${i}`}>
                         <div>
                           <div className="title">
                             {m.current.player.common_name || m.current.player.name} →{" "}
                             {m.suggested.player.common_name || m.suggested.player.name}
                           </div>
                           <p className="desc">{m.position}</p>
+                          <div className="plano-elenco-move-ratings">
+                            <GGRating current={m.current.player.gg_rating} currentPosition={m.current.player.gg_rating_pos} positional={m.current_rating} positionalPosition={m.position} />
+                            <span aria-hidden="true">→</span>
+                            <GGRating current={m.suggested.player.gg_rating} currentPosition={m.suggested.player.gg_rating_pos} positional={m.suggested_rating} positionalPosition={m.position} />
+                          </div>
                         </div>
-                        <p className="meta">{formatSigned(m.gain)} GG</p>
+                        <p className="meta">{formatSigned(m.gain)} GG posicional</p>
                       </div>
                     ))}
                   </div>

@@ -117,11 +117,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.gauntlet-starter-player-text span {
+.gauntlet-starter-player-text > span:not(.gg-rating) {
   color: var(--ink-3);
   font: 11px var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+.gauntlet-starter-player-text .gg-rating { color: var(--ink-3); font: 11px var(--font-mono); gap: 6px; }
 .gauntlet-starter-main .rank-link {
   white-space: nowrap;
 }
@@ -204,7 +205,7 @@
   white-space: nowrap;
   font-size: 12.5px;
 }
-.gauntlet-bench-chit-text span {
+.gauntlet-bench-chit-text > span:last-child {
   color: var(--ink-3);
   font: 10.5px var(--font-mono);
 }

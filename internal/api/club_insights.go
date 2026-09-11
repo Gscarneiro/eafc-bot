@@ -51,7 +51,9 @@ func (s *Server) handleClubInsights(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	page, ok := serveList(w, r, clubInsightsSchema(), analyze.BuildClubInsights(snap.Club, collection))
+	page, ok := serveList(w, r, clubInsightsSchema(), analyze.BuildClubInsightsWithEvaluator(
+		snap.Club, collection, s.resolveEvaluator(), snap.Avaliacao, contextosAtuaisDasVagas(snap),
+	))
 	if ok {
 		writeJSON(w, collectionResponse[analyze.ClubInsight]{Page: page})
 	}

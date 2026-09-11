@@ -18,6 +18,25 @@ export function formatSigned(v: number): string {
   return `${sign}${v.toFixed(1)}`;
 }
 
+// evaluationSourceLabel é a legenda da escala ativa. A UI nunca chama toda
+// fonte externa de "GG", pois isso esconderia justamente a escolha que muda
+// rankings e recomendações.
+export function evaluationSourceLabel(source: string | undefined, compact = false): string {
+  switch (source) {
+    case "bot": return compact ? "BOT" : "nota do bot";
+    case "futbin": return compact ? "FUTBIN" : "nota FUTBIN";
+    case "futwiz": return compact ? "FUTWIZ" : "nota FUTWIZ";
+    default: return compact ? "GG" : "GG Rating do FUT.GG";
+  }
+}
+
+// formatSignedCoins é formatSigned para moedas: formatCoins já separa
+// milhar, então "+"/"" na frente basta — toFixed(1) de formatSigned
+// arruinaria um valor grande ("-281300.0" em vez de "-281.300").
+export function formatSignedCoins(v: number): string {
+  return `${v >= 0 ? "+" : ""}${formatCoins(v)}`;
+}
+
 export function styleName(name: string, plus: boolean): string {
   return plus ? `${name}+` : name;
 }

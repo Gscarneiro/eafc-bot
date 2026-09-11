@@ -186,6 +186,40 @@ type SavedEvolutionPathStore interface {
 	DeleteSavedEvolutionPath(ctx context.Context, cycle, id string) error
 }
 
+// SavedSquadPlanStore guarda os planos que a pessoa montou no editor. É uma
+// extensão opcional pelo mesmo motivo dos paths salvos: stores/fakes antigos
+// ainda podem servir as telas de leitura sem precisar fingir persistência.
+type SavedSquadPlanStore interface {
+	ListSavedSquadPlans(ctx context.Context, cycle, club string) ([]domain.PlanoElencoSalvo, error)
+	SaveSquadPlan(ctx context.Context, plan domain.PlanoElencoSalvo) error
+	DeleteSavedSquadPlan(ctx context.Context, cycle, club, id string) error
+}
+
+// GameplayFeedbackStore persiste comparações de campo separadas do feedback
+// de agenda. É opcional para snapshots/fakes antigos continuarem válidos.
+type GameplayFeedbackStore interface {
+	ListGameplayFeedback(ctx context.Context, cycle string) ([]domain.FeedbackGameplay, error)
+	UpsertGameplayFeedback(ctx context.Context, entry domain.FeedbackGameplay) error
+}
+
+// MetaProposalStore guarda pacotes candidatos fora do snapshot diário. Uma
+// proposta pode mudar de estado, mas o campo Pacote identifica imutavelmente
+// regras, evidências e resultado de avaliação que foram aprovados.
+type MetaProposalStore interface {
+	ListMetaProposals(ctx context.Context, cycle string) ([]domain.PropostaMeta, error)
+	SaveMetaProposal(ctx context.Context, proposal domain.PropostaMeta) error
+}
+
+// DemoSeeder é uma extensão opcional só para popular histórico sintético.
+// SavePrices sempre usa time.Now() e ignora um ponto a menos de uma hora do
+// anterior (a proteção contra a coleta rodar duas vezes no mesmo dia) — o
+// que torna impossível simular 30 dias de preço numa rajada de chamadas que
+// levam segundos de relógio real. `serve -demo` é o único chamador; nenhum
+// backend de produção precisa implementar isto.
+type DemoSeeder interface {
+	SavePricesAt(ctx context.Context, cycle string, players []domain.Player, at time.Time) error
+}
+
 // Snapshot é o resultado completo de uma coleta+análise: os dados brutos que
 // futgg.Collect trouxe, mais tudo que internal/analyze decidiu em cima
 // deles. É deliberadamente PLANO em vez de embutir futgg.Snapshot ou
@@ -195,10 +229,11 @@ type SavedEvolutionPathStore interface {
 // report.Build com estes mesmos campos, em vez deste tipo aprender a
 // calcular isso de novo.
 type Snapshot struct {
-	GeneratedAt     time.Time     `json:"generated_at"`
-	Duration        time.Duration `json:"duration"`
-	Cycle           string        `json:"cycle"`
-	BotScoreProfile string        `json:"bot_score_profile,omitempty"`
+	GeneratedAt     time.Time                `json:"generated_at"`
+	Duration        time.Duration            `json:"duration"`
+	Cycle           string                   `json:"cycle"`
+	BotScoreProfile string                   `json:"bot_score_profile,omitempty"`
+	Avaliacao       domain.ContextoAvaliacao `json:"avaliacao,omitempty"`
 
 	Club       domain.Club        `json:"club"`
 	Capital    domain.Capital     `json:"capital"`
@@ -253,6 +288,9 @@ type Snapshot struct {
 	// sincronizada — internal/api recalcula direto de Club nesse caso, sem
 	// tocar rede (mesmo padrão de GauntletPlan.Status=="" acima).
 	Quimica *chemistry.Resultado `json:"chemistry,omitempty"`
+	// PlanoReferencia é uma sobreposição transitória da API. O plano local não
+	// integra a fotografia histórica e por isso nunca é serializado junto dela.
+	PlanoReferencia *domain.PlanoElencoSalvo `json:"-"`
 }
 
 // SnapshotSummary é o ponto leve de um dia, para o gráfico de tendência —

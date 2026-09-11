@@ -34,7 +34,7 @@ export default function Configuracoes() {
     try {
       const next = await saveConfig(form);
       setForm(next.settings);
-      setMessage("Configuração salva e aplicada. Faça uma nova coleta para recalcular as recomendações.");
+      setMessage("Configuração salva e aplicada. As recomendações foram recalculadas com a nova régua; atualize os dados apenas para buscar novas cartas e preços.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Não foi possível salvar a configuração.");
     } finally {
@@ -60,7 +60,7 @@ export default function Configuracoes() {
       <div className="settings-toolbar">
         <div className="settings-note"><Chip tone="flat">uso local</Chip> Credenciais, rotas e armazenamento continuam fora da interface.</div>
         <div className="settings-actions">
-          <button className="btn secondary" type="button" onClick={refresh} disabled={running}>{running ? "iniciando…" : "atualizar dados"}</button>
+          <button className="btn ghost" type="button" onClick={refresh} disabled={running}>{running ? "iniciando…" : "atualizar dados"}</button>
           <button className="btn primary" type="button" onClick={save} disabled={saving}>{saving ? "salvando…" : "salvar alterações"}</button>
         </div>
       </div>
@@ -82,6 +82,16 @@ export default function Configuracoes() {
           <Field label="Janela de tendência" hint="horas"><input type="number" min="1" value={form.report.trend_window_hours} onChange={(e) => patch("report", "trend_window_hours", Number(e.target.value))} /></Field>
           <Toggle label="Permitir fora de posição" checked={form.report.allow_out_of_position} onChange={(v) => patch("report", "allow_out_of_position", v)} />
           <Toggle label="Permitir cartas sem cotação" checked={form.report.allow_unpriced} onChange={(v) => patch("report", "allow_unpriced", v)} />
+        </SettingsSection>
+
+        <SettingsSection title="Avaliação" description="Uma régua governa time, mercado e evoluções. Notas de fontes diferentes nunca são misturadas.">
+          <Toggle label="Usar nota do bot" checked={form.evaluation.use_bot} onChange={(v) => patch("evaluation", "use_bot", v)} />
+          {!form.evaluation.use_bot && <Field label="Fonte externa" hint="Cada fonte exige uma importação posicional verificável; as escalas não são misturadas."><select value={form.evaluation.external_source} onChange={(e) => patch("evaluation", "external_source", e.target.value)}><option value="futgg">FUT.GG</option><option value="futbin">FUTBIN</option><option value="futwiz">FUTWIZ</option></select></Field>}
+          {!form.evaluation.use_bot && form.evaluation.external_source === "futbin" && <Field label="Importação FUTBIN" hint="caminho do JSON validado"><input value={form.evaluation.futbin_import ?? ""} onChange={(e) => patch("evaluation", "futbin_import", e.target.value)} placeholder=".eafc-bot/notas-futbin.json" /></Field>}
+          {!form.evaluation.use_bot && form.evaluation.external_source === "futwiz" && <Field label="Importação FUTWIZ" hint="caminho do JSON validado"><input value={form.evaluation.futwiz_import ?? ""} onChange={(e) => patch("evaluation", "futwiz_import", e.target.value)} placeholder=".eafc-bot/notas-futwiz.json" /></Field>}
+          {form.evaluation.use_bot && <Field label="Perfil" hint="experimental até ter evidências independentes"><select value={form.evaluation.profile} onChange={(e) => patch("evaluation", "profile", e.target.value)}><option value="meta_competitivo">Meta competitivo</option><option value="posse">Posse</option><option value="contra_ataque">Contra-ataque</option><option value="jogo_pelas_pontas">Jogo pelas pontas</option></select></Field>}
+          <Field label="Patch" hint="identifica o contexto; não altera pesos sozinho"><input value={form.evaluation.patch} onChange={(e) => patch("evaluation", "patch", e.target.value)} /></Field>
+          <Field label="Estilo do plano"><select value={form.evaluation.play_style} onChange={(e) => patch("evaluation", "play_style", e.target.value)}><option value="meta_competitivo">Competitivo</option><option value="posse">Posse</option><option value="contra_ataque">Contra-ataque</option><option value="jogo_pelas_pontas">Jogo pelas pontas</option></select></Field>
         </SettingsSection>
 
         <SettingsSection title="Agenda" description="Frequência da coleta e retenção do histórico.">

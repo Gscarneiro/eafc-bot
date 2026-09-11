@@ -18,6 +18,14 @@ test("o presenter distingue GG atual e posicional sem fallback silencioso", asyn
   assert.match(source, /return isKnownGGRating\(value\) \? value\.toFixed\(1\) : "—"/);
 });
 
+// O chip do campo recebe GG geral e GG da vaga. Quando ele pinta o elo mais
+// fraco, precisa exibir a segunda medida: usar o GG geral faz uma carta 99,0
+// parecer acima de uma vaga 98,8 mesmo que ela esteja em 98,3 naquela vaga.
+test("o campo exibe o GG da vaga que decide o elo mais fraco", async () => {
+  const source = await read("src/components/GGRating.tsx");
+  assert.match(source, /const visibleRating = variant === "pitch" && isKnownGGRating\(positional\) \? positional : current/);
+});
+
 test("o campo usa a cópia física como chave e mostra os dois contextos", async () => {
   const pitch = await read("src/components/Pitch.tsx");
   const time = await read("src/pages/Time.tsx");
@@ -44,7 +52,7 @@ test("filtro de posição da análise usa o resultado final de cada path", async
 });
 
 test("fixture Vite/Playwright mantém cópia atual, posicional e ausente", async () => {
-  const vite = await createViteServer({ root: fileURLToPath(new URL("..", import.meta.url)), server: { middlewareMode: true }, appType: "spa" });
+  const vite = await createViteServer({ root: fileURLToPath(new URL("..", import.meta.url)), server: { middlewareMode: true, hmr: false }, appType: "spa" });
   const http = createHttpServer((req, res) => vite.middlewares(req, res, () => { res.statusCode = 404; res.end(); }));
   await new Promise((resolve) => http.listen(0, "127.0.0.1", resolve));
   const address = http.address();

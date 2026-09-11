@@ -135,11 +135,15 @@ export interface EvolutionPathImpact {
   starter_gg_rating?: number;
   final_gg_rating?: number;
   gain?: number;
+  starter_evaluation?: CardEvaluation;
+  final_evaluation?: CardEvaluation;
 }
 export interface EvolutionPathCandidate {
   id: string;
   potential: EvoPotential;
   impact: EvolutionPathImpact;
+  current_evaluation?: CardEvaluation;
+  final_evaluation?: CardEvaluation;
   version_hash: string;
   saved: boolean;
 }
@@ -150,6 +154,7 @@ export interface EvolutionPlayerAnalysis {
   status: "confirmed" | "no_path" | "not_eligible" | "fetch_error" | "not_checked";
   paths: EvolutionPathCandidate[] | null;
   best_final_gg_rating?: number;
+  best_active_rating?: number;
   best_xi_gain?: number;
   entra_no_xi: boolean;
 }
@@ -165,6 +170,7 @@ export interface EvolutionPathsSummary {
 }
 export interface EvolutionPathsCollection extends ODataPage<EvolutionPlayerAnalysis> {
   "@eafc.summary": EvolutionPathsSummary;
+  avaliacao: EvaluationContext;
 }
 export interface SavedEvolutionImpact {
   kind: EvolutionPathImpactKind;
@@ -228,6 +234,9 @@ export interface CardDetailResponse extends CardReport {
   related_cards?: { player: ClubPlayer; card_slug?: string }[];
   play_style_recommendations?: PlayStyleRecommendation[];
   play_style_recommendation_source?: string;
+  completed?: string[];
+  best_path_id?: string;
+  best_path_saved?: boolean;
 }
 
 // EvolutionGraphNode/Transition espelham internal/domain/evolution_graph.go
@@ -360,8 +369,14 @@ export interface TopMove {
   slot: Position;
   headline: string;
   gain: number;
+  gross_cost?: number;
+  recoup?: number;
   net_cost: number;
+  profit?: number;
+  efficiency?: number;
+  rationale?: string[] | null;
   link: string;
+  action_id: string;
 }
 
 export interface StatusResponse {
@@ -403,11 +418,94 @@ export interface LedgerSummary { spent: number; raised_gross: number; raised_net
 export interface PriceAssessment { ea_id: number; platform?: string; source?: string; observed_at: string; coverage?: number; quality: string; stale: boolean }
 export interface MarketPlanResponse { plan: MarketPlan; watchlist: WatchlistEntry[] | null; ledger: LedgerEntry[] | null; ledger_summary: LedgerSummary; price_assessment: PriceAssessment[] | null }
 
+export interface PriceTrend { ea_id: number; first: number; last: number; min: number; max: number; change_pct: number; samples: number }
+
+// WatchlistRow — GET /api/watchlist. player é ausente quando a carta não
+// apareceu nem no mercado nem no clube desta coleta.
+export interface WatchlistRow {
+  entry: WatchlistEntry;
+  player?: Player;
+  series: PricePoint[] | null;
+  history_status: string;
+  trend: PriceTrend;
+  has_trend: boolean;
+}
+export interface WatchlistCollection { value: WatchlistRow[]; "@odata.count": number }
+
+// ExtratoResponse — GET /api/capital/extrato.
+export interface ExtratoResponse extends ODataPage<LedgerEntry> {
+  "@eafc.summary": LedgerSummary;
+  "@eafc.summary_7d": LedgerSummary;
+}
+
+// MesaResponse — GET /api/mercado/mesa?index=N.
+export interface MesaCandidato {
+  origem: "mercado" | "banco";
+  player: Player;
+  gg_na_posicao: number;
+  net_cost: number;
+  gain: number;
+  efficiency?: number;
+  unpriced?: boolean;
+  escolha_do_bot: boolean;
+  avaliacao?: CardEvaluation;
+}
+export interface MesaResponse {
+  index: number;
+  position: Position;
+  current: ClubPlayer;
+  current_gg: number;
+  avaliacao: EvaluationContext;
+  current_evaluation?: CardEvaluation;
+  candidatos: MesaCandidato[] | null;
+}
+
+// PosicoesResponse — GET /api/capital/posicoes.
+export interface PosicaoAberta {
+  player: ClubPlayer;
+  card_slug?: string;
+  purchased_for: number;
+  current_value: number;
+  unrealized_pnl: number;
+}
+export interface PosicoesResponse {
+  posicoes: PosicaoAberta[] | null;
+  planejado: LedgerEntry[] | null;
+  committed: number;
+}
+
+// EvolutionProgressListResponse — GET /api/evolucoes/progresso.
+export interface EvolutionProgressItem {
+  card_slug: string;
+  name: string;
+  completed: number;
+  total: number;
+  steps: string[] | null;
+  done: string[] | null;
+}
+export interface EvolutionProgressListResponse { items: EvolutionProgressItem[] | null }
+
+// AgendaResponse — GET /api/agenda.
+export interface AgendaResponse {
+  agenda: Agenda;
+  feedback: Record<string, string>;
+  concluidas: number;
+  total: number;
+}
+
 export interface BotScoreComponent { key: string; label: string; value: number }
 export interface BotScore { profile: string; cycle: string; version: string; position: Position; total: number; components: BotScoreComponent[]; missing?: string[]; confidence: string }
 export interface FodderValue { cards: number; tradeable: number; untradeable: number; gross_coins: number; net_coins: number; missing_prices: number; confidence: string }
-export interface ClubInsight { kind: string; headline: string; detail: string; confidence: string; source?: string; observed_at?: string; bot_score?: BotScore; fodder_value?: FodderValue }
+export interface ClubInsight { kind: string; headline: string; detail: string; confidence: string; source?: string; observed_at?: string; bot_score?: BotScore; avaliacao?: CardEvaluation; fodder_value?: FodderValue }
 export interface CollectionCard { player: ClubPlayer; count: number; first_observed?: string; last_observed?: string; permanence_days: number; identity: string; origin: string; source?: string; observed_at?: string; protected: boolean; fodder_candidate: boolean }
+
+// ReservasCollection é o envelope de GET /api/elenco/reservas — a mesma
+// forma de MercadoCollection, mas pro banco.
+export interface ReservasCollection extends ODataPage<RosterCard> {
+  "@eafc.minimum_rating": number;
+  "@eafc.price_series": Record<string, PricePoint[]> | null;
+  "@eafc.price_history_status": Record<string, string> | null;
+}
 
 export interface RosterCard {
   player: ClubPlayer;
@@ -415,6 +513,29 @@ export interface RosterCard {
   // do cards_min_rating configurado: não tem análise de evolução, então não
   // tem página de detalhe pra linkar.
   card_slug?: string;
+  // leitura só vem preenchido no banco de /api/time — ver internal/api/leitura.go.
+  leitura?: LeituraDoBot;
+}
+
+// LeituraDoBot é a "leitura" de uma linha do banco — kind escolhe o modelo
+// de frase; os números ficam crus (formatar é trabalho de format.ts).
+export interface LeituraDoBot {
+  kind: "evoluir" | "vender_caindo" | "vender" | "promover" | "fodder" | "nao_vendavel" | "aguardar_verificacao" | "";
+  final_gg_rating?: number;
+  coins_cost?: number;
+  change_pct_30d?: number;
+  sbc_name?: string;
+	// A recomendação de promoção traz a vaga física, o titular e as notas
+	// posicionais que o servidor comparou. Ausente quando a fonte não provou
+	// uma das notas — a UI nunca deduz usando o GG geral da carta.
+	promocao?: {
+		slot_index: number;
+		position: Position;
+		starter_name: string;
+		starter_rating: number;
+		candidate_rating: number;
+		gain: number;
+	};
 }
 
 // --- Química (entrosamento): ver internal/chemistry. O jogo publica os
@@ -463,8 +584,180 @@ export interface StarterCard extends RosterCard {
   chemistry?: ChemistryPlayer;
 }
 
+export interface SquadCardReference {
+  origem?: "clube" | "mercado" | "evolucao";
+  club_item_id?: string;
+  player_id?: number;
+  evolucao_id?: string;
+}
+
+export interface SquadPlanSlot {
+  index: number;
+  posicao: Position;
+  carta: SquadCardReference;
+  funcao?: string;
+  estilo_entrosamento?: string;
+}
+
+export interface SavedSquadPlan {
+  id: string;
+  ciclo: string;
+  clube: string;
+  nome: string;
+  formacao: string;
+  origem_formacao: "confirmada" | "manual";
+  estilo_jogo?: string;
+  vagas: SquadPlanSlot[];
+  banco?: SquadCardReference[] | null;
+  nao_relacionados?: SquadCardReference[] | null;
+  revisao: number;
+  referencia: boolean;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export interface SavedSquadPlanInput {
+  nome: string;
+  formacao: string;
+  origem_formacao: "confirmada" | "manual";
+  estilo_jogo?: string;
+  revisao_esperada?: number;
+  vagas: SquadPlanSlot[];
+  banco?: SquadCardReference[];
+  nao_relacionados?: SquadCardReference[];
+}
+
+export interface SavedSquadPlanView {
+  plano: SavedSquadPlan;
+  pendencias?: string[];
+}
+
+export interface SavedSquadPlansResponse {
+  value: SavedSquadPlanView[] | null;
+  "@odata.count": number;
+}
+
+export interface SquadEditorResponse {
+  generated_at: string;
+  clube: string;
+  formacao: string;
+  titulares: StarterCard[] | null;
+  cartas: RosterCard[] | null;
+  alvos?: SquadEditorTarget[] | null;
+  funcoes?: SquadEditorRole[] | null;
+  quimica_referencia?: ChemistryResult;
+  avaliacao: EvaluationContext;
+}
+
+export interface SquadEditorTarget {
+  tipo: "mercado" | "evolucao";
+  player: ClubPlayer;
+  referencia: SquadCardReference;
+  custo?: number;
+  descricao?: string;
+}
+
+export interface SquadEditorRole {
+  nome: string;
+  posicao: Position;
+}
+
+export interface CardEvaluationComponent {
+  chave: string;
+  rotulo: string;
+  valor: number;
+}
+
+export interface CardEvaluation {
+  disponivel: boolean;
+  parcial: boolean;
+  nota?: number;
+  componentes?: CardEvaluationComponent[];
+  pontos_fortes?: string[];
+  limitacoes?: string[];
+  dados_ausentes?: string[];
+  cobertura?: string[];
+  motivo?: string;
+  contexto: EvaluationContext;
+}
+
+export interface SquadEditorSlotEvaluation {
+  index: number;
+  posicao: Position;
+  carta?: ClubPlayer;
+  nota?: number;
+  nota_disponivel: boolean;
+  avaliacao?: CardEvaluation;
+  fora_de_posicao: boolean;
+  funcao?: string;
+  estilo_entrosamento?: string;
+}
+
+export interface SquadEditorEvaluation {
+	status: "ok" | "incompleto" | "indisponivel";
+	motivo?: string;
+	formacao: string;
+	revisao_plano: string;
+  vagas: SquadEditorSlotEvaluation[] | null;
+  media?: number;
+  cobertura: number;
+  elo_mais_fraco?: SquadEditorSlotEvaluation;
+  quimica?: ChemistryResult;
+  avaliacao: EvaluationContext;
+  avisos?: string[];
+}
+
+export interface GameplayFeedback {
+  id?: string;
+  comparacao_id: string;
+	amostra?: "ajuste" | "avaliacao";
+  ciclo?: string;
+  carta_a: string;
+  carta_b: string;
+	carta_a_id?: number;
+	carta_b_id?: number;
+	carta_a_club_item_id?: string;
+	carta_b_club_item_id?: string;
+  preferencia: "a" | "b" | "empate" | "insuficiente";
+  patch?: string;
+  plataforma?: string;
+  posicao?: Position;
+  funcao?: string;
+  quimica?: number;
+  estilo_jogo?: string;
+  perfil?: string;
+  uso?: string;
+  decisao_compra?: string;
+  resultado_financeiro?: string;
+  registrado_em?: string;
+}
+
+export interface GameplayFeedbackResponse {
+  value: GameplayFeedback[] | null;
+  "@odata.count": number;
+}
+
+export interface GameplayRankingQuality {
+	amostra: "ajuste" | "avaliacao";
+	comparacoes: number;
+	cobertas: number;
+	concordancias: number;
+	divergencias: number;
+	empates: number;
+	insuficientes: number;
+	concordancia?: number;
+	por_funcao?: { funcao: string; comparacoes: number; cobertas: number; concordancia?: number }[];
+}
+
+export interface GameplayQualityResponse {
+	perfil: string;
+	candidata: GameplayRankingQuality;
+	externa_gg: GameplayRankingQuality;
+}
+
 export interface TimeResponse {
-  formation: string;
+	avaliacao: EvaluationContext;
+	formation: string;
   starters: StarterCard[] | null;
   bench: RosterCard[] | null;
   bench_page: number;
@@ -472,6 +765,27 @@ export interface TimeResponse {
   bench_total: number;
   optimization: SquadOptimization;
   chemistry?: ChemistryResult; // do XI ATUAL
+  top_move?: TopMove;
+  position_map: PositionMapRow[] | null;
+  regua: number;
+  slot_outlook: SlotOutlook[] | null;
+  price_series: Record<string, PricePoint[]> | null;
+  price_history_status: Record<string, string> | null;
+}
+
+export interface PositionMapRow {
+  index: number;
+  position: Position;
+  player: ClubPlayer;
+  rating: number;
+}
+
+export type SlotOutlookKind = "melhor_disponivel" | "sem_cotacao" | "teto" | "sem_dado";
+export interface SlotOutlook {
+  index: number;
+  position: Position;
+  kind: SlotOutlookKind;
+  delta?: number;
 }
 
 export interface SquadMoveView { index:number; position:Position; current:StarterCard; suggested:StarterCard; current_gg_rating:number; suggested_gg_rating:number; gain:number }
@@ -508,6 +822,7 @@ export interface GauntletRoundView {
 
 export interface GauntletResponse {
   generated_at: string;
+	avaliacao: EvaluationContext;
   formation: string;
   status: string; // "ok" | "unavailable"
   reason?: string;
@@ -569,6 +884,7 @@ export interface SquadPlanResponse {
   needs: SquadPlanNeed[] | null;
   warnings?: string[];
   capital: Capital;
+	avaliacao: EvaluationContext;
 }
 
 export interface Upgrade {
@@ -858,11 +1174,47 @@ export interface JobStatus {
   last_started?: string;
   last_success?: string;
   last_error?: string;
+  // next_run/daily_at vêm calculados por cmd/eafcbot (internal/api não
+  // conhece internal/scheduler) — ausentes em `serve -demo`, que não agenda
+  // coleta sozinho.
+  next_run?: string;
+  daily_at?: string;
 }
 
 export type AgendaFaixa = "agora" | "esta_semana" | "observando";
 export interface AcaoAgenda { id: string; faixa: AgendaFaixa; tipo: string; alvo: string; impacto: string; moedas?: number; prazo?: string; confianca: string; proveniencia: string; conflitos?: string[]; link: string; }
 export interface Agenda { agora: AcaoAgenda[]; esta_semana: AcaoAgenda[]; observando: AcaoAgenda[]; }
+
+export interface Aviso {
+  kind: string;
+  severity: string;
+  headline: string;
+  detail?: string;
+  link?: string;
+}
+
+// ResumoResponse é o envelope leve da topbar + rail — ver internal/api/resumo.go.
+export interface ResumoResponse {
+  generated_at: string;
+  cycle: string;
+  coins: number;
+  coins_delta?: number;
+  capital: Capital;
+  squad_score: number;
+  squad_score_delta?: number;
+  weakest_slot: Position | "";
+  weakest_name: string;
+  weakest_gg_rating: number;
+  chemistry?: ChemistryResult;
+  trocas_viaveis: number;
+  analise_entra_no_xi: number;
+  catalogo_elegiveis: number;
+  salvos: number;
+  avisos: Aviso[];
+  ticker: TickerRow[] | null;
+}
+
+export interface TickerRow { name: string; role: string; trend: PriceTrend }
 
 export interface UISettings {
   market: {
@@ -889,7 +1241,35 @@ export interface UISettings {
     momentum_window_hours: number;
     evolution_favorites: string;
   };
+	chemistry: { weight: number };
+	evaluation: {
+		use_bot: boolean;
+		external_source: string;
+		profile: string;
+		patch: string;
+		play_style: string;
+		futbin_import?: string;
+		futwiz_import?: string;
+	};
 }
+
+export interface EvaluationContext {
+	fonte: string;
+	perfil?: string;
+	versao_perfil?: string;
+	versao_motor?: string;
+	ciclo?: string;
+	patch?: string;
+	plataforma?: string;
+	estilo_jogo?: string;
+	funcao?: string;
+	posicao?: Position;
+	revisao_plano?: string;
+	snapshot?: string;
+}
+export interface MetaProfile { id: string; versao: string; nome: string; status: string; descricao?: string; plataformas?: string[] }
+export interface EvaluationSource { id: string; name: string; available: boolean; description: string }
+export interface EvaluationCatalogResponse { active: EvaluationContext; profiles: MetaProfile[]; sources: EvaluationSource[] }
 
 export interface ConfigResponse {
   settings: UISettings;

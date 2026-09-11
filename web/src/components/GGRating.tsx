@@ -29,10 +29,15 @@ export function shouldShowPositionalGGRating(current?: number | null, positional
 }
 
 export default function GGRating({ current, currentPosition, positional, positionalPosition, variant = "inline" }: GGRatingProps) {
-  const currentText = formatGGRating(current);
-  const showPositional = shouldShowPositionalGGRating(current, positional);
+  // No campo, a cor "elo mais fraco" é decidida pelo GG da vaga física.
+  // Mostrar ao lado o GG geral da melhor posição fazia o número contradizer a
+  // própria cor do card. Fora do campo, mantemos os dois contextos visíveis.
+  const visibleRating = variant === "pitch" && isKnownGGRating(positional) ? positional : current;
+  const visiblePosition = variant === "pitch" && isKnownGGRating(positional) ? positionalPosition : currentPosition;
+  const currentText = formatGGRating(visibleRating);
+  const showPositional = variant !== "pitch" && shouldShowPositionalGGRating(current, positional);
   const positionalText = formatGGRating(positional);
-  const currentLabel = `GG atual ${currentText}${currentPosition ? ` · ${currentPosition}` : ""}`;
+  const currentLabel = `${variant === "pitch" && isKnownGGRating(positional) ? "GG na vaga" : "GG atual"} ${currentText}${visiblePosition ? ` · ${visiblePosition}` : ""}`;
   const positionalLabel = `GG posicional ${positionalText}${positionalPosition ? ` · ${positionalPosition}` : ""}`;
 
   return (
@@ -40,7 +45,7 @@ export default function GGRating({ current, currentPosition, positional, positio
       <span className="gg-rating-current">
         <span className="gg-rating-label">atual</span>
         <strong>{currentText}</strong>
-        {variant !== "pitch" && currentPosition && <small>{currentPosition}</small>}
+        {variant !== "pitch" && visiblePosition && <small>{visiblePosition}</small>}
       </span>
       {showPositional && (
         <span className="gg-rating-positional">

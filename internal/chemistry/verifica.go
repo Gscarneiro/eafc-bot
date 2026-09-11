@@ -66,7 +66,7 @@ func Verificar(m Modelo, club domain.Club) Verificacao {
 
 	observadoPorID := make(map[int64]int, len(club.Squad.Starters))
 	for _, s := range club.Squad.Starters {
-		if p, ok := club.PlayerByID(s.PlayerID); ok {
+		if p, ok := club.PlayerForSlot(s); ok {
 			observadoPorID[p.ID] = p.Chemistry
 		}
 	}

@@ -34,9 +34,21 @@ const COMMANDS = {
   async launch() {
     if (browser) return console.log("already launched");
     browser = await chromium.launch({ headless: true });
-    page = await browser.newPage();
+    // VIEWPORT="390x844" (or via the `viewport` command below) drives the
+    // 390px-mobile screenshots the redesign verification asks for at the
+    // end of every phase — default matches Playwright's own 1280x720.
+    const [w, h] = (process.env.VIEWPORT || "1280x720").split("x").map(Number);
+    page = await browser.newPage({ viewport: { width: w || 1280, height: h || 720 } });
     trackConsole(page);
-    console.log("launched.");
+    console.log("launched.", `viewport ${w || 1280}x${h || 720}`);
+  },
+
+  async viewport(args) {
+    if (!page) await COMMANDS.launch();
+    const [w, h] = (args || "").split("x").map(Number);
+    if (!w || !h) return console.log("ERROR: viewport <width>x<height>, e.g. viewport 390x844");
+    await page.setViewportSize({ width: w, height: h });
+    console.log("viewport ->", `${w}x${h}`);
   },
 
   async nav(url) {

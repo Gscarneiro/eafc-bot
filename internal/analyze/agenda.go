@@ -69,7 +69,7 @@ func MontarAgenda(in AgendaInput) Agenda {
 			continue
 		}
 		if !e.Evolution.ExpiresAt.IsZero() {
-			all = append(all, AcaoAgenda{ID: fmt.Sprintf("evo:%d:%s", e.Player.ID, e.Evolution.ID), Tipo: "evolucao", Alvo: e.Evolution.Name, Impacto: fmt.Sprintf("%+.1f BotScore", e.Gain), Moedas: e.Cost, Prazo: prazoAgenda(e.Evolution.ExpiresAt), Confianca: "alta", Proveniencia: "plano_evolucao", Link: "/evolucoes"})
+			all = append(all, AcaoAgenda{ID: EvoAcaoID(e.Player.ID, e.Evolution.ID), Tipo: "evolucao", Alvo: e.Evolution.Name, Impacto: fmt.Sprintf("%+.1f BotScore", e.Gain), Moedas: e.Cost, Prazo: prazoAgenda(e.Evolution.ExpiresAt), Confianca: "alta", Proveniencia: "plano_evolucao", Link: "/evolucoes"})
 		}
 	}
 	for _, s := range in.SBCs {
@@ -111,7 +111,19 @@ func acaoAgendaMercado(a MarketAction, now time.Time) AcaoAgenda {
 			link = "/evolucoes"
 		}
 	}
-	return AcaoAgenda{ID: fmt.Sprintf("mercado:%s:%d:%s", tipo, a.EAID, strings.ToLower(a.Name)), Faixa: faixa, Tipo: tipo, Alvo: a.Name, Impacto: strings.Join(a.Rationale, "; "), Moedas: a.NetCost, Prazo: a.Deadline, Confianca: a.Confidence, Proveniencia: proveniencia, Conflitos: a.Conflicts, Link: link}
+	return AcaoAgenda{ID: AcaoID(tipo, a.EAID, a.Name), Faixa: faixa, Tipo: tipo, Alvo: a.Name, Impacto: strings.Join(a.Rationale, "; "), Moedas: a.NetCost, Prazo: a.Deadline, Confianca: a.Confidence, Proveniencia: proveniencia, Conflitos: a.Conflicts, Link: link}
+}
+
+// AcaoID e EvoAcaoID constroem o identificador estavel de uma acao da
+// Agenda — exportados para que outro envelope (TopMove, em internal/api) que
+// aponte para a MESMA decisao de mercado/evolucao produza o MESMO id, sem
+// duplicar o formato e arriscar as duas rotas divergirem silenciosamente.
+func AcaoID(tipo string, eaID int64, name string) string {
+	return fmt.Sprintf("mercado:%s:%d:%s", tipo, eaID, strings.ToLower(name))
+}
+
+func EvoAcaoID(playerID int64, evolutionID string) string {
+	return fmt.Sprintf("evo:%d:%s", playerID, evolutionID)
 }
 func faixaAgenda(a AcaoAgenda, now time.Time) FaixaAgenda {
 	if a.Prazo != nil {

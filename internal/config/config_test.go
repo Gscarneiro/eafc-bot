@@ -63,6 +63,34 @@ func TestApplyEditableAtualizaAtomico(t *testing.T) {
 	}
 }
 
+func TestAvaliacaoPadraoMantemFutGGAtivo(t *testing.T) {
+	cfg := Default()
+	if cfg.Evaluation.UseBot || cfg.Evaluation.ExternalSource != "futgg" {
+		t.Fatalf("avaliação padrão = %+v; FUT.GG deveria começar ativo", cfg.Evaluation)
+	}
+	next := cfg.Editable()
+	next.Evaluation.UseBot = true
+	next.Evaluation.Profile = "posse"
+	if err := cfg.ApplyEditable(next); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Evaluation.UseBot || cfg.Evaluation.Profile != "posse" {
+		t.Fatalf("preferência não aplicada: %+v", cfg.Evaluation)
+	}
+}
+
+func TestAvaliacaoExternaExigeImportacaoRastreavel(t *testing.T) {
+	cfg := Default()
+	cfg.Evaluation.ExternalSource = "futbin"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("FUTBIN sem importação deveria ser recusado")
+	}
+	cfg.Evaluation.FutbinImport = "notas-futbin.json"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("FUTBIN com importação = %v", err)
+	}
+}
+
 func TestPadraoUsaGanhoMinimoDeUmDecimo(t *testing.T) {
 	if got := Default().Report.MinGain; got != 0.1 {
 		t.Fatalf("report.min_gain padrão = %v; esperava 0.1", got)
@@ -102,6 +130,15 @@ func TestApplyEditableAtualizaReserva(t *testing.T) {
 	}
 }
 
+func TestValidateRecusaSaldoManualNegativo(t *testing.T) {
+	cfg := Default()
+	saldo := -1
+	cfg.Market.ManualCoins = &saldo
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("esperava erro para market.manual_coins negativo")
+	}
+}
+
 // A mensagem que sai pro console/API pode conter a DSN inteira quando o
 // driver do Postgres a ecoa de volta num erro de conexão — RedactSecrets é o
 // ponto único que impede essa string de aparecer em texto visível.
@@ -122,7 +159,7 @@ func TestRedactSecretsApagaDSNECookie(t *testing.T) {
 func TestSaveEditablePreservaSegredosEBlocosNaoEditaveis(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	original := []byte(`{"gamer_tag":"perfil","futgg":{"session_cookie":"segredo"},"market":{"min_rating":80},"custom":{"keep":true}}`)
+	original := []byte(`{"gamer_tag":"perfil","futgg":{"session_cookie":"segredo"},"market":{"min_rating":80,"manual_coins":777},"custom":{"keep":true}}`)
 	if err := os.WriteFile(path, original, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +182,33 @@ func TestSaveEditablePreservaSegredosEBlocosNaoEditaveis(t *testing.T) {
 	}
 	if got["market"].(map[string]any)["min_rating"] != float64(90) {
 		t.Fatalf("market não foi atualizado: %s", b)
+	}
+	if got["market"].(map[string]any)["manual_coins"] != float64(777) {
+		t.Fatalf("SaveEditable apagou o saldo manual da topbar: %s", b)
+	}
+}
+
+func TestSaveManualCoinsAtualizaSoOSaldo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	original := []byte(`{"gamer_tag":"perfil","market":{"min_rating":80,"extra_budget":5000}}`)
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Default().SaveManualCoins(path, 123_456); err != nil {
+		t.Fatalf("SaveManualCoins: %v", err)
+	}
+	var got map[string]any
+	b, _ := os.ReadFile(path)
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	market := got["market"].(map[string]any)
+	if got["gamer_tag"] != "perfil" || market["min_rating"] != float64(80) || market["extra_budget"] != float64(5000) {
+		t.Fatalf("SaveManualCoins alterou configuração não relacionada: %s", b)
+	}
+	if market["manual_coins"] != float64(123_456) {
+		t.Fatalf("saldo manual não foi gravado: %s", b)
 	}
 }
 

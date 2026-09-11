@@ -124,3 +124,38 @@ func TestOptimizeSquadNaoSugereDuasVersoesDoMesmoJogador(t *testing.T) {
 		}
 	}
 }
+
+func TestOptimizeSquadUsaFuncaoDaVagaNoMatchingGlobal(t *testing.T) {
+	club := domain.Club{
+		Players: []domain.ClubPlayer{
+			starterCP(1, mk(85, domain.CM, 80, 70, 80, 80, 75, 80)),
+			starterCP(2, mk(85, domain.CM, 80, 70, 80, 80, 75, 80)),
+			starterCP(3, mk(85, domain.CM, 80, 70, 80, 80, 75, 80)),
+		},
+		Squad: domain.Squad{Starters: []domain.SquadSlot{
+			{Index: 7, Position: domain.CM, PlayerID: 1},
+			{Index: 8, Position: domain.CM, PlayerID: 2},
+		}},
+	}
+	for i := range club.Players {
+		club.Players[i].ID = int64(i + 1)
+	}
+
+	plan := OptimizeSquadWithOptions(club, SquadOptions{
+		Evaluator: avaliadorPorFuncaoTeste{},
+		ContextosPorVaga: map[int]domain.ContextoAvaliacao{
+			7: {Fonte: domain.FonteBot, Funcao: "volante"},
+			8: {Fonte: domain.FonteBot, Funcao: "criador"},
+		},
+	})
+	if plan.Status == "unavailable" {
+		t.Fatalf("otimizador indisponível: %s", plan.Reason)
+	}
+	byIndex := make(map[int]SquadAssignment, len(plan.Starters))
+	for _, assignment := range plan.Starters {
+		byIndex[assignment.Index] = assignment
+	}
+	if byIndex[7].Player.ID != 3 || byIndex[8].Player.ID != 2 {
+		t.Fatalf("XI = %+v, esperava reserva 3 como volante e titular 2 como criador", plan.Starters)
+	}
+}

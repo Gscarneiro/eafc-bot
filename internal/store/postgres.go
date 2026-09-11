@@ -820,4 +820,162 @@ func (s *PostgresStore) DeleteSavedEvolutionPath(ctx context.Context, cycle, id 
 	return err
 }
 
+func (s *PostgresStore) ListSavedSquadPlans(ctx context.Context, cycle, club string) ([]domain.PlanoElencoSalvo, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM saved_squad_plans
+		WHERE cycle = $1 AND club = $2 ORDER BY is_reference DESC, updated_at DESC`, cycle, club)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.PlanoElencoSalvo
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var plan domain.PlanoElencoSalvo
+		if err := json.Unmarshal(payload, &plan); err != nil {
+			return nil, err
+		}
+		out = append(out, plan)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) SaveSquadPlan(ctx context.Context, plan domain.PlanoElencoSalvo) error {
+	if err := plan.Validate(); err != nil {
+		return err
+	}
+	if plan.CriadoEm.IsZero() {
+		plan.CriadoEm = time.Now()
+	}
+	if plan.AtualizadoEm.IsZero() {
+		plan.AtualizadoEm = plan.CriadoEm
+	}
+	payload, err := json.Marshal(plan)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO saved_squad_plans
+		(cycle,club,id,is_reference,updated_at,payload) VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (cycle,club,id) DO UPDATE SET is_reference = EXCLUDED.is_reference,
+		updated_at = EXCLUDED.updated_at, payload = EXCLUDED.payload`,
+		plan.Ciclo, plan.Clube, plan.ID, plan.Referencia, plan.AtualizadoEm, payload)
+	return err
+}
+
+func (s *PostgresStore) DeleteSavedSquadPlan(ctx context.Context, cycle, club, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM saved_squad_plans WHERE cycle = $1 AND club = $2 AND id = $3`, cycle, club, id)
+	return err
+}
+
+func (s *PostgresStore) ListGameplayFeedback(ctx context.Context, cycle string) ([]domain.FeedbackGameplay, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM gameplay_feedback WHERE cycle = $1 ORDER BY registered_at`, cycle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.FeedbackGameplay
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var entry domain.FeedbackGameplay
+		if err := json.Unmarshal(payload, &entry); err != nil {
+			return nil, err
+		}
+		out = append(out, entry)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) UpsertGameplayFeedback(ctx context.Context, entry domain.FeedbackGameplay) error {
+	if entry.Ciclo == "" || entry.ComparacaoID == "" || entry.ID == "" {
+		return fmt.Errorf("feedback de gameplay precisa de ciclo, comparação e id")
+	}
+	registeredAt := time.Now().UTC()
+	if entry.RegistradoEm != "" {
+		parsed, err := time.Parse(time.RFC3339, entry.RegistradoEm)
+		if err != nil {
+			return fmt.Errorf("data do feedback de gameplay inválida: %w", err)
+		}
+		registeredAt = parsed
+	} else {
+		entry.RegistradoEm = registeredAt.Format(time.RFC3339)
+	}
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO gameplay_feedback
+		(cycle,comparison_id,id,registered_at,payload) VALUES ($1,$2,$3,$4,$5)
+		ON CONFLICT (cycle,comparison_id) DO UPDATE SET id = EXCLUDED.id,
+		registered_at = EXCLUDED.registered_at, payload = EXCLUDED.payload`,
+		entry.Ciclo, entry.ComparacaoID, entry.ID, registeredAt, payload)
+	return err
+}
+
+func (s *PostgresStore) ListMetaProposals(ctx context.Context, cycle string) ([]domain.PropostaMeta, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM meta_proposals WHERE cycle = $1 ORDER BY created_at DESC`, cycle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.PropostaMeta
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var proposal domain.PropostaMeta
+		if err := json.Unmarshal(payload, &proposal); err != nil {
+			return nil, err
+		}
+		out = append(out, proposal)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) SaveMetaProposal(ctx context.Context, proposal domain.PropostaMeta) error {
+	if err := proposal.Validate(); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if proposal.CriadaEm == "" {
+		proposal.CriadaEm = now.Format(time.RFC3339)
+	}
+	if proposal.AtualizadaEm == "" {
+		proposal.AtualizadaEm = proposal.CriadaEm
+	}
+	createdAt, err := time.Parse(time.RFC3339, proposal.CriadaEm)
+	if err != nil {
+		return fmt.Errorf("data de criação da proposta inválida: %w", err)
+	}
+	updatedAt, err := time.Parse(time.RFC3339, proposal.AtualizadaEm)
+	if err != nil {
+		return fmt.Errorf("data de atualização da proposta inválida: %w", err)
+	}
+	payload, err := json.Marshal(proposal)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO meta_proposals
+		(cycle,id,package_hash,status,created_at,updated_at,payload) VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (cycle,id) DO UPDATE SET status = EXCLUDED.status,
+		updated_at = EXCLUDED.updated_at, payload = EXCLUDED.payload
+		WHERE meta_proposals.package_hash = EXCLUDED.package_hash`, proposal.Ciclo, proposal.ID,
+		proposal.Pacote, proposal.Status, createdAt, updatedAt, payload)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+		return fmt.Errorf("proposta %q tentou trocar o pacote imutável", proposal.ID)
+	}
+	return nil
+}
+
 var _ Store = (*PostgresStore)(nil)
+var _ SavedSquadPlanStore = (*PostgresStore)(nil)
+var _ GameplayFeedbackStore = (*PostgresStore)(nil)
+var _ MetaProposalStore = (*PostgresStore)(nil)

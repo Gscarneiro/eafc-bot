@@ -96,6 +96,7 @@ func mapPlayer(n node, cycle string, l lens) domain.Player {
 		p.RealFace = &v
 	}
 	p.AccelerateType = n.str("accelerateType", "accelerate_type", "accelerateTypes")
+	p.BodyType = n.str("bodyType", "body_type", "bodyTypeName", "body_type_name")
 	p.RolesPlus = n.ints("rolesPlus", "roles_plus")
 	p.RolesPlusPlus = n.ints("rolesPlusPlus", "roles_plus_plus")
 

@@ -1,11 +1,16 @@
-/* Os mesmos tokens usados no briefing diário (internal/report/report.gohtml)
-   e no antigo relatório de cartas em html/template — consistência visual
-   entre os dois "produtos" deste bot. Mudou um valor aqui, muda lá também.
+/* Paleta "terminal" — tema escuro de trabalho, com contraparte clara.
+   Consistência visual com o briefing diário (internal/report/report.gohtml):
+   os DOZE tokens abaixo marcados [espelhado] existem lá com o mesmo nome e
+   valor — mudou um valor aqui, muda lá também. Os demais tokens (turf,
+   alert, pitch-*, raised, rule-soft, ink-4, on-turf, toda a escala de
+   espaço/raio/fonte) só existem aqui: o relatório é //go:embed autocontido
+   de propósito (precisa renderizar sem buscar CSS externo) e não carrega
+   tokens de layout, só os de cor essenciais pro placar do dia.
 
    Regra de cor: cada matiz tem UM trabalho.
-     --turf   estrutura  (nav ativo, foco, réguas de seção, o campo)
+     --turf   estrutura  (nav ativo, foco, réguas de seção, ganho/delta positivo)
      --coin   dinheiro   (saldo, preço, custo — nunca delta)
-     --gain/--cost variação (só deltas: subiu, caiu, lucrou)
+     --gain/--cost variação (só deltas: subiu, caiu, lucrou — gain reusa turf)
      --alert  atenção    (falha, aviso, fora do orçamento)
      --ink/--paper tudo o mais
    Antes disso o dourado sozinho cobria posição, aviso, link, hover e
@@ -13,98 +18,116 @@
    não são hierarquia, são ruído. */
 :root {
   color-scheme: light;
-  --paper: #f6f2e7;
-  --panel: #ffffff;
-  --sunk: #ece5d3;
-  --ink: #191c14;
-  --ink-2: #4b4a3b;
-  --ink-3: #7a7862;
-  --rule: #ddd4bc;
-  --rule-strong: #c7bb98;
+  --paper: #f1f3ef;
+  --panel: #ffffff; /* [espelhado] */
+  --raised: #ffffff; /* cartão elevado — separado do painel por régua, não por tom, no claro */
+  --sunk: #ecefe8; /* [espelhado] */
+  --ink: #171a13; /* [espelhado] */
+  --ink-2: #4c5447; /* [espelhado] */
+  --ink-3: #5d6759; /* [espelhado] */
+  --ink-4: #6a7467;
+  --rule: #d4dad0; /* [espelhado] */
+  --rule-strong: #b4beb1; /* [espelhado] */
+  --rule-soft: #e3e7df;
 
-  --turf: #2b5940;
-  --turf-bg: #e1e9e2;
-  --pitch-fill: #1e4430;
-  --pitch-line: rgba(255, 255, 255, 0.22);
+  --turf: #00934a;
+  --turf-bg: #e1f4e8;
+  --turf-line: #9ad2b0;
+  --on-turf: #f1f3ef;
+  --pitch-fill: #e8f0e8;
+  --pitch-grid: #d6e2d7;
+  --pitch-line: #c1d1c3;
 
-  --coin: #8c6a13;
-  --coin-bg: #f1e4c2;
-  --gain: #1f7a46;
-  --gain-bg: #dcf0e3;
-  --cost: #9a3227;
-  --cost-bg: #f5deda;
-  --alert: #b54708;
-  --alert-bg: #fbe4d2;
-  --flat: #5c5a48;
+  --coin: #9c6c07;
+  --coin-bg: #e6cd9c;
+  --gain: #00934a; /* [espelhado] — mesma cor de --turf: o design reusa o acento pra delta positivo */
+  --gain-bg: #e1f4e8; /* [espelhado] */
+  --cost: #c72c17; /* [espelhado] */
+  --cost-bg: #fbe0da; /* [espelhado] */
+  --alert: #ad5e04;
+  --alert-bg: #fbe9d4;
+  --flat: #5d6759; /* [espelhado] */
 
-  --focus: #2b594055;
+  --focus: #00934a55;
 
-  --shadow-sm: 0 1px 2px rgba(25, 28, 20, 0.08);
-  --shadow-md: 0 8px 24px rgba(25, 28, 20, 0.12);
+  --shadow-sm: none;
+  --shadow-md: none;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --paper: #12140f;
-    --panel: #1b1f17;
-    --sunk: #23281e;
-    --ink: #ecead0;
-    --ink-2: #b9b7a4;
-    --ink-3: #86846e;
-    --rule: #2e3427;
-    --rule-strong: #454c39;
+    --paper: #0b0e0c;
+    --panel: #0e120f;
+    --raised: #121613;
+    --sunk: #161b17;
+    --ink: #e8ece7;
+    --ink-2: #a3ad9f;
+    --ink-3: #8a9688;
+    --ink-4: #6d786b;
+    --rule: #242b25;
+    --rule-strong: #39433a;
+    --rule-soft: #1b211c;
 
-    --turf: #6fd19a;
-    --turf-bg: #16301f;
-    --pitch-fill: #14301f;
-    --pitch-line: rgba(255, 255, 255, 0.16);
+    --turf: #00d46a;
+    --turf-bg: #0d2a1a;
+    --turf-line: #1c5334;
+    --on-turf: #08150d;
+    --pitch-fill: #0d1710;
+    --pitch-grid: #141f16;
+    --pitch-line: #1d2b20;
 
-    --coin: #e8b33a;
+    --coin: #f5b93b;
     --coin-bg: #3a2c0e;
-    --gain: #5fcb8c;
-    --gain-bg: #12301f;
-    --cost: #e8776a;
-    --cost-bg: #331a12;
-    --alert: #f0925a;
-    --alert-bg: #3a2210;
-    --flat: #9a9880;
+    --gain: #00d46a;
+    --gain-bg: #0d2a1a;
+    --cost: #ff5c47;
+    --cost-bg: #3a1712;
+    --alert: #ffa63d;
+    --alert-bg: #3d2410;
+    --flat: #8a9688;
 
-    --focus: #6fd19a66;
+    --focus: #00d46a66;
 
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --shadow-sm: none;
+    --shadow-md: none;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --paper: #12140f;
-  --panel: #1b1f17;
-  --sunk: #23281e;
-  --ink: #ecead0;
-  --ink-2: #b9b7a4;
-  --ink-3: #86846e;
-  --rule: #2e3427;
-  --rule-strong: #454c39;
+  --paper: #0b0e0c;
+  --panel: #0e120f;
+  --raised: #121613;
+  --sunk: #161b17;
+  --ink: #e8ece7;
+  --ink-2: #a3ad9f;
+  --ink-3: #8a9688;
+  --ink-4: #6d786b;
+  --rule: #242b25;
+  --rule-strong: #39433a;
+  --rule-soft: #1b211c;
 
-  --turf: #6fd19a;
-  --turf-bg: #16301f;
-  --pitch-fill: #14301f;
-  --pitch-line: rgba(255, 255, 255, 0.16);
+  --turf: #00d46a;
+  --turf-bg: #0d2a1a;
+  --turf-line: #1c5334;
+  --on-turf: #08150d;
+  --pitch-fill: #0d1710;
+  --pitch-grid: #141f16;
+  --pitch-line: #1d2b20;
 
-  --coin: #e8b33a;
+  --coin: #f5b93b;
   --coin-bg: #3a2c0e;
-  --gain: #5fcb8c;
-  --gain-bg: #12301f;
-  --cost: #e8776a;
-  --cost-bg: #331a12;
-  --alert: #f0925a;
-  --alert-bg: #3a2210;
-  --flat: #9a9880;
+  --gain: #00d46a;
+  --gain-bg: #0d2a1a;
+  --cost: #ff5c47;
+  --cost-bg: #3a1712;
+  --alert: #ffa63d;
+  --alert-bg: #3d2410;
+  --flat: #8a9688;
 
-  --focus: #6fd19a66;
+  --focus: #00d46a66;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-sm: none;
+  --shadow-md: none;
 }
 
 /* Escalas — antes cada arquivo tinha os próprios números mágicos de
@@ -120,10 +143,13 @@
   --space-7: 32px;
   --space-8: 48px;
 
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 14px;
-  --radius-pill: 999px;
+  /* Raio zero em tudo — o design "terminal" separa por régua de 1px, nunca
+     por canto arredondado. --radius-pill fica 0 também: os chips do design
+     são retangulares, não pílulas. */
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-pill: 0;
 
   --text-xs: 11px;
   --text-sm: 12.5px;
@@ -140,6 +166,23 @@
   --font-display: "Archivo Black", Impact, sans-serif;
   --font-body: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", monospace;
+
+  /* Largura de conteúdo — a base por trás de .wrap e de toda página com
+     max-width próprio (cada uma soma um delta fixo em cima desta variável,
+     ver o arquivo daquela página). Sobe em passos em telas bem largas (4K
+     sem escala do SO, ultrawide) pra não deixar duas faixas enormes de
+     vazio nas bordas; abaixo de 1900px continua exatamente como sempre
+     foi — não é um redesenho, só o teto crescendo com a tela. */
+  --content-width: 1200px;
+}
+@media (min-width: 1900px) {
+  :root { --content-width: 1500px; }
+}
+@media (min-width: 2400px) {
+  :root { --content-width: 1800px; }
+}
+@media (min-width: 3200px) {
+  :root { --content-width: 2200px; }
 }
 @media (prefers-reduced-motion: reduce) {
   :root {
@@ -182,12 +225,30 @@ a {
   }
 }
 
+/* sr-only esconde visualmente sem tirar do leitor de tela — usado pelo
+   rótulo do campo de busca do rail (components/CardSearch.tsx), que já tem
+   um placeholder visível mas precisa de um <label> de verdade. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .wrap {
-  max-width: 1200px;
+  max-width: var(--content-width);
   margin: 0 auto;
   padding: var(--space-7) var(--space-5) 60px;
 }
 .wrap.narrow {
+  /* Deliberadamente NÃO segue --content-width: isto é uma mensagem curta
+     centralizada (ex.: "carta não encontrada"), não um dashboard — alargar
+     numa tela grande só deixaria o texto difícil de ler. */
   max-width: 820px;
 }
 

@@ -2,6 +2,7 @@ package futgg
 
 import (
 	"context"
+	"sort"
 
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 )
@@ -73,4 +74,62 @@ func (c *Client) Roles(ctx context.Context) RolesTable {
 		return RolesTable{Plus: map[int]Role{}, PlusPlus: map[int]Role{}}
 	}
 	return *c.rolesTable
+}
+
+// PreencherFamiliaridadesFuncoes materializa o catÃ¡logo no retrato da carta.
+// A coleta conserva os IDs crus por compatibilidade, mas a avaliaÃ§Ã£o precisa
+// de nome, posiÃ§Ã£o e nÃ­vel para explicar por que uma funÃ§Ã£o ajudou a nota.
+func PreencherFamiliaridadesFuncoes(player *domain.Player, roles RolesTable) {
+	if player == nil {
+		return
+	}
+	known := make(map[string]domain.FamiliaridadeFuncao)
+	add := func(role Role, nivel string) {
+		key := string(role.Position) + "\x00" + role.Name
+		current, ok := known[key]
+		if !ok || (current.Nivel != "plus_plus" && nivel == "plus_plus") {
+			known[key] = domain.FamiliaridadeFuncao{Nome: role.Name, Posicao: role.Position, Nivel: nivel}
+		}
+	}
+	for _, id := range player.RolesPlus {
+		if role, ok := roles.Plus[id]; ok {
+			add(role, "plus")
+		}
+	}
+	for _, id := range player.RolesPlusPlus {
+		if role, ok := roles.PlusPlus[id]; ok {
+			add(role, "plus_plus")
+		}
+	}
+	player.FamiliaridadesFuncao = make([]domain.FamiliaridadeFuncao, 0, len(known))
+	for _, role := range known {
+		player.FamiliaridadesFuncao = append(player.FamiliaridadesFuncao, role)
+	}
+	sort.Slice(player.FamiliaridadesFuncao, func(i, j int) bool {
+		left, right := player.FamiliaridadesFuncao[i], player.FamiliaridadesFuncao[j]
+		if left.Posicao != right.Posicao {
+			return left.Posicao < right.Posicao
+		}
+		return left.Nome < right.Nome
+	})
+}
+
+// PreencherFamiliaridadesDoClube reaplica o catÃ¡logo de um snapshot salvo.
+// Isso deixa snapshots anteriores Ã  nova projeÃ§Ã£o tÃ£o explicÃ¡veis quanto uma
+// coleta nova, sem escrever de volta a fotografia histÃ³rica.
+func PreencherFamiliaridadesDoClube(club *domain.Club, roles RolesTable) {
+	if club == nil {
+		return
+	}
+	for i := range club.Players {
+		PreencherFamiliaridadesFuncoes(&club.Players[i].Player, roles)
+	}
+}
+
+// PreencherFamiliaridadesDoMercado faz a mesma projeÃ§Ã£o para alternativas
+// de compra. O avaliador recebe Player puro nestas comparaÃ§Ãµes.
+func PreencherFamiliaridadesDoMercado(players []domain.Player, roles RolesTable) {
+	for i := range players {
+		PreencherFamiliaridadesFuncoes(&players[i], roles)
+	}
 }

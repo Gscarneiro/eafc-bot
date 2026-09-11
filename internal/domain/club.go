@@ -1,12 +1,19 @@
 package domain
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // ClubPlayer é uma carta que já está no seu clube. Carrega o estado que só
 // existe para você: se dá para vender, se está escalado, e o que já foi
 // gasto de evolução nela.
 type ClubPlayer struct {
 	Player
+	// AlvoPlano marca uma carta simulada de mercado ou evolução. Ela pode
+	// ocupar uma vaga do editor, mas não passa a contar como posse, venda ou
+	// recurso de SBC.
+	AlvoPlano bool `json:"alvo_plano,omitempty"`
 	// ClubItemID é o identificador do registro físico no clube, quando a
 	// fonte o fornece. Ele é diferente de Player.ID: duas cópias da mesma
 	// carta compartilham o segundo, mas não deveriam ser colapsadas no diff
@@ -40,7 +47,7 @@ func (c ClubPlayer) Evolvable() bool { return !c.EvoExhausted }
 
 // SellValue é o valor bruto da carta no mercado. Untradeable não vira coin.
 func (c ClubPlayer) SellValue() int {
-	if c.Untradeable {
+	if c.Untradeable || c.AlvoPlano {
 		return 0
 	}
 	return c.Price.Coins
@@ -58,9 +65,10 @@ func (c ClubPlayer) NetSellValue() int {
 // 4-4-1-1 tem dois CB e dois CM, e um mapa "Position -> jogador" só teria
 // espaço para um de cada, descartando o resto em silêncio.
 type SquadSlot struct {
-	Index    int      `json:"index"`    // 0..10, a ordem "FIELD" que o fut.gg usa
-	Position Position `json:"position"` // carta de posição quando há, senão a natural
-	PlayerID int64    `json:"player_id"`
+	Index      int      `json:"index"`    // 0..10, a ordem "FIELD" que o fut.gg usa
+	Position   Position `json:"position"` // carta de posição quando há, senão a natural
+	PlayerID   int64    `json:"player_id"`
+	ClubItemID string   `json:"club_item_id,omitempty"`
 }
 
 // Squad é a escalação atual: formação + quem joga onde.
@@ -95,6 +103,10 @@ type Club struct {
 	Cycle    string       `json:"cycle"`
 	SyncedAt time.Time    `json:"synced_at"`
 	Source   string       `json:"source"` // "futgg", "csv", "chrome"
+	// ProtectedCards é uma marca transitória de um plano de referência. Não
+	// pertence ao snapshot nem à fonte: só impede que análises desta requisição
+	// ofereçam titular ou reserva do plano como venda/consumo de SBC.
+	ProtectedCards map[string]bool `json:"-"`
 }
 
 // Starter devolve quem está escalado numa posição. Existe para responder
@@ -113,7 +125,7 @@ func (c Club) Starter(pos Position) (ClubPlayer, bool) {
 		if slot.Position != pos {
 			continue
 		}
-		p, ok := c.PlayerByID(slot.PlayerID)
+		p, ok := c.PlayerForSlot(slot)
 		if !ok {
 			continue
 		}
@@ -132,6 +144,34 @@ func (c Club) PlayerByID(id int64) (ClubPlayer, bool) {
 		}
 	}
 	return ClubPlayer{}, false
+}
+
+// PlayerForSlot resolve a carta que está em uma vaga física. ClubItemID é
+// obrigatório quando a coleta o conhece porque duas cópias podem compartilhar
+// o mesmo player_id; snapshots antigos continuam compatíveis pelo fallback.
+func (c Club) PlayerForSlot(slot SquadSlot) (ClubPlayer, bool) {
+	if slot.ClubItemID != "" {
+		for _, p := range c.Players {
+			if p.ClubItemID == slot.ClubItemID {
+				return p, true
+			}
+		}
+		return ClubPlayer{}, false
+	}
+	return c.PlayerByID(slot.PlayerID)
+}
+
+// IdentityKey preserva a cópia física onde ela existe. O fallback é somente
+// para snapshots legados que ainda não carregavam club_item_id.
+func (p ClubPlayer) IdentityKey() string {
+	if p.ClubItemID != "" {
+		return "item:" + p.ClubItemID
+	}
+	return fmt.Sprintf("player:%d", p.ID)
+}
+
+func (c Club) IsProtected(p ClubPlayer) bool {
+	return c.ProtectedCards[p.IdentityKey()]
 }
 
 // Budget é quanto você pode gastar: coins em caixa mais o que dá para

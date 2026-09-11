@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -285,6 +286,37 @@ func TestHandleConfigEditaSomenteOrigemLocal(t *testing.T) {
 	}
 }
 
+func TestHandleSaldoAtualizaSomenteOrigemLocal(t *testing.T) {
+	var saldo int
+	srv := &Server{Config: &ConfigEditor{
+		UpdateCoins: func(coins int) (int, error) {
+			saldo = coins
+			return coins, nil
+		},
+	}}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/saldo", strings.NewReader(`{"coins":123456}`))
+	req.Host = "127.0.0.1:4173"
+	req.Header.Set("Origin", "http://127.0.0.1:4173")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK || saldo != 123_456 {
+		t.Fatalf("PUT /api/saldo status=%d saldo=%d body=%s", w.Code, saldo, w.Body.String())
+	}
+	if got := decodeJSON[SaldoResponse](t, w); got.Coins != saldo {
+		t.Fatalf("resposta coins=%d, esperava %d", got.Coins, saldo)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/saldo", strings.NewReader(`{"coins":1}`))
+	req.Host = "127.0.0.1:4173"
+	req.Header.Set("Origin", "http://outro-host:4173")
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden || saldo != 123_456 {
+		t.Fatalf("origem externa: status=%d saldo=%d, esperava 403 sem alteração", w.Code, saldo)
+	}
+}
+
 // fixtureSnapshotComGauntletDeSobra monta um clube com 6 cartas elegíveis
 // por posição (66 no total) — o bastante para 3 rodadas do Gauntlet (3 x 18
 // = 54) com folga, e uma escalação titular sincronizada nas 11 posições.
@@ -524,6 +556,42 @@ func TestHandleTimePaginaEFiltraReservasAcimaDoPiso(t *testing.T) {
 	}
 }
 
+// A linha de reserva precisa carregar a vaga física, o titular e as notas
+// posicionais que justificam a promoção. Este teste passa pela rota que a
+// tela /time consome e não aceita uma troca guardada no snapshot antigo.
+func TestHandleTimeExplicaPromocaoComAVagaEOTitular(t *testing.T) {
+	titular := domain.ClubPlayer{Player: domain.Player{
+		ID: 1, Name: "Vitinha", Position: domain.CAM,
+		GGRating: 99.1, GGRatingPos: domain.CAM,
+		GGRatings: map[domain.Position]float64{domain.CAM: 99.1},
+	}, ClubItemID: "titular-cam"}
+	reserva := domain.ClubPlayer{Player: domain.Player{
+		ID: 2, Name: "Florian Wirtz", Position: domain.CAM,
+		GGRating: 99.0, GGRatingPos: domain.ST,
+		AltPositions: []domain.Position{domain.ST},
+		GGRatings:    map[domain.Position]float64{domain.CAM: 99.4, domain.ST: 99.0},
+	}, ClubItemID: "reserva-cam"}
+	snap := fixtureSnapshot()
+	snap.Club.Players = []domain.ClubPlayer{titular, reserva}
+	snap.Club.Squad.Starters = []domain.SquadSlot{{Index: 9, Position: domain.CAM, PlayerID: titular.ID}}
+	snap.SquadSwaps = nil // a rota deve recalcular com a regra atual
+
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/time", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[TimeResponse](t, w)
+	if len(got.Bench) != 1 || got.Bench[0].Leitura == nil || got.Bench[0].Leitura.Promocao == nil {
+		t.Fatalf("banco = %+v, esperava promoção detalhada", got.Bench)
+	}
+	promocao := got.Bench[0].Leitura.Promocao
+	if promocao.SlotIndex != 9 || promocao.Posicao != domain.CAM || promocao.Titular != "Vitinha" || promocao.NotaTitular != 99.1 || promocao.NotaCandidato != 99.4 || math.Abs(promocao.Ganho-0.3) > 0.001 {
+		t.Errorf("promoção = %+v, esperava CAM slot 9, Vitinha, 99.1 -> 99.4 (+0.3)", promocao)
+	}
+}
+
 func TestInferFormationReconheceSnapshotAntigo4411(t *testing.T) {
 	positions := []domain.Position{domain.GK, domain.RB, domain.CB, domain.CB, domain.LB, domain.RM, domain.CM, domain.CM, domain.LM, domain.CAM, domain.ST}
 	slots := make([]domain.SquadSlot, len(positions))
@@ -552,6 +620,59 @@ func TestHandleTimeSlug(t *testing.T) {
 	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/time/nao-existe", nil))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("slug inexistente: status = %d, esperava 404", w.Code)
+	}
+}
+
+// TestHandleTimeSlugExpoeIDDoMelhorCaminhoParaSalvar prova que o id exposto
+// em CardDetailResponse.BestPathID é o MESMO que /api/evolucoes/caminhos
+// calcularia pra este path — salvando por ele e reconferindo BestPathSaved,
+// não comparando strings arbitrárias.
+func TestHandleTimeSlugExpoeIDDoMelhorCaminhoParaSalvar(t *testing.T) {
+	player := evolutionTestPlayer(41, "evoluivel", 90, domain.ST, 80)
+	path := evolutionTestPath("Salvar daqui", domain.ST, 93, 500)
+	snap := store.Snapshot{Cycle: "26", Club: domain.Club{Players: []domain.ClubPlayer{player}}, Cards: []cards.CardReport{{Slug: "evoluivel", Player: player, EvolutionStatus: cards.EvolutionConfirmed, Best: &cards.EvoPotential{Path: path}}}}
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/time/evoluivel", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeJSON[CardDetailResponse](t, w)
+	if got.BestPathID == "" || got.BestPathSaved {
+		t.Fatalf("CardDetailResponse = %+v, esperava BestPathID preenchido e ainda não salvo", got)
+	}
+
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/evolucoes/caminhos/salvos", strings.NewReader(`{"path_id":"`+got.BestPathID+`"}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("salvar path exposto na carta = %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/time/evoluivel", nil))
+	got = decodeJSON[CardDetailResponse](t, w)
+	if !got.BestPathSaved {
+		t.Fatalf("BestPathSaved = %v após salvar, esperava true", got.BestPathSaved)
+	}
+}
+
+// TestHandleTimeSlugNaoExpoeIDAbaixoDoPisoDeAnalise trava a restrição de
+// honestidade: abaixo de evolutionAnalysisMinRating (88) o botão "salvar
+// path" não pode aparecer, porque /api/evolucoes/caminhos/salvos rejeitaria
+// o id (buildEvolutionPlayerAnalyses filtra pelo mesmo piso) — oferecer o
+// botão ali daria um 404 silencioso.
+func TestHandleTimeSlugNaoExpoeIDAbaixoDoPisoDeAnalise(t *testing.T) {
+	player := evolutionTestPlayer(42, "abaixo-do-piso", 84, domain.ST, 80)
+	path := evolutionTestPath("Não deveria salvar", domain.ST, 88, 500)
+	snap := store.Snapshot{Cycle: "26", Club: domain.Club{Players: []domain.ClubPlayer{player}}, Cards: []cards.CardReport{{Slug: "abaixo-do-piso", Player: player, EvolutionStatus: cards.EvolutionConfirmed, Best: &cards.EvoPotential{Path: path}}}}
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/time/abaixo-do-piso", nil))
+	got := decodeJSON[CardDetailResponse](t, w)
+	if got.BestPathID != "" {
+		t.Fatalf("BestPathID = %q abaixo do piso de análise, esperava vazio", got.BestPathID)
 	}
 }
 
@@ -932,6 +1053,7 @@ func TestHandleGauntletUsaPlanoJaPersistidoSemRecomputar(t *testing.T) {
 	// resposta se vier do valor PERSISTIDO, sem recalcular.
 	quimicaSentinela := chemistry.Resultado{Total: 17, Maximo: 33, Modelo: "sentinela"}
 	snap.GauntletPlan = analyze.GauntletPlan{
+		RatingVersion: domain.GGRatingVersion, CardIdentityVersion: analyze.GauntletCardIdentityVersion,
 		Status:    "ok",
 		Formation: "sentinela-9-9-9",
 		Rounds: []analyze.GauntletSquad{{
@@ -961,6 +1083,25 @@ func TestHandleGauntletUsaPlanoJaPersistidoSemRecomputar(t *testing.T) {
 	}
 }
 
+func TestHandleGauntletRecomputaPlanoSemVersaoDeIdentidadeDaCarta(t *testing.T) {
+	snap := fixtureSnapshot()
+	// Este sentinela só pode sair se a rota reutilizar o plano persistido.
+	// CardIdentityVersion zero representa snapshot anterior à deduplicação de
+	// cópias evoluída/original da mesma carta.
+	snap.GauntletPlan = analyze.GauntletPlan{
+		RatingVersion: domain.GGRatingVersion,
+		Status:        "ok",
+		Formation:     "sentinela-9-9-9",
+	}
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gauntlet", nil))
+	got := decodeJSON[GauntletResponse](t, w)
+	if got.Formation == "sentinela-9-9-9" || got.Status != "unavailable" {
+		t.Fatalf("plano sem versão de identidade foi reutilizado: %+v", got)
+	}
+}
+
 func evoPotential(pos domain.Position, finalGG float64, cost int, styles ...domain.PlayStyle) cards.EvoPotential {
 	return cards.EvoPotential{
 		Path:             domain.EvolutionPath{Steps: []domain.Player{{}, {GGRatingPos: pos, GGRating: finalGG}}},
@@ -978,7 +1119,7 @@ func evoPotential(pos domain.Position, finalGG float64, cost int, styles ...doma
 // única rota da fase 02, sem esperar POST /api/planos/elenco.
 func TestHandleGauntletQueryStrategyForcaRecompute(t *testing.T) {
 	snap := fixtureSnapshot()
-	snap.GauntletPlan = analyze.GauntletPlan{Status: "ok", Formation: "sentinela-9-9-9"}
+	snap.GauntletPlan = analyze.GauntletPlan{Status: "ok", Formation: "sentinela-9-9-9", RatingVersion: domain.GGRatingVersion, CardIdentityVersion: analyze.GauntletCardIdentityVersion}
 	srv, _ := newTestServerWithSnapshot(t, snap)
 
 	w := httptest.NewRecorder()

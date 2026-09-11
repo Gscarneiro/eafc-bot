@@ -148,6 +148,25 @@ func SummarizeLedger(entries []LedgerEntry) LedgerSummary {
 	return out
 }
 
+// SummarizeLedgerSince é SummarizeLedger restrita a partir de um instante —
+// o "Caixa 7d" de Hoje precisa da MESMA matemática de taxa de 5%/PnL que o
+// extrato completo usa, só numa janela mais curta; reimplementar a soma à
+// parte arriscaria os dois arredondarem diferente. Filtra por OccurredAt
+// (quando o lançamento de fato aconteceu), não RecordedAt (quando foi
+// digitado) — uma venda de ontem registrada hoje pertence à janela de
+// ontem. Reversão fora da janela ainda anula o lançamento que ela reverte
+// SE esse lançamento também estiver na janela; uma reversão de fora não
+// entra, então não pode anular nada de dentro.
+func SummarizeLedgerSince(entries []LedgerEntry, since time.Time) LedgerSummary {
+	windowed := make([]LedgerEntry, 0, len(entries))
+	for _, e := range entries {
+		if !e.OccurredAt.Before(since) {
+			windowed = append(windowed, e)
+		}
+	}
+	return SummarizeLedger(windowed)
+}
+
 func SortLedgerNewestFirst(entries []LedgerEntry) {
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].RecordedAt.After(entries[j].RecordedAt) })
 }

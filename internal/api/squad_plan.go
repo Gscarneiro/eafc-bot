@@ -72,14 +72,15 @@ type SquadPlanScenarioView struct {
 // Pareto, necessidades de mercado (só apontadas, nunca escolhidas — ver
 // analyze.SquadPlanNeed) e o capital disponível como contexto.
 type SquadPlanResponse struct {
-	GeneratedAt time.Time               `json:"generated_at"`
-	Status      string                  `json:"status"`
-	Reason      string                  `json:"reason,omitempty"`
-	Formation   string                  `json:"formation"`
-	Scenarios   []SquadPlanScenarioView `json:"scenarios"`
-	Needs       []analyze.SquadPlanNeed `json:"needs"`
-	Warnings    []string                `json:"warnings,omitempty"`
-	Capital     domain.Capital          `json:"capital"`
+	GeneratedAt time.Time                `json:"generated_at"`
+	Status      string                   `json:"status"`
+	Reason      string                   `json:"reason,omitempty"`
+	Formation   string                   `json:"formation"`
+	Scenarios   []SquadPlanScenarioView  `json:"scenarios"`
+	Needs       []analyze.SquadPlanNeed  `json:"needs"`
+	Warnings    []string                 `json:"warnings,omitempty"`
+	Capital     domain.Capital           `json:"capital"`
+	Avaliacao   domain.ContextoAvaliacao `json:"avaliacao"`
 }
 
 func (s *Server) handleSquadPlan(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +99,12 @@ func (s *Server) handleSquadPlan(w http.ResponseWriter, r *http.Request) {
 
 	req := analyze.DefaultSquadPlanRequest()
 	req.ChemistryModel = s.resolveChemistryModel()
+	req.Evaluator = s.resolveEvaluator()
+	req.Contexto = snap.Avaliacao
+	if req.Contexto.Fonte == "" {
+		req.Contexto = s.resolveEvaluationContext()
+	}
+	req.ContextosPorVaga = contextosAtuaisDasVagas(snap)
 	if body.Goal != "" {
 		req.Goal = analyze.SquadPlanGoal(body.Goal)
 	}
@@ -131,6 +138,7 @@ func (s *Server) handleSquadPlan(w http.ResponseWriter, r *http.Request) {
 		Needs:       plan.Needs,
 		Warnings:    plan.Warnings,
 		Capital:     snap.Club.Capital(s.EvolutionExtraBudget, s.MarketReserve, 0),
+		Avaliacao:   req.Contexto,
 	})
 }
 

@@ -50,6 +50,7 @@ type SellFunnel struct {
 	Promotable          int `json:"promotable"`
 	HeldForPotential    int `json:"held_for_potential"`
 	WaitingVerification int `json:"waiting_verification"`
+	Protected           int `json:"protected"`
 	Suggested           int `json:"suggested"` // "vender"
 
 	MinEvoGGGain float64 `json:"min_evo_gg_gain"`
@@ -70,13 +71,15 @@ type SellFunnel struct {
 //     valer esperar.
 //   - "vender": nenhum dos motivos acima — líquida, sem uso à vista.
 func FindSellCandidates(club domain.Club, cardReports []cards.CardReport, swaps []SquadSwap, opt SellOptions) ([]SellCandidate, SellFunnel) {
-	starterIDs := make(map[int64]bool, len(club.Squad.Starters))
+	starterCards := make(map[string]bool, len(club.Squad.Starters))
 	for _, s := range club.Squad.Starters {
-		starterIDs[s.PlayerID] = true
+		if p, ok := club.PlayerForSlot(s); ok {
+			starterCards[p.IdentityKey()] = true
+		}
 	}
-	promotable := make(map[int64]bool, len(swaps))
+	promotable := make(map[string]bool, len(swaps))
 	for _, s := range swaps {
-		promotable[s.Candidate.ID] = true
+		promotable[s.Candidate.IdentityKey()] = true
 	}
 	bestByID := make(map[int64]*cards.EvoPotential, len(cardReports))
 	evoStatusByID := make(map[int64]cards.EvolutionStatus, len(cardReports))
@@ -91,12 +94,16 @@ func FindSellCandidates(club domain.Club, cardReports []cards.CardReport, swaps 
 
 	var out []SellCandidate
 	for _, p := range club.Players {
-		if starterIDs[p.ID] {
+		if starterCards[p.IdentityKey()] {
 			continue // titular, não é banco
+		}
+		if club.IsProtected(p) {
+			funnel.Protected++
+			continue
 		}
 		funnel.Considered++
 
-		if promotable[p.ID] {
+		if promotable[p.IdentityKey()] {
 			funnel.Promotable++
 			out = append(out, SellCandidate{
 				Player: p, Recommendation: "promover",

@@ -1,0 +1,66 @@
+.time-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, 1fr); gap: 14px; align-items: start; margin-top: var(--space-5); }
+.time-pitch-panel { display: flex; flex-direction: column; }
+.time-side { display: flex; flex-direction: column; gap: 14px; }
+
+.pitch-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-3);
+  font: 600 9.5px var(--font-mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.pitch-legend span { display: flex; align-items: center; gap: 5px; }
+.pitch-legend i { display: block; width: 9px; height: 2px; }
+.pitch-legend i.tone-turf { background: var(--turf); }
+.pitch-legend i.tone-alert { background: var(--alert); }
+.pitch-legend i.tone-cost { background: var(--cost); }
+.time-pitch-panel .top-border { border-top: 1px solid var(--rule); }
+
+/* Jogada de hoje */
+.top-move-headline { font: 700 15px/1.2 var(--font-body); margin-bottom: 10px; }
+.top-move-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 1px; background: var(--rule); margin-bottom: 10px; }
+.top-move-stats > div { background: var(--raised); padding: 7px 9px; }
+.top-move-stats span { display: block; color: var(--ink-3); font: 700 9px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 2px; }
+.top-move-stats strong { font: 700 16px/1.2 var(--font-mono); }
+.top-move-rationale { margin: 0 0 12px; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
+.top-move-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.top-move-actions .hint { color: var(--ink-3); font: 600 11px var(--font-mono); }
+
+/* Mapa de posições */
+.position-map-rows { display: flex; flex-direction: column; gap: 6px; }
+.position-map-row { display: grid; grid-template-columns: 34px 1fr 40px 52px; align-items: center; gap: 8px; }
+.position-map-pos { color: var(--ink-2); font: 700 10px var(--font-mono); }
+.position-map-bar { position: relative; height: 8px; background: var(--sunk); }
+.position-map-fill { display: block; height: 100%; background: var(--turf); }
+.position-map-ruler { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--ink-3); }
+.position-map-value { font: 700 11px var(--font-mono); text-align: right; }
+.position-map-outlook { color: var(--ink-3); font: 600 10px var(--font-mono); text-align: right; }
+.position-map-outlook.up { font-weight: 700; }
+
+/* Química */
+.chem-segments { display: flex; gap: 2px; margin-bottom: 9px; }
+.chem-segments span { flex: 1; height: 22px; background: var(--turf-bg); border-top: 2px solid var(--turf); }
+.chem-segments span.out { background: var(--cost-bg); border-top-color: var(--cost); }
+.chem-groups { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--rule); margin-bottom: 9px; }
+.chem-groups > div { background: var(--raised); padding: 6px 8px; }
+.chem-groups span { display: block; color: var(--ink-3); font: 700 9px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 2px; }
+.chem-groups strong { font: 700 12px var(--font-mono); }
+.chem-note { margin: 0; color: var(--ink-3); font: 11px/1.5 var(--font-mono); }
+
+.leitura-cell { color: var(--ink-2); font-size: 12.5px; max-width: 320px; }
+
+.promotion-cell { min-width: 190px; color: var(--ink-2); font-size: 12px; }
+.promotion-cell strong,
+.promotion-cell span { display: block; }
+.promotion-cell strong { color: var(--ink); font: 700 11px/1.35 var(--font-mono); }
+.promotion-cell span { margin-top: 2px; color: var(--ink-3); font: 600 10px/1.35 var(--font-mono); }
+.promotion-cell b { font-weight: 800; }
+
+@media (max-width: 900px) {
+  .time-grid { grid-template-columns: 1fr; }
+}

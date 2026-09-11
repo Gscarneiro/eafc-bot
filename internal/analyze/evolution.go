@@ -10,19 +10,28 @@ import (
 // EvoMatch é uma evolução que cabe num jogador seu, já com a projeção
 // de como a carta fica no fim.
 type EvoMatch struct {
-	Evolution    domain.Evolution  `json:"evolution"`
-	Player       domain.ClubPlayer `json:"player"`
-	Slot         domain.Position   `json:"slot"` // função onde o ganho foi medido
-	Before       float64           `json:"before"`
-	After        float64           `json:"after"`
-	Gain         float64           `json:"gain"`
-	Result       domain.Player     `json:"result"` // a carta projetada
-	Cost         int               `json:"cost"`
-	Affordable   bool              `json:"affordable"`
-	Acquisition  string            `json:"acquisition"`
-	CardSlug     string            `json:"card_slug,omitempty"`
-	BeatsStarter bool              `json:"beats_starter"` // vira titular na posição?
-	Highlights   []string          `json:"highlights"`
+	Evolution           domain.Evolution      `json:"evolution"`
+	Player              domain.ClubPlayer     `json:"player"`
+	Slot                domain.Position       `json:"slot"`  // função onde o ganho foi medido
+	Index               int                   `json:"index"` // vaga física comparada; use HasComparison para distinguir ausência do índice zero
+	Before              float64               `json:"before"`
+	After               float64               `json:"after"`
+	Gain                float64               `json:"gain"`
+	Result              domain.Player         `json:"result"` // a carta projetada
+	Cost                int                   `json:"cost"`
+	Affordable          bool                  `json:"affordable"`
+	Acquisition         string                `json:"acquisition"`
+	CardSlug            string                `json:"card_slug,omitempty"`
+	BeatsStarter        bool                  `json:"beats_starter"` // vira titular na posição?
+	ImprovesStarter     bool                  `json:"improves_starter"`
+	HasComparison       bool                  `json:"has_comparison"`
+	Current             *domain.ClubPlayer    `json:"current,omitempty"`
+	ReplacementGain     float64               `json:"replacement_gain,omitempty"`
+	Highlights          []string              `json:"highlights"`
+	BeforeEvaluation    domain.AvaliacaoCarta `json:"before_evaluation,omitempty"`
+	AfterEvaluation     domain.AvaliacaoCarta `json:"after_evaluation,omitempty"`
+	CurrentEvaluation   domain.AvaliacaoCarta `json:"current_evaluation,omitempty"`
+	CandidateEvaluation domain.AvaliacaoCarta `json:"candidate_evaluation,omitempty"`
 }
 
 // EvolutionOptions governa o cruzamento diário de evoluções com o elenco.
@@ -30,6 +39,11 @@ type EvolutionOptions struct {
 	Budget              int
 	MinRating           int
 	IncludeUnaffordable bool
+	Evaluator           Avaliador
+	Contexto            domain.ContextoAvaliacao
+	// ContextosPorVaga impede que dois slots de mesma posição e funções
+	// diferentes sejam reduzidos à mesma comparação.
+	ContextosPorVaga map[int]domain.ContextoAvaliacao
 }
 
 // EvolutionAcquisition classifica apenas o que os dados permitem afirmar.
@@ -80,29 +94,31 @@ func FindEvolutionsWithOptions(club domain.Club, evos []domain.Evolution, option
 
 			// Mede o ganho na melhor função possível para o jogador,
 			// já considerando posições que a evolução destrava.
-			bestSlot, before, after := bestSlotGain(cp.Player, result)
+			bestSlot, before, after, beforeEvaluation, afterEvaluation, available := bestEvolutionGainForOptions(club, cp.Player, result, options)
+			if !available {
+				continue
+			}
 			gain := after - before
 			if gain <= 0.5 {
 				continue
 			}
 
 			m := EvoMatch{
-				Evolution:   evo,
-				Player:      cp,
-				Slot:        bestSlot,
-				Before:      before,
-				After:       after,
-				Gain:        gain,
-				Result:      result,
-				Cost:        evo.CoinCost,
-				Affordable:  evo.CoinCost <= options.Budget,
-				Acquisition: EvolutionAcquisition(evo),
-				Highlights:  evoHighlights(cp.Player, result, evo),
+				Evolution:        evo,
+				Player:           cp,
+				Slot:             bestSlot,
+				Before:           before,
+				After:            after,
+				Gain:             gain,
+				Result:           result,
+				Cost:             evo.CoinCost,
+				Affordable:       evo.CoinCost <= options.Budget,
+				Acquisition:      EvolutionAcquisition(evo),
+				Highlights:       evoHighlights(cp.Player, result, evo),
+				BeforeEvaluation: beforeEvaluation,
+				AfterEvaluation:  afterEvaluation,
 			}
-			// A evolução vale muito mais se a carta final passa o titular atual.
-			if starter, ok := club.Starter(bestSlot); ok {
-				m.BeatsStarter = after > EvaluateBotScore(starter.Player, bestSlot, DefaultBotScoreProfile).Total && starter.ID != cp.ID
-			}
+			compararEvolucaoComXI(&m, club, cp, result, options)
 			out = append(out, m)
 		}
 	}
@@ -111,15 +127,128 @@ func FindEvolutionsWithOptions(club domain.Club, evos []domain.Evolution, option
 		if out[i].BeatsStarter != out[j].BeatsStarter {
 			return out[i].BeatsStarter
 		}
+		if out[i].ImprovesStarter != out[j].ImprovesStarter {
+			return out[i].ImprovesStarter
+		}
+		if out[i].ReplacementGain != out[j].ReplacementGain {
+			return out[i].ReplacementGain > out[j].ReplacementGain
+		}
 		return out[i].Gain > out[j].Gain
 	})
 	return out
 }
 
-// bestSlotGain procura em que posição a carta evoluída rende mais.
-func bestSlotGain(before, after domain.Player) (domain.Position, float64, float64) {
+func bestEvolutionGainForOptions(club domain.Club, before, after domain.Player, options EvolutionOptions) (domain.Position, float64, float64, domain.AvaliacaoCarta, domain.AvaliacaoCarta, bool) {
 	var bestSlot domain.Position
 	var bestBefore, bestAfter float64
+	var bestBeforeEvaluation, bestAfterEvaluation domain.AvaliacaoCarta
+	found := false
+	for _, slot := range club.Squad.Starters {
+		if _, specific := options.ContextosPorVaga[slot.Index]; !specific || !after.PlaysAt(slot.Position) {
+			continue
+		}
+		ctx := contextoDaVaga(options.Contexto, options.ContextosPorVaga, slot)
+		beforeEvaluation := avaliarOpcional(before, slot.Position, options.Evaluator, ctx)
+		afterEvaluation := avaliarOpcional(after, slot.Position, options.Evaluator, ctx)
+		if !beforeEvaluation.Disponivel || !afterEvaluation.Disponivel {
+			continue
+		}
+		if !found || afterEvaluation.Nota > bestAfter {
+			bestSlot, bestBefore, bestAfter = slot.Position, beforeEvaluation.Nota, afterEvaluation.Nota
+			bestBeforeEvaluation, bestAfterEvaluation, found = beforeEvaluation, afterEvaluation, true
+		}
+	}
+	if found {
+		return bestSlot, bestBefore, bestAfter, bestBeforeEvaluation, bestAfterEvaluation, true
+	}
+	return bestSlotGainWithEvaluator(before, after, options.Evaluator, options.Contexto)
+}
+
+// compararEvolucaoComXI identifica o ocupante exato que a carta final
+// enfrentaria. Se a própria cópia já é titular, descreve uma melhora daquele
+// titular; uma versão do mesmo atleta só pode disputar a vaga dele para não
+// sugerir duas versões ilegais no XI.
+func compararEvolucaoComXI(match *EvoMatch, club domain.Club, original domain.ClubPlayer, result domain.Player, options EvolutionOptions) {
+	type comparison struct {
+		slot      domain.SquadSlot
+		current   domain.ClubPlayer
+		currentEv domain.AvaliacaoCarta
+		finalEv   domain.AvaliacaoCarta
+		gain      float64
+		sameCopy  bool
+	}
+	var restricted *domain.SquadSlot
+	// A cópia física tem precedência sobre outra versão do mesmo atleta.
+	for pass := 0; pass < 2 && restricted == nil; pass++ {
+		for i := range club.Squad.Starters {
+			slot := &club.Squad.Starters[i]
+			if !result.PlaysAt(slot.Position) {
+				continue
+			}
+			current, ok := club.PlayerForSlot(*slot)
+			if !ok {
+				continue
+			}
+			if (pass == 0 && current.IdentityKey() == original.IdentityKey()) ||
+				(pass == 1 && current.PlayerKey() == original.PlayerKey()) {
+				restricted = slot
+				break
+			}
+		}
+	}
+	var comparable []comparison
+	for _, slot := range club.Squad.Starters {
+		if restricted != nil && slot.Index != restricted.Index {
+			continue
+		}
+		if !result.PlaysAt(slot.Position) {
+			continue
+		}
+		current, ok := club.PlayerForSlot(slot)
+		if !ok {
+			continue
+		}
+		sameCopy := current.IdentityKey() == original.IdentityKey()
+		ctx := contextoDaVaga(options.Contexto, options.ContextosPorVaga, slot)
+		currentEv := avaliarOpcional(current.Player, slot.Position, options.Evaluator, ctx)
+		finalEv := avaliarOpcional(result, slot.Position, options.Evaluator, ctx)
+		if !currentEv.Disponivel || !finalEv.Disponivel {
+			continue
+		}
+		entry := comparison{slot: slot, current: current, currentEv: currentEv, finalEv: finalEv, gain: finalEv.Nota - currentEv.Nota, sameCopy: sameCopy}
+		comparable = append(comparable, entry)
+	}
+	if len(comparable) == 0 {
+		return
+	}
+	best := comparable[0]
+	for _, candidate := range comparable[1:] {
+		if candidate.gain > best.gain {
+			best = candidate
+		}
+	}
+	current := best.current
+	match.Index = best.slot.Index
+	match.Slot = best.slot.Position
+	match.HasComparison = true
+	match.Current = &current
+	match.ReplacementGain = best.gain
+	match.CurrentEvaluation = best.currentEv
+	match.CandidateEvaluation = best.finalEv
+	match.ImprovesStarter = best.sameCopy && best.gain > 0
+	match.BeatsStarter = !best.sameCopy && best.gain > 0
+}
+
+// bestSlotGain procura em que posição a carta evoluída rende mais.
+func bestSlotGain(before, after domain.Player) (domain.Position, float64, float64) {
+	slot, b, a, _, _, _ := bestSlotGainWithEvaluator(before, after, nil, domain.ContextoAvaliacao{})
+	return slot, b, a
+}
+
+func bestSlotGainWithEvaluator(before, after domain.Player, evaluator Avaliador, ctx domain.ContextoAvaliacao) (domain.Position, float64, float64, domain.AvaliacaoCarta, domain.AvaliacaoCarta, bool) {
+	var bestSlot domain.Position
+	var bestBefore, bestAfter float64
+	var bestBeforeEvaluation, bestAfterEvaluation domain.AvaliacaoCarta
 	first := true
 
 	// Considera a posição natural, as alternativas atuais e as que a
@@ -130,13 +259,17 @@ func bestSlotGain(before, after domain.Player) (domain.Position, float64, float6
 	}
 
 	for slot := range slots {
-		a := EvaluateBotScore(after, slot, DefaultBotScoreProfile).Total
-		b := EvaluateBotScore(before, slot, DefaultBotScoreProfile).Total
+		aEvaluation := avaliarOpcional(after, slot, evaluator, ctx)
+		bEvaluation := avaliarOpcional(before, slot, evaluator, ctx)
+		if !aEvaluation.Disponivel || !bEvaluation.Disponivel {
+			continue
+		}
+		a, b := aEvaluation.Nota, bEvaluation.Nota
 		if first || a > bestAfter {
-			bestSlot, bestBefore, bestAfter, first = slot, b, a, false
+			bestSlot, bestBefore, bestAfter, bestBeforeEvaluation, bestAfterEvaluation, first = slot, b, a, bEvaluation, aEvaluation, false
 		}
 	}
-	return bestSlot, bestBefore, bestAfter
+	return bestSlot, bestBefore, bestAfter, bestBeforeEvaluation, bestAfterEvaluation, !first
 }
 
 // evoHighlights resume em texto o que a evolução muda na carta.

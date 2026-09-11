@@ -22,7 +22,7 @@ function aplicarTema(tema: Tema) {
   document.documentElement.style.colorScheme = tema;
 
   const corDoTema = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-  if (corDoTema) corDoTema.content = tema === "dark" ? "#12140f" : "#f6f2e7";
+  if (corDoTema) corDoTema.content = tema === "dark" ? "#0b0e0c" : "#f1f3ef";
 }
 
 export function inicializarTema(): Tema {

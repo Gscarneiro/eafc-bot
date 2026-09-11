@@ -136,15 +136,45 @@ as expõe a ninguém:
 - **Seu saldo de moedas.** Sem ele o orçamento fica zero — mas isso NÃO some
   com as sugestões: uma troca fora do bolso continua na lista, só marcada
   "fora do orçamento" (`analyze.Upgrade.Affordable`), porque
-  `IncludeUnaffordable` é o padrão. Preencha `market.extra_budget` no
-  `config.json` para essa marcação ficar correta; se a lista de upgrades
-  estiver vazia, o motivo é outro — veja o funil na tela de mercado ou no
-  relatório, e ajuste `report.min_gain`/`report.allow_unpriced` em vez disso.
+  `IncludeUnaffordable` é o padrão. Clique no saldo da barra superior para
+  informar o valor; ele fica salvo como `market.manual_coins` no
+  `config.json`. `market.extra_budget` continua sendo apenas dinheiro além
+  desse saldo. Se a lista de upgrades estiver vazia, o motivo é outro — veja
+  o funil na tela de mercado ou no relatório, e ajuste
+  `report.min_gain`/`report.allow_unpriced` em vez disso.
 - **A escalação titular por posição.** O bot deduz pelos jogadores marcados
   como `isInActiveSquad`.
 
 Os preços não precisam de rota própria: já vêm dentro da listagem de
 jogadores (`price`, `currentDbPrice`).
+
+### Avaliações FUTBIN e FUTWIZ
+
+FUTBIN e FUTWIZ podem fornecer uma escala externa, mas nunca são mesclados
+ao GG Rating nem à nota do bot. A integração aceita uma exportação JSON
+local por fonte: ela exige o id da versão da carta, a métrica posicional,
+escala, ciclo, contexto e URL de evidência. O job rejeita identidade ou ciclo
+divergentes e deixa a carta sem nota quando a cobertura não existe.
+
+Configure `evaluation.futbin_import` ou `evaluation.futwiz_import`, selecione
+a fonte em **Configurações** e execute a coleta. Exemplo de arquivo:
+
+```json
+{
+  "fonte": "futbin",
+  "metrica": "rating_per_position",
+  "escala_minima": 0,
+  "escala_maxima": 100,
+  "ciclo": "27",
+  "evidencia": "https://www.futbin.com/27/player/...",
+  "capturada_em": "2026-09-10T20:00:00Z",
+  "cartas": [{"id": 12345, "base_player_ea_id": 67890, "versao": "TOTS", "por_posicao": {"CM": 96.4}}]
+}
+```
+
+O aplicativo não raspa esses sites: a coleta por rede só entra depois de
+um contrato de endpoint e permissão serem verificados. Isso preserva a
+proveniência da nota e evita automatizar uma fonte sem autorização.
 
 ### Ambiguidade não vira chute
 
@@ -192,9 +222,12 @@ go get github.com/jackc/pgx/v5
 go build -tags postgres ./cmd/eafcbot
 
 export EAFC_DSN="postgres://user:senha@localhost:5432/eafc?sslmode=disable"
-psql "$EAFC_DSN" -f migrations/001_init.sql
+for arquivo in migrations/*.sql; do psql "$EAFC_DSN" -v ON_ERROR_STOP=1 -f "$arquivo"; done
 ./eafcbot run
 ```
+
+As migrações são incrementais e devem ser aplicadas em ordem. A `010` inclui
+planos do editor, feedback de gameplay e propostas versionadas de meta.
 
 O histórico é o que permite as seções "novidades de hoje" e "mercado": sem ele
 o bot não sabe o que mudou desde ontem.
@@ -207,16 +240,24 @@ o bot não sabe o que mudou desde ontem.
 
 Sobe a API + a UI React (`web/`, embutida no binário) numa porta só —
 `http://localhost:4173` (`-port` muda), abre sozinho no navegador, fica no
-ar até `Ctrl+C`. Cinco telas, cada uma lendo só o endpoint que precisa:
+ar até `Ctrl+C`. Cada tela lê só o endpoint que precisa:
 
 | rota | o que mostra |
 |---|---|
 | `/` | status diário — saldo, nota do elenco, elo mais fraco, o que mudou desde ontem, tendência de 30 dias |
 | `/time` | os titulares + reservas, com GG Rating |
+| `/time/editor` | editor local com formações, arrastar e controles por toque/teclado, banco, não relacionados, alvos, desfazer/refazer e planos versionados |
 | `/time/:slug` | atual x potencial de uma carta — funções por posição (Role++/Role+), teto das evoluções disponíveis, preço no tempo |
 | `/mercado` | oportunidades de troca, ordenadas por ganho por moeda gasta |
 | `/evolucoes` | catálogo vivo por seção oficial (Evoluções, Rewards, PlayStyles, Roles++, Training Camp e outras) |
 | `/evolucoes/:slug` | laboratório de uma evolução: carta elegível, atributos e subatributos antes/depois, PlayStyles duplicados e fontes |
+
+O editor nunca altera a escalação no jogo. O rascunho tem autosave por
+clube e ciclo; aplicar uma referência escolhe qual revisão alimenta as
+recomendações do bot. Alvos de mercado e evolução podem ser simulados no
+XI, mas continuam marcados como não possuídos e não entram em venda, SBC ou
+capital do clube. A análise mostra separadamente a química observada na
+coleta e a química simulada pelo plano.
 
 Um scheduler embutido coleta sozinho, uma vez por dia, no horário de
 `serve.daily_at` (`config.json`, padrão `"05:00"`) — sem cron, sem Agendador

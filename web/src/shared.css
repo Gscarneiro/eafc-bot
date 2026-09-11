@@ -32,6 +32,31 @@
   flex-shrink: 0;
 }
 
+/* .btn é o botão global do app — base neutra + duas variantes. Antes
+   conviviam duas convenções (.btn.primary/.btn.secondary em
+   Configuracoes.css e .btn-primary com cor cravada em Evolucoes.css);
+   unificado aqui porque .btn é usado fora do shell (formulários, listas). */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 8px 13px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--rule-strong);
+  background: var(--sunk);
+  color: var(--ink);
+  font: 600 12px var(--font-mono);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease), background-color var(--duration) var(--ease);
+}
+.btn:hover:not(:disabled) { border-color: var(--turf); color: var(--turf); background: var(--turf-bg); }
+.btn:disabled { opacity: .6; cursor: default; }
+.btn.primary { color: var(--on-turf); border-color: var(--turf); background: var(--turf); }
+.btn.primary:hover:not(:disabled) { color: var(--on-turf); background: var(--pitch-fill); }
+.btn.ghost { background: transparent; }
+
 .toggle {
   display: inline-flex;
   border: 1px solid var(--rule-strong);
@@ -75,6 +100,32 @@
   margin: 6px 0 0;
   padding-left: 18px;
 }
+
+/* .panel é o cartão bordado com cabeçalho que o redesenho "terminal" repete
+   em toda tela (Hoje, Meu time, Mercado, Evoluções, Capital) — construído
+   uma vez aqui em vez de cada página reinventar a mesma borda+cabeçalho. */
+.panel { background: var(--raised); border: 1px solid var(--rule); }
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--rule);
+  font: 700 10px/1.3 var(--font-mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.panel-head-sub { color: var(--ink-3); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.panel-head-meta { color: var(--ink-3); font: 600 9.5px var(--font-mono); text-transform: none; letter-spacing: 0; white-space: nowrap; }
+.panel-body { padding: 12px; }
+
+/* Utilitários de cor — mesma regra de theme.css: --gain/--cost só pra
+   delta, --coin só pra dinheiro parado. Usados soltos (não só dentro de
+   .chip/.stat-tile) nas tabelas densas do redesenho. */
+.up { color: var(--gain); }
+.down { color: var(--cost); }
+.coin { color: var(--coin); }
 
 .stat-grid {
   display: grid;
@@ -195,8 +246,9 @@ th.num {
   color: var(--ink-3);
   font-size: 13.5px;
 }
-.empty .hint {
+.hint {
   margin: 6px 0 0;
+  color: var(--ink-3);
   font-size: 12.5px;
 }
 

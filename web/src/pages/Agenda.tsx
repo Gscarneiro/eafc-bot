@@ -22,24 +22,25 @@ const ACTIONS_PER_SECTION = 16;
 export default function Agenda() {
   const { data, loading, error, refetch } = useData(fetchAgenda, []);
   const gate = asyncGate(loading, error, data !== null, refetch); if (gate) return gate; if (!data) return null;
-  const rows: Record<AgendaFaixa, AcaoAgenda[]> = { agora: data.agora ?? [], esta_semana: data.esta_semana ?? [], observando: data.observando ?? [] };
+  const rows: Record<AgendaFaixa, AcaoAgenda[]> = { agora: data.agenda.agora ?? [], esta_semana: data.agenda.esta_semana ?? [], observando: data.agenda.observando ?? [] };
   return <div className="wrap agenda">
     <PageHeader eyebrow="copiloto · agenda" title="O que merece sua atenção" meta="Uma sequência única de decisões já calculadas pelos módulos do bot. Nada é executado automaticamente." />
     <div className="agenda-rail" aria-label="Resumo da agenda">{SECTIONS.map((section) => <a key={section.key} href={`#${section.key}`}><span>{section.title}</span><strong>{rows[section.key].length}</strong></a>)}</div>
-    {SECTIONS.map((section) => <AgendaSection key={section.key} section={section} actions={rows[section.key]} />)}
+    {SECTIONS.map((section) => <AgendaSection key={section.key} section={section} actions={rows[section.key]} feedback={data.feedback ?? {}} />)}
   </div>;
 }
 
-function AgendaSection({ section, actions }: { section: typeof SECTIONS[number]; actions: AcaoAgenda[] }) {
+function AgendaSection({ section, actions, feedback }: { section: typeof SECTIONS[number]; actions: AcaoAgenda[]; feedback: Record<string, string> }) {
   const [visibleActions, setVisibleActions] = useState(ACTIONS_PER_SECTION);
   const actionsToShow = actions.slice(0, visibleActions);
   return <section id={section.key} className="agenda-section" aria-labelledby={`${section.key}-heading`}>
     <header><div><Chip tone={TONE[section.key]}>{section.title}</Chip><h2 id={`${section.key}-heading`}>{section.note}</h2></div><strong>{actions.length} ações</strong></header>
-    {actions.length === 0 ? <EmptyState message={`Nada em ${section.title.toLowerCase()} no snapshot atual.`} /> : <><ol>{actionsToShow.map((action) => <li key={action.id}><AgendaCard action={action} /></li>)}</ol>{actionsToShow.length < actions.length ? <div className="agenda-more"><p aria-live="polite">Mostrando {actionsToShow.length} de {actions.length} ações.</p><button className="btn" type="button" onClick={() => setVisibleActions((count) => count + ACTIONS_PER_SECTION)}>mostrar mais {Math.min(ACTIONS_PER_SECTION, actions.length - actionsToShow.length)}</button></div> : null}</>}
+    {actions.length === 0 ? <EmptyState message={`Nada em ${section.title.toLowerCase()} no snapshot atual.`} /> : <><ol>{actionsToShow.map((action) => <li key={action.id}><AgendaCard action={action} previousStatus={feedback[action.id]} /></li>)}</ol>{actionsToShow.length < actions.length ? <div className="agenda-more"><p aria-live="polite">Mostrando {actionsToShow.length} de {actions.length} ações.</p><button className="btn" type="button" onClick={() => setVisibleActions((count) => count + ACTIONS_PER_SECTION)}>mostrar mais {Math.min(ACTIONS_PER_SECTION, actions.length - actionsToShow.length)}</button></div> : null}</>}
   </section>;
 }
-function AgendaCard({ action }: { action: AcaoAgenda }) {
-  const [sent, setSent] = useState(false); const [sending, setSending] = useState(false);
-  const send = async (status: "aceita" | "adiada" | "descartada") => { if (sending || sent) return; setSending(true); try { await appendFeedback({ action_id: action.id, status }); setSent(true); } finally { setSending(false); } };
-  return <article className="agenda-card"><div className="agenda-card-main"><div className="agenda-card-kicker"><Chip tone="flat">{action.tipo}</Chip><span>origem: {action.proveniencia}</span></div><h3>{action.alvo}</h3><p>{action.impacto || "Sem detalhe adicional."}</p>{action.conflitos?.length ? <p className="agenda-conflict">Conflito: {action.conflitos.join(" · ")}</p> : null}</div><div className="agenda-card-meta"><span>confiança <strong>{action.confianca}</strong></span>{action.moedas ? <span>{formatCoins(action.moedas)}</span> : null}{action.prazo ? <time dateTime={action.prazo}>até {formatDateTime(action.prazo)}</time> : null}<Link className="agenda-link" to={action.link}>ver contexto</Link><div className="agenda-feedback" aria-label={`Feedback para ${action.alvo}`}>{sent ? <span>feedback salvo</span> : <><button type="button" onClick={() => send("aceita")} disabled={sending}>aceitar</button><button type="button" onClick={() => send("adiada")} disabled={sending}>adiar</button><button type="button" onClick={() => send("descartada")} disabled={sending}>descartar</button></>}</div></div></article>;
+function AgendaCard({ action, previousStatus }: { action: AcaoAgenda; previousStatus?: string }) {
+  const [sent, setSent] = useState(previousStatus);
+  const [sending, setSending] = useState(false);
+  const send = async (status: "aceita" | "adiada" | "descartada") => { if (sending || sent) return; setSending(true); try { await appendFeedback({ action_id: action.id, status }); setSent(status); } finally { setSending(false); } };
+  return <article className="agenda-card"><div className="agenda-card-main"><div className="agenda-card-kicker"><Chip tone="flat">{action.tipo}</Chip><span>origem: {action.proveniencia}</span></div><h3>{action.alvo}</h3><p>{action.impacto || "Sem detalhe adicional."}</p>{action.conflitos?.length ? <p className="agenda-conflict">Conflito: {action.conflitos.join(" · ")}</p> : null}</div><div className="agenda-card-meta"><span>confiança <strong>{action.confianca}</strong></span>{action.moedas ? <span>{formatCoins(action.moedas)}</span> : null}{action.prazo ? <time dateTime={action.prazo}>até {formatDateTime(action.prazo)}</time> : null}<Link className="agenda-link" to={action.link}>ver contexto</Link><div className="agenda-feedback" aria-label={`Feedback para ${action.alvo}`}>{sent ? <span>feedback salvo: {sent}</span> : <><button type="button" onClick={() => send("aceita")} disabled={sending}>aceitar</button><button type="button" onClick={() => send("adiada")} disabled={sending}>adiar</button><button type="button" onClick={() => send("descartada")} disabled={sending}>descartar</button></>}</div></div></article>;
 }

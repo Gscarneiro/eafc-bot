@@ -63,10 +63,12 @@ func (s *JSONStore) writeJSON(name string, v any) error {
 	return os.Rename(tmp, s.path(name))
 }
 
-func pricesFile(cycle string) string   { return "prices_" + cycle + ".json" }
-func clubFile(cycle string) string     { return "club_" + cycle + ".json" }
-func seenFile(cycle string) string     { return "seen_" + cycle + ".json" }
-func feedbackFile(cycle string) string { return "feedback_" + cycle + ".json" }
+func pricesFile(cycle string) string           { return "prices_" + cycle + ".json" }
+func clubFile(cycle string) string             { return "club_" + cycle + ".json" }
+func seenFile(cycle string) string             { return "seen_" + cycle + ".json" }
+func feedbackFile(cycle string) string         { return "feedback_" + cycle + ".json" }
+func gameplayFeedbackFile(cycle string) string { return "gameplay_feedback_" + cycle + ".json" }
+func metaProposalsFile(cycle string) string    { return "meta_proposals_" + cycle + ".json" }
 
 // snapshotRetention é quantos dias de snapshot ficam guardados — o bastante
 // para o gráfico de tendência de 30 dias do status diário, sem deixar o
@@ -87,15 +89,28 @@ type priceHistory struct {
 func (s *JSONStore) SavePrices(ctx context.Context, cycle string, players []domain.Player) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.savePricesAtLocked(cycle, players, time.Now())
+}
 
+// SavePricesAt é a mesma gravação de SavePrices com o instante escolhido
+// pelo chamador — ver DemoSeeder em store.go: existe só para `serve -demo`
+// simular histórico sem esperar horas de relógio real passarem entre
+// chamadas. Chamadores fora de internal/store/json.go usam a interface
+// DemoSeeder, nunca *JSONStore direto, para não vazar o tipo concreto.
+func (s *JSONStore) SavePricesAt(ctx context.Context, cycle string, players []domain.Player, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.savePricesAtLocked(cycle, players, at)
+}
+
+func (s *JSONStore) savePricesAtLocked(cycle string, players []domain.Player, at time.Time) error {
 	hist := priceHistory{Points: map[string][]PricePoint{}}
 	_ = s.readJSON(pricesFile(cycle), &hist)
 	if hist.Points == nil {
 		hist.Points = map[string][]PricePoint{}
 	}
 
-	now := time.Now()
-	cutoff := now.Add(-60 * 24 * time.Hour) // guarda 60 dias
+	cutoff := at.Add(-60 * 24 * time.Hour) // guarda 60 dias
 
 	for _, p := range players {
 		if p.Price.Coins == 0 && !p.Price.Extinct {
@@ -105,12 +120,15 @@ func (s *JSONStore) SavePrices(ctx context.Context, cycle string, players []doma
 		series := hist.Points[key]
 
 		// Não grava dois pontos no mesmo período de 1h: a coleta diária
-		// pode rodar mais de uma vez sem inflar o arquivo.
-		if n := len(series); n > 0 && now.Sub(series[n-1].ObservedAt) < time.Hour {
+		// pode rodar mais de uma vez sem inflar o arquivo. Assume chamadas
+		// em ordem cronológica não-decrescente de `at`, como SavePrices
+		// sempre fez com time.Now() — SavePricesAt (demo) respeita a mesma
+		// disciplina, chamando dia a dia em ordem crescente.
+		if n := len(series); n > 0 && at.Sub(series[n-1].ObservedAt) < time.Hour {
 			continue
 		}
 		series = append(series, PricePoint{
-			EAID: p.ID, Coins: p.Price.Coins, Extinct: p.Price.Extinct, ObservedAt: now,
+			EAID: p.ID, Coins: p.Price.Coins, Extinct: p.Price.Extinct, ObservedAt: at,
 		})
 
 		// Poda pontos antigos.
@@ -226,6 +244,76 @@ func (s *JSONStore) AppendFeedback(ctx context.Context, cycle string, entry doma
 	}
 	out = append(out, entry)
 	return s.writeJSON(feedbackFile(cycle), out)
+}
+
+func (s *JSONStore) ListGameplayFeedback(ctx context.Context, cycle string) ([]domain.FeedbackGameplay, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []domain.FeedbackGameplay
+	if err := s.readJSON(gameplayFeedbackFile(cycle), &out); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
+// UpsertGameplayFeedback usa ComparacaoID como deduplicação: a mesma
+// comparação pode ser corrigida, mas não pode inflar a base de evidências.
+func (s *JSONStore) UpsertGameplayFeedback(ctx context.Context, entry domain.FeedbackGameplay) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.FeedbackGameplay
+	if err := s.readJSON(gameplayFeedbackFile(entry.Ciclo), &entries); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for i := range entries {
+		if entries[i].ComparacaoID == entry.ComparacaoID {
+			entries[i] = entry
+			return s.writeJSON(gameplayFeedbackFile(entry.Ciclo), entries)
+		}
+	}
+	entries = append(entries, entry)
+	return s.writeJSON(gameplayFeedbackFile(entry.Ciclo), entries)
+}
+
+func (s *JSONStore) ListMetaProposals(ctx context.Context, cycle string) ([]domain.PropostaMeta, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.PropostaMeta
+	if err := s.readJSON(metaProposalsFile(cycle), &entries); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].CriadaEm > entries[j].CriadaEm })
+	return entries, nil
+}
+
+func (s *JSONStore) SaveMetaProposal(ctx context.Context, proposal domain.PropostaMeta) error {
+	if err := proposal.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.PropostaMeta
+	if err := s.readJSON(metaProposalsFile(proposal.Ciclo), &entries); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for i := range entries {
+		if entries[i].ID != proposal.ID {
+			continue
+		}
+		if entries[i].Pacote != proposal.Pacote {
+			return fmt.Errorf("proposta %q tentou trocar o pacote imutável", proposal.ID)
+		}
+		entries[i] = proposal
+		return s.writeJSON(metaProposalsFile(proposal.Ciclo), entries)
+	}
+	entries = append(entries, proposal)
+	return s.writeJSON(metaProposalsFile(proposal.Ciclo), entries)
 }
 
 func (s *JSONStore) PreviousClub(ctx context.Context, gamerTag, cycle string) (domain.Club, bool, error) {
@@ -752,6 +840,8 @@ func evolutionAnalysesFile(cycle string) string { return "evolution_analyses_" +
 
 func savedEvolutionPathsFile(cycle string) string { return "evolution_paths_" + cycle + ".json" }
 
+func savedSquadPlansFile(cycle string) string { return "squad_plans_" + cycle + ".json" }
+
 func (s *JSONStore) ListSavedEvolutionPaths(ctx context.Context, cycle string) ([]domain.SavedEvolutionPath, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -805,6 +895,75 @@ func (s *JSONStore) DeleteSavedEvolutionPath(ctx context.Context, cycle, id stri
 		}
 	}
 	return s.writeJSON(savedEvolutionPathsFile(cycle), kept)
+}
+
+func (s *JSONStore) ListSavedSquadPlans(ctx context.Context, cycle, club string) ([]domain.PlanoElencoSalvo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.PlanoElencoSalvo
+	if err := s.readJSON(savedSquadPlansFile(cycle), &entries); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]domain.PlanoElencoSalvo, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Clube == club {
+			out = append(out, entry)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Referencia != out[j].Referencia {
+			return out[i].Referencia
+		}
+		return out[i].AtualizadoEm.After(out[j].AtualizadoEm)
+	})
+	return out, nil
+}
+
+func (s *JSONStore) SaveSquadPlan(ctx context.Context, plan domain.PlanoElencoSalvo) error {
+	if err := plan.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.PlanoElencoSalvo
+	if err := s.readJSON(savedSquadPlansFile(plan.Ciclo), &entries); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if plan.CriadoEm.IsZero() {
+		plan.CriadoEm = time.Now()
+	}
+	if plan.AtualizadoEm.IsZero() {
+		plan.AtualizadoEm = plan.CriadoEm
+	}
+	for i := range entries {
+		if entries[i].ID == plan.ID && entries[i].Clube == plan.Clube {
+			entries[i] = plan
+			return s.writeJSON(savedSquadPlansFile(plan.Ciclo), entries)
+		}
+	}
+	return s.writeJSON(savedSquadPlansFile(plan.Ciclo), append(entries, plan))
+}
+
+func (s *JSONStore) DeleteSavedSquadPlan(ctx context.Context, cycle, club, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []domain.PlanoElencoSalvo
+	if err := s.readJSON(savedSquadPlansFile(cycle), &entries); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	kept := entries[:0]
+	for _, entry := range entries {
+		if entry.ID != id || entry.Clube != club {
+			kept = append(kept, entry)
+		}
+	}
+	return s.writeJSON(savedSquadPlansFile(cycle), kept)
 }
 
 // ListEvolutionAnalyses devolve resultados do mesmo hash do pedido mais

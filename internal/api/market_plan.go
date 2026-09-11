@@ -115,6 +115,73 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// WatchlistRow é uma entrada da watchlist com a carta e o preço já
+// resolvidos contra o snapshot — a tela "Vigiadas" não devia fazer esse
+// cruzamento sozinha (a EAID é o único vínculo, e o mesmo EAID some do
+// mercado quando a carta sai de circulação).
+type WatchlistRow struct {
+	Entry domain.WatchlistEntry `json:"entry"`
+	// Player é nil quando a carta não está nem no mercado nem no clube
+	// deste snapshot — a EAID ainda é válida, só não foi vista hoje.
+	Player        *domain.Player     `json:"player,omitempty"`
+	Series        []store.PricePoint `json:"series"`
+	HistoryStatus string             `json:"history_status"`
+	Trend         store.PriceTrend   `json:"trend"`
+	HasTrend      bool               `json:"has_trend"`
+}
+
+type watchlistCollectionResponse struct {
+	Value []WatchlistRow `json:"value"`
+	Count int            `json:"@odata.count"`
+}
+
+// handleWatchlistList não pagina/filtra por OData de propósito — a
+// watchlist é sempre pequena (é uma lista que a própria pessoa monta), e a
+// tela de Hoje/Mercado quer a lista inteira, não uma página.
+func (s *Server) handleWatchlistList(w http.ResponseWriter, r *http.Request) {
+	snap, ok := s.load(w, r)
+	if !ok {
+		return
+	}
+	entries, err := s.Store.ListWatchlist(r.Context(), s.Cycle)
+	if err != nil {
+		http.Error(w, "lendo watchlist local: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	byID := make(map[int64]domain.Player, len(snap.Market)+len(snap.Club.Players))
+	for _, player := range snap.Market {
+		byID[player.ID] = player
+	}
+	for _, player := range snap.Club.Players {
+		if _, exists := byID[player.ID]; !exists {
+			byID[player.ID] = player.Player
+		}
+	}
+	ids := make([]int64, len(entries))
+	for i, e := range entries {
+		ids[i] = e.EAID
+	}
+	series, seriesErr := s.Store.PriceSeries(r.Context(), s.Cycle, ids, priceSeriesWindow)
+
+	rows := make([]WatchlistRow, 0, len(entries))
+	for _, entry := range entries {
+		trend, hasTrend := snap.Trends[entry.EAID]
+		row := WatchlistRow{Entry: entry, Trend: trend, HasTrend: hasTrend}
+		if player, found := byID[entry.EAID]; found {
+			p := player
+			row.Player = &p
+		}
+		var pts []store.PricePoint
+		if seriesErr == nil {
+			pts = series[entry.EAID]
+		}
+		row.Series = pts
+		row.HistoryStatus = priceHistoryStatus(pts, seriesErr)
+		rows = append(rows, row)
+	}
+	writeJSON(w, watchlistCollectionResponse{Value: rows, Count: len(rows)})
+}
+
 func (s *Server) handleWatchlistCreate(w http.ResponseWriter, r *http.Request) {
 	var entry domain.WatchlistEntry
 	if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {

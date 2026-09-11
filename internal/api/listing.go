@@ -71,6 +71,10 @@ type startersCollectionResponse struct {
 type reservasCollectionResponse struct {
 	query.Page[RosterCard]
 	MinimumRating int `json:"@eafc.minimum_rating"`
+	// PriceSeries/PriceHistoryStatus cobrem só a página devolvida em Value —
+	// mesmo padrão de MercadoCollection.@eafc.price_series.
+	PriceSeries        map[int64][]store.PricePoint `json:"@eafc.price_series"`
+	PriceHistoryStatus map[int64]string             `json:"@eafc.price_history_status"`
 }
 
 type investimentosCollectionResponse struct {
@@ -204,8 +208,8 @@ func (s *Server) handleTitulares(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	quimicaPorCarta := chemistryByPlayer(s.currentChemistry(snap))
-	starters, formation := buildStarters(snap, quimicaPorCarta)
+	quimicaPorVaga := chemistryBySlot(s.currentChemistry(snap))
+	starters, formation := buildStarters(snap, quimicaPorVaga)
 	page, ok := serveList(w, r, startersSchema(), starters)
 	if !ok {
 		return
@@ -218,9 +222,11 @@ func (s *Server) handleReservas(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	starters := map[int64]bool{}
+	starters := map[string]bool{}
 	for _, slot := range snap.Club.Squad.Starters {
-		starters[slot.PlayerID] = true
+		if player, ok := snap.Club.PlayerForSlot(slot); ok {
+			starters[player.IdentityKey()] = true
+		}
 	}
 	players := filteredBench(snap.Club.Players, starters, httptestRequestWithoutLegacyFilters(r))
 	rows := make([]RosterCard, 0, len(players))
@@ -232,7 +238,35 @@ func (s *Server) handleReservas(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, reservasCollectionResponse{Page: page, MinimumRating: benchMinimumRating})
+
+	pagePlayers := make([]domain.ClubPlayer, len(page.Value))
+	ids := make([]int64, len(page.Value))
+	for i, row := range page.Value {
+		pagePlayers[i] = row.Player
+		ids[i] = row.Player.ID
+	}
+	leituras := s.leituraByPlayer(r.Context(), snap, pagePlayers)
+	for i, row := range page.Value {
+		if l, ok := leituras[leituraPlayerKey(row.Player)]; ok {
+			page.Value[i].Leitura = &l
+		}
+	}
+	series, seriesErr := s.Store.PriceSeries(r.Context(), s.Cycle, ids, priceSeriesWindow)
+	priceSeries := make(map[int64][]store.PricePoint, len(ids))
+	priceStatus := make(map[int64]string, len(ids))
+	for _, id := range ids {
+		var pts []store.PricePoint
+		if seriesErr == nil {
+			pts = series[id]
+		}
+		priceSeries[id] = pts
+		priceStatus[id] = priceHistoryStatus(pts, seriesErr)
+	}
+
+	writeJSON(w, reservasCollectionResponse{
+		Page: page, MinimumRating: benchMinimumRating,
+		PriceSeries: priceSeries, PriceHistoryStatus: priceStatus,
+	})
 }
 
 // filteredBench recebe a requisição para manter a compatibilidade da função
@@ -288,14 +322,14 @@ func (lookup cardSlugLookup) report(player domain.ClubPlayer) (cards.CardReport,
 	return cards.CardReport{}, false
 }
 
-func buildStarters(snap store.Snapshot, quimicaPorCarta map[int64]chemistry.Jogador) ([]StarterCard, string) {
+func buildStarters(snap store.Snapshot, quimicaPorVaga map[int]chemistry.Jogador) ([]StarterCard, string) {
 	lookup := newCardSlugLookup(snap.Cards)
 	main := reportMainSquad(snap.Club)
 	starters := make([]StarterCard, 0, len(main))
 	for _, card := range main {
 		rating, _ := card.Player.GGRatingAt(card.Position)
 		sc := StarterCard{RosterCard: RosterCard{Player: card.Player, CardSlug: lookup.slug(card.Player)}, Index: card.Index, Position: card.Position, PositionGGRating: rating}
-		if j, ok := quimicaPorCarta[card.Player.ID]; ok {
+		if j, ok := quimicaPorVaga[card.Index]; ok {
 			sc.Quimica = &j
 		}
 		starters = append(starters, sc)
@@ -460,7 +494,7 @@ func (s *Server) handleHistorico(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.load(w, r); !ok {
 		return
 	}
-	items, err := s.Store.SnapshotHistory(r.Context(), s.Cycle, s.History)
+	items, err := s.snapshotHistory(r.Context(), s.History)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

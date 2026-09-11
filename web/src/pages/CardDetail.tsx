@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tooltip } from "recharts";
-import { ApiError, fetchCard, fetchEvolutionPlan, saveEvolutionProgress } from "../api";
+import { ApiError, fetchCard, fetchEvolutionPlan, saveEvolutionPath, saveEvolutionProgress } from "../api";
 import { asyncGate } from "../components/asyncGate";
 import Chip from "../components/Chip";
-import GGRating from "../components/GGRating";
+import { formatGGRating } from "../components/GGRating";
 import TrendChart from "../components/TrendChart";
 import { formatCoins, formatDate, formatSigned, styleNames } from "../format";
 import { useData } from "../useData";
@@ -40,7 +40,7 @@ function RadarTooltip({ active, payload, label }: { active?: boolean; payload?: 
 function RadarFace({ p }: { p: CardDetailResponse["player"] }) {
   const a = p.attributes;
   const data = [{ name: p.position === "GK" ? "DIV" : "PAC", value: a.pace }, { name: p.position === "GK" ? "HAN" : "SHO", value: a.shooting }, { name: p.position === "GK" ? "KIC" : "PAS", value: a.passing }, { name: p.position === "GK" ? "REF" : "DRI", value: a.dribbling }, { name: p.position === "GK" ? "SPD" : "DEF", value: a.defending }, { name: p.position === "GK" ? "POS" : "PHY", value: a.physical }];
-  return <div className="detail-radar" aria-label="Radar dos seis atributos principais"><ResponsiveContainer width="100%" height={280}><RadarChart data={data}><PolarGrid stroke="var(--detail-chart-grid, var(--rule))"/><PolarAngleAxis dataKey="name" stroke="var(--ink-2)"/><Radar dataKey="value" stroke="var(--turf)" fill="var(--turf)" fillOpacity={0.32}/><Tooltip content={<RadarTooltip/>}/></RadarChart></ResponsiveContainer></div>;
+  return <div className="detail-radar" aria-label="Radar dos seis atributos principais"><ResponsiveContainer width="100%" height={240}><RadarChart data={data}><PolarGrid stroke="var(--rule-soft)"/><PolarAngleAxis dataKey="name" stroke="var(--ink-2)"/><Radar dataKey="value" stroke="var(--turf)" fill="var(--turf)" fillOpacity={0.28}/><Tooltip content={<RadarTooltip/>}/></RadarChart></ResponsiveContainer><div className="detail-radar-grid">{data.map(item => <div key={item.name}><span>{item.name}</span><strong>{item.value ?? "—"}</strong></div>)}</div></div>;
 }
 
 function AttributeGroups({ attrs, keeper }: { attrs?: DetailedAttributes; keeper: boolean }) {
@@ -62,14 +62,58 @@ function PlayStyleGallery({ p, catalog, recommendation }: { p: CardDetailRespons
   const recommended = new Set((recommendation?.styles ?? []).map(style => style.name.toLowerCase()));
   const categories = [...new Set((catalog ?? []).map(item => item.category || "Outros"))];
   const items: PlayStyleDefinition[] = catalog?.length ? catalog : current.map(style => ({ ea_id: style.ea_id ?? 0, name: style.name, category: "Presentes" }));
-  return <div className="detail-playstyles"><div className="detail-source-note">{recommendation?.source === "bot" ? "Sugestão do bot · baseada na posição e nas funções da carta" : "Recomendação oficial do fut.gg"}</div>{(categories.length ? categories : ["Presentes"]).map(category => <div className="detail-playstyle-category" key={category}><h3>{category}</h3><div className="detail-ps-grid">{items.filter(item => (item.category || "Outros") === category).map(item => { const actual = currentByName.get(item.name.toLowerCase()); const isRecommended = recommended.has(item.name.toLowerCase()); return <button type="button" className={`detail-ps ${actual ? "is-present" : "is-muted"} ${isRecommended ? "is-recommended" : ""}`} key={`${item.ea_id}-${item.name}`} aria-pressed={selected?.name === item.name} onClick={() => setSelected(item)}><span className="detail-ps-icon">{item.image_url ? <img src={item.image_url} alt="" loading="lazy"/> : "✦"}</span><span>{item.name}{actual?.plus ? " +" : ""}</span>{isRecommended && <small>indicado</small>}</button>; })}</div></div>)}{selected && <aside className="detail-ps-detail" aria-live="polite"><div>{selected.image_url ? <img src={selected.image_url} alt=""/> : <span className="detail-ps-detail-fallback">✦</span>}</div><div><h3>{selected.name}{currentByName.get(selected.name.toLowerCase())?.plus ? " +" : ""}</h3><p>{currentByName.get(selected.name.toLowerCase())?.plus ? selected.plus_description || selected.description || "PlayStyle+ presente nesta carta." : selected.description || "Descrição indisponível no catálogo atual."}</p></div></aside>}</div>;
+  return <div className="detail-playstyles-grid"><div className="detail-playstyles">
+    <div className="detail-source-note">{recommendation?.source === "bot" ? "Sugestão do bot · baseada na posição e nas funções da carta" : "Recomendação oficial do fut.gg"}</div>
+    {(categories.length ? categories : ["Presentes"]).map(category => <div className="detail-playstyle-category" key={category}><h3>{category}</h3><div className="detail-ps-grid">{items.filter(item => (item.category || "Outros") === category).map(item => { const actual = currentByName.get(item.name.toLowerCase()); const isRecommended = recommended.has(item.name.toLowerCase()); return <button type="button" className={`detail-ps ${actual ? "is-present" : "is-muted"} ${isRecommended ? "is-recommended" : ""}`} key={`${item.ea_id}-${item.name}`} aria-pressed={selected?.name === item.name} onClick={() => setSelected(item)}><span className="detail-ps-icon">{item.image_url ? <img src={item.image_url} alt="" loading="lazy"/> : "✦"}</span><span>{item.name}{actual?.plus ? " +" : ""}</span>{isRecommended && <small>indicado</small>}</button>; })}</div></div>)}
+    <div className="detail-ps-legend"><span><i className="tone-present"/>presente</span><span><i className="tone-recommended"/>indicado para a posição</span><span><i className="tone-absent"/>ausente</span></div>
+  </div>
+  {selected && <aside className="detail-ps-detail" aria-live="polite"><div className="detail-ps-detail-icon">{selected.image_url ? <img src={selected.image_url} alt=""/> : <span className="detail-ps-detail-fallback">✦</span>}</div><div><h3>{selected.name}{currentByName.get(selected.name.toLowerCase())?.plus ? " +" : ""}</h3><p>{currentByName.get(selected.name.toLowerCase())?.plus ? selected.plus_description || selected.description || "PlayStyle+ presente nesta carta." : selected.description || "Descrição indisponível no catálogo atual."}</p><div className="detail-ps-detail-source">{currentByName.get(selected.name.toLowerCase()) ? "Presente nesta carta." : "Ausente nesta carta."} Descrição do catálogo do fut.gg.</div></div></aside>}</div>;
 }
 
-function Path({ potential }: { potential: EvoPotential }) { return <div className="detail-potential"><div className="detail-potential-head"><strong>{potential.final_overall} · GG final {potential.final_gg_rating.toFixed(1)}</strong><Chip tone="gain">{formatSigned(potential.gg_rating_gain)} GG ganho</Chip></div><div>{potential.coin_cost ? formatCoins(potential.coin_cost) : "grátis"}{potential.point_cost ? ` · ${potential.point_cost} pontos` : ""}</div><p>{potential.gained_play_styles?.length ? `Novos PlayStyles: ${styleNames(potential.gained_play_styles)}` : ""}</p></div>; }
+function Path({ potential }: { potential: EvoPotential }) { return <div className="detail-potential"><div className="detail-potential-head"><strong>{potential.final_overall} · GG final {potential.final_gg_rating.toFixed(1)}</strong><Chip tone="turf">{formatSigned(potential.gg_rating_gain)} GG ganho</Chip></div><div className="detail-potential-cost">{potential.coin_cost ? formatCoins(potential.coin_cost) : "grátis"}{potential.point_cost ? ` · ${potential.point_cost} pontos` : ""}</div>{potential.gained_play_styles?.length ? <p>Novos PlayStyles: {styleNames(potential.gained_play_styles)}</p> : null}</div>; }
+
+// BestPathCard é o "melhor caminho" em destaque — comparação agora→final,
+// PlayStyles ganhos, e o único botão que grava algo de verdade (salvar path
+// local via best_path_id, o MESMO id que /api/evolucoes/caminhos usa: ver
+// comentário de CardDetailResponse.BestPathID em internal/api/api.go). Nunca
+// "evoluir" — o bot não toca a conta EA, então nenhum botão pode ler como se
+// aplicasse a evolução no jogo.
+function BestPathCard({ p, best, pathID, pathSaved, alternates }: { p: CardDetailResponse["player"]; best: EvoPotential; pathID?: string; pathSaved?: boolean; alternates: EvoPotential[] }) {
+  const [saved, setSaved] = useState(!!pathSaved);
+  const [saving, setSaving] = useState(false);
+  const [showAlternates, setShowAlternates] = useState(false);
+  useEffect(() => { setSaved(!!pathSaved); }, [pathID, pathSaved]);
+
+  const save = async () => {
+    if (!pathID || saved || saving) return;
+    setSaving(true);
+    try { await saveEvolutionPath(pathID); setSaved(true); } catch { /* botão volta a ficar clicável */ } finally { setSaving(false); }
+  };
+
+  return <section className="panel detail-best-path" id="melhor-caminho">
+    <div className="panel-head"><span>Melhor caminho</span><Chip tone="turf">GG {best.final_gg_rating.toFixed(1)}</Chip></div>
+    <div className="panel-body">
+      <div className="detail-best-path-row">
+        <span className="detail-best-path-cell"><small>agora</small><strong>{p.rating} · {formatGGRating(p.gg_rating)}</strong></span>
+        <span className="detail-best-path-arrow" aria-hidden="true">→</span>
+        <span className="detail-best-path-cell is-gain"><small>final</small><strong>{best.final_overall} · {best.final_gg_rating.toFixed(1)}</strong></span>
+        <span className="detail-best-path-cell is-gain detail-best-path-gain"><small>ganho</small><strong>{formatSigned(best.gg_rating_gain)}</strong></span>
+      </div>
+      <div className="detail-best-path-cost"><span className="coin">{best.coin_cost ? formatCoins(best.coin_cost) : "grátis"}</span>{best.point_cost ? ` · ${best.point_cost} pontos` : ""}{best.training_time ? ` · ${best.training_time}` : ""}</div>
+      {!!best.gained_play_styles?.length && <div className="detail-best-path-styles">{best.gained_play_styles.map(style => <Chip tone="turf" key={style.name}>{style.name}{style.plus ? "+" : ""}</Chip>)}</div>}
+      <div className="detail-best-path-actions">
+        <button type="button" className="btn primary" disabled={!pathID || saved || saving} onClick={save}>{saved ? "path salvo" : saving ? "salvando…" : "salvar path"}</button>
+        {alternates.length > 0 && <button type="button" className="btn ghost" onClick={() => setShowAlternates(v => !v)}>alternativas · {alternates.length}</button>}
+      </div>
+      {!pathID && <p className="detail-helper">Salvar path pede uma carta 88+ (mesmo piso da Análise de evoluções).</p>}
+      {showAlternates && <div className="detail-best-path-alternates">{alternates.map((alt, index) => <Path key={index} potential={alt} />)}</div>}
+    </div>
+  </section>;
+}
 
 // TransitionCard mostra UMA aresta do grafo confirmado — não só o "melhor"
-// caminho (isso já é o Path acima), a estrutura inteira: branch/rejoin são
-// calculados aqui, no cliente, contando quantas transições do MESMO grafo
+// caminho (isso já é o BestPathCard acima), a estrutura inteira: branch/rejoin
+// são calculados aqui, no cliente, contando quantas transições do MESMO grafo
 // compartilham from/to (o JSON só traz nós+arestas crus, sem esses flags).
 function TransitionCard({ transition, graph, transitions, completed, onToggle }: { transition: EvolutionGraphTransition; graph: EvolutionGraph; transitions: EvolutionGraphTransition[]; completed: string[]; onToggle: (name: string, checked: boolean) => void }) {
   const from = graph.nodes?.[transition.from];
@@ -77,13 +121,19 @@ function TransitionCard({ transition, graph, transitions, completed, onToggle }:
   const isBranch = transitions.filter((t) => t.from === transition.from).length > 1;
   const isRejoin = transitions.filter((t) => t.to === transition.to).length > 1;
   const done = completed.includes(transition.evolution);
-  return <div className="detail-potential evo-transition"><div className="detail-potential-head"><strong>{from?.card.rating ?? "?"} → {to?.card.rating ?? "?"}{to?.card.gg_rating ? ` · GG final ${to.card.gg_rating.toFixed(1)}` : ""}</strong><Chip tone={transition.is_expired ? "alert" : "coin"}>{transition.coin_cost ? formatCoins(transition.coin_cost) : "grátis"}</Chip></div><p className="evo-transition-name">{transition.evolution}</p><div className="evo-transition-badges">{isBranch && <Chip tone="flat">ramificação</Chip>}{isRejoin && <Chip tone="flat">reencontro</Chip>}{transition.lab && <Chip tone="flat">Lab</Chip>}{transition.repeatable && <Chip tone="flat">repetível</Chip>}{transition.is_expired && <Chip tone="alert">expirada</Chip>}</div><div>{transition.training_time || "tempo não informado"}{transition.point_cost ? ` · ${transition.point_cost} pontos` : ""}</div><label className="evo-transition-done"><input type="checkbox" checked={done} onChange={(event) => onToggle(transition.evolution, event.target.checked)} /> já concluí</label></div>;
+  return <div className={`evo-transition ${transition.is_expired ? "is-expired" : ""} ${done ? "is-done" : ""}`}>
+    <div className="detail-potential-head"><strong>{from?.card.rating ?? "?"} → {to?.card.rating ?? "?"}</strong><Chip tone={transition.is_expired ? "alert" : "coin"}>{transition.coin_cost ? formatCoins(transition.coin_cost) : "grátis"}</Chip></div>
+    <p className="evo-transition-name">{transition.evolution}</p>
+    <div className="evo-transition-meta">{to?.card.gg_rating ? `GG final ${to.card.gg_rating.toFixed(1)} · ` : ""}{transition.training_time || "tempo não informado"}{transition.point_cost ? ` · ${transition.point_cost} pontos` : ""}</div>
+    <div className="evo-transition-badges">{isBranch && <Chip tone="flat">ramificação</Chip>}{isRejoin && <Chip tone="flat">reencontro</Chip>}{transition.lab && <Chip tone="flat">Lab</Chip>}{transition.repeatable && <Chip tone="flat">repetível</Chip>}{transition.is_expired && <Chip tone="alert">expirada</Chip>}</div>
+    <label className={`evo-transition-done ${transition.is_expired ? "is-disabled" : ""}`}><input type="checkbox" checked={done} disabled={transition.is_expired} onChange={(event) => onToggle(transition.evolution, event.target.checked)} /> já concluí</label>
+  </div>;
 }
 
 // EvolutionWorkbench é a visão estrutural completa do grafo, ao lado da
-// visão "recomendado" (Path/Best/Alternates acima, já filtrada por ganho).
-// Seção secundária: qualquer falha de rede fica silenciosa aqui — Best/
-// Alternates já cobrem o essencial da tela.
+// visão "recomendado" (BestPathCard acima, já filtrada por ganho). Painel
+// próprio (renderiza seu próprio .panel ou nada): qualquer falha de rede
+// fica silenciosa aqui — o melhor caminho já cobre o essencial da tela.
 function EvolutionWorkbench({ slug }: { slug: string }) {
   const { data: plan, loading, error } = useData(() => fetchEvolutionPlan(slug), [slug]);
   const [completed, setCompleted] = useState<string[]>([]);
@@ -105,13 +155,22 @@ function EvolutionWorkbench({ slug }: { slug: string }) {
   const transitions = graph?.transitions ?? [];
   const estimated = plan.estimated_only ?? [];
   if (transitions.length === 0 && estimated.length === 0 && plan.status !== "fetch_error") return null;
+  const doneCount = transitions.filter((t) => completed.includes(t.evolution)).length;
 
-  return <div className="evo-workbench">
-    <h3>Workbench — todos os ramos</h3>
-    {plan.status === "fetch_error" && <div className="empty">Falha ao confirmar caminhos nesta coleta{plan.error ? `: ${plan.error}` : "."}</div>}
-    {graph && transitions.length > 0 && <div className="evo-transition-grid">{transitions.map((transition, index) => <TransitionCard key={`${transition.from}-${transition.to}-${index}`} transition={transition} graph={graph} transitions={transitions} completed={completed} onToggle={toggle} />)}</div>}
-    {estimated.length > 0 && <div className="evo-estimated"><h4>Elegível pelas regras, sem caminho confirmado pelo fut.gg</h4><ul>{estimated.map((item) => <li key={item.evolution.id}><strong>{item.evolution.name}</strong> · {item.acquisition}{item.status === "fetch_error" ? " (não foi possível confirmar nesta coleta)" : ""}</li>)}</ul></div>}
-  </div>;
+  return <section className="panel detail-workbench">
+    <div className="panel-head">
+      <span>Workbench <span className="panel-head-sub">/ todos os ramos</span></span>
+      <span className="detail-workbench-meta">
+        {transitions.length > 0 && <span className="panel-head-meta">{transitions.length} transiç{transitions.length === 1 ? "ão" : "ões"} confirmada{transitions.length === 1 ? "" : "s"}</span>}
+        {doneCount > 0 && <span className="panel-head-meta is-turf">{doneCount} concluída{doneCount === 1 ? "" : "s"}</span>}
+      </span>
+    </div>
+    <div className="panel-body">
+      {plan.status === "fetch_error" && <div className="empty">Falha ao confirmar caminhos nesta coleta{plan.error ? `: ${plan.error}` : "."}</div>}
+      {graph && transitions.length > 0 && <div className="evo-transition-grid">{transitions.map((transition, index) => <TransitionCard key={`${transition.from}-${transition.to}-${index}`} transition={transition} graph={graph} transitions={transitions} completed={completed} onToggle={toggle} />)}</div>}
+      {estimated.length > 0 && <div className="evo-estimated"><h4>Elegível pelas regras, sem caminho confirmado pelo fut.gg</h4><ul>{estimated.map((item) => <li key={item.evolution.id}><strong>{item.evolution.name}</strong> · {item.acquisition}{item.status === "fetch_error" ? " (não foi possível confirmar nesta coleta)" : ""}</li>)}</ul></div>}
+    </div>
+  </section>;
 }
 
 export default function CardDetail() {
@@ -127,9 +186,102 @@ export default function CardDetail() {
   if (p.gg_rating && p.gg_rating_pos && !ratings[p.gg_rating_pos]) ratings[p.gg_rating_pos] = p.gg_rating;
   const bestPosition = positions.reduce<Position | null>((best, position) => !best || (ratings[position] ?? 0) > (ratings[best] ?? 0) ? position : best, null) ?? p.position;
   const activePosition = selectedPosition && positions.includes(selectedPosition) ? selectedPosition : bestPosition;
-  const activeRating = ratings[activePosition] ?? (p.gg_rating_pos === activePosition ? p.gg_rating : undefined);
   const recommendation = report.play_style_recommendations?.find(item => item.position === activePosition);
   const pricePoints = (report.price_series ?? []).filter(point => point.coins > 0).sort((a, b) => a.observed_at.localeCompare(b.observed_at)).map(point => ({ label: formatDate(point.observed_at), value: point.coins }));
   const stats = p.club_stats;
-  return <div className="wrap detail-page"><Link className="back-link" to="/time">← voltar para o time</Link><div className="detail-layout"><aside className="detail-sidebar"><div className="detail-hero">{p.image_url && <img src={p.image_url} alt={`Arte de ${p.common_name || p.name}`}/>}<div><h1>{p.common_name || p.name}</h1><p>{p.version} · {p.club}</p><div className="detail-hero-ratings"><Chip tone="flat">EA {p.rating}</Chip><GGRating current={p.gg_rating} currentPosition={p.gg_rating_pos} positional={activeRating} positionalPosition={activePosition} variant="detail" /></div></div></div><section><h2>Nota por posição</h2><PositionPicker positions={positions} selected={activePosition} ratings={ratings} onSelect={setSelectedPosition}/><p className="detail-helper">A nota EA da carta é {p.rating}. A GG atual identifica esta cópia do clube; a nota posicional vem da referência do fut.gg e pode ser compartilhada entre cópias da mesma carta.</p></section><section><h2>Ficha</h2><dl className="detail-facts"><div><dt>Liga</dt><dd>{p.league || "—"}</dd></div><div><dt>Nação</dt><dd>{p.nation || "—"}</dd></div><div><dt>Altura</dt><dd>{p.height_cm ? `${p.height_cm} cm` : "—"}</dd></div><div><dt>Pé</dt><dd>{p.foot || "—"}</dd></div><div><dt>AcceleRATE</dt><dd>{p.accelerate_type || "não informado"}</dd></div><div><dt>Coleta</dt><dd>{formatDate(report.generated_at)}</dd></div></dl><div className="detail-star-grid"><Stars value={p.skill_moves} label="Habilidades"/><Stars value={p.weak_foot} label="Pé fraco"/></div></section><section><h2>No clube</h2><p>{p.untradeable ? "Intransferível" : "Transferível"}{p.in_squad ? " · no time titular" : ""}</p>{stats && <div className="detail-stat-grid">{[["Jogos", stats.games], ["Gols", stats.goals], ["Assistências", stats.assists]].map(([label, value]) => <div key={label as string}><strong>{value ?? "—"}</strong><span>{label}</span></div>)}</div>}</section></aside><main className="detail-main"><section><div className="detail-section-heading"><div><span className="detail-kicker">ANÁLISE VISUAL</span><h2>Atributos principais</h2></div><span className="detail-selection">Posição: {activePosition}</span></div><RadarFace p={{ ...p, position: activePosition }}/><AttributeGroups attrs={p.detailed_attributes} keeper={activePosition === "GK"}/></section><section><div className="detail-section-heading"><div><span className="detail-kicker">FUNÇÕES</span><h2>PlayStyles para {activePosition}</h2></div>{recommendation?.role && <span className="detail-selection">Role: {recommendation.role}</span>}</div><PlayStyleGallery p={p} catalog={report.play_style_catalog} recommendation={recommendation}/></section><section><div className="detail-section-heading"><div><span className="detail-kicker">MERCADO</span><h2>Referência de mercado</h2></div><span className="detail-selection">{report.price_history_status}</span></div>{pricePoints.length > 1 ? <TrendChart data={pricePoints} valueFormatter={formatCoins} height={220}/> : <div className="empty">Histórico insuficiente para desenhar tendência; não representa preço ao vivo.</div>}</section><section><h2>Evolução</h2>{report.best ? <Path potential={report.best}/> : <div className="empty">{report.evolution_status === "not_checked" ? "Ainda não verificada para esta carta." : "Nenhum caminho confirmado nesta coleta."}</div>}{(report.alternates ?? []).map((potential, index) => <Path key={index} potential={potential}/>)}<EvolutionWorkbench slug={slug} /></section>{(report.related_cards ?? []).length > 0 && <section><h2>Outras cartas deste atleta no clube</h2><div className="detail-related">{report.related_cards?.map(card => <Link key={card.card_slug} to={`/time/${card.card_slug}`}>{card.player.rating} {card.player.position} · {card.player.version}</Link>)}</div></section>}</main></div></div>;
+  const alternates = report.alternates ?? [];
+
+  return <div className="wrap detail-page">
+    <Link className="back-link" to="/time">← voltar para o time</Link>
+
+    <div className="detail-hero">
+      <div className="detail-hero-thumb">{p.image_url ? <img src={p.image_url} alt={`Arte de ${p.common_name || p.name}`}/> : <span className="detail-hero-thumb-fallback">arte<br/>fut.gg</span>}</div>
+      <div className="detail-hero-id">
+        <div className="detail-hero-chips">
+          <span className="detail-hero-version">{p.version}{p.club ? ` · ${p.club}` : ""}</span>
+          <Chip tone="flat">EA {p.rating}</Chip>
+          <Chip tone="flat">{p.untradeable ? "intransferível" : "transferível"}</Chip>
+          <Chip tone="flat">{p.in_squad ? "titular" : "banco"}</Chip>
+        </div>
+        <h1>{p.common_name || p.name}</h1>
+      </div>
+      <div className="detail-hero-scores">
+        <div className="detail-hero-score">
+          <span>GG atual · esta cópia</span>
+          <strong>{formatGGRating(p.gg_rating)}</strong>
+          <small>{p.gg_rating_pos || p.position}</small>
+        </div>
+        {report.best && <div className="detail-hero-score is-potential">
+          <span>Potencial · evolução</span>
+          <strong>{report.best.final_gg_rating.toFixed(1)}</strong>
+          <small>{formatSigned(report.best.gg_rating_gain)} GG</small>
+        </div>}
+        <div className="detail-hero-actions">
+          {report.best ? <a className="btn primary" href="#melhor-caminho">ver melhor caminho</a> : <span className="hint">sem caminho de evolução confirmado nesta coleta</span>}
+          <Link className="btn ghost" to="/mercado">comparar no mercado</Link>
+        </div>
+      </div>
+    </div>
+
+    <div className="detail-layout">
+      <aside className="detail-sidebar">
+        <section className="panel">
+          <div className="panel-head"><span>Nota por posição</span><span className="panel-head-meta">fut.gg</span></div>
+          <div className="panel-body">
+            <PositionPicker positions={positions} selected={activePosition} ratings={ratings} onSelect={setSelectedPosition}/>
+            <p className="detail-helper">A nota EA da carta é {p.rating}. A GG atual identifica esta cópia do clube; a nota posicional vem da referência do fut.gg e pode ser compartilhada entre cópias da mesma carta.</p>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-head">Ficha</div>
+          <div className="panel-body">
+            <dl className="detail-facts"><div><dt>Liga</dt><dd>{p.league || "—"}</dd></div><div><dt>Nação</dt><dd>{p.nation || "—"}</dd></div><div><dt>Altura</dt><dd>{p.height_cm ? `${p.height_cm} cm` : "—"}</dd></div><div><dt>Pé</dt><dd>{p.foot || "—"}</dd></div><div><dt>AcceleRATE</dt><dd>{p.accelerate_type || "não informado"}</dd></div><div><dt>Coleta</dt><dd>{formatDate(report.generated_at)}</dd></div></dl>
+            <div className="detail-star-grid"><Stars value={p.skill_moves} label="Habilidades"/><Stars value={p.weak_foot} label="Pé fraco"/></div>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-head"><span>No clube</span><span className="panel-head-meta">{p.untradeable ? "intransferível" : "transferível"} · {p.in_squad ? "titular" : "banco"}</span></div>
+          <div className="panel-body">
+            {stats && <div className="detail-stat-grid">{[["Jogos", stats.games], ["Gols", stats.goals], ["Assistências", stats.assists]].map(([label, value]) => <div key={label as string}><strong>{value ?? "—"}</strong><span>{label}</span></div>)}</div>}
+          </div>
+        </section>
+
+        {(report.related_cards ?? []).length > 0 && <section className="panel">
+          <div className="panel-head">Outras cartas deste atleta no clube</div>
+          <div className="detail-related-list">{report.related_cards?.map(card => <Link key={card.card_slug} to={`/time/${card.card_slug}`}><Chip tone="flat">{card.player.rating}</Chip><span>{card.player.position} · {card.player.version}</span></Link>)}</div>
+        </section>}
+      </aside>
+
+      <main className="detail-main">
+        <section className="panel">
+          <div className="panel-head"><span>Atributos principais <span className="panel-head-sub">/ posição {activePosition}</span></span><span className="panel-head-meta">subatributos da coleta</span></div>
+          <div className="panel-body detail-attrs-grid">
+            <RadarFace p={{ ...p, position: activePosition }}/>
+            <AttributeGroups attrs={p.detailed_attributes} keeper={activePosition === "GK"}/>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-head"><span>PlayStyles para {activePosition}</span>{recommendation?.role && <span className="panel-head-meta">Role: {recommendation.role}</span>}</div>
+          <div className="panel-body"><PlayStyleGallery p={p} catalog={report.play_style_catalog} recommendation={recommendation}/></div>
+        </section>
+
+        <div className="detail-market-path-row">
+          <section className="panel">
+            <div className="panel-head"><span>Referência de mercado</span><span className="panel-head-meta">{report.price_history_status}</span></div>
+            <div className="panel-body">{pricePoints.length > 1 ? <TrendChart data={pricePoints} valueFormatter={formatCoins} height={180}/> : <div className="empty">Histórico insuficiente para desenhar tendência; não representa preço ao vivo.</div>}</div>
+          </section>
+
+          {report.best ? <BestPathCard p={p} best={report.best} pathID={report.best_path_id} pathSaved={report.best_path_saved} alternates={alternates} /> : <section className="panel">
+            <div className="panel-head">Melhor caminho</div>
+            <div className="panel-body"><div className="empty">{report.evolution_status === "not_checked" ? "Ainda não verificada para esta carta." : "Nenhum caminho confirmado nesta coleta."}</div></div>
+          </section>}
+        </div>
+
+        <EvolutionWorkbench slug={slug} />
+      </main>
+    </div>
+  </div>;
 }

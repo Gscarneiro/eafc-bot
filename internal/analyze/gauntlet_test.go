@@ -13,6 +13,17 @@ var gauntletFormationPositions = []domain.Position{
 	domain.CM, domain.CAM, domain.RM, domain.LM, domain.RW, domain.ST,
 }
 
+type avaliadorGauntletInvertido struct{}
+
+func (avaliadorGauntletInvertido) Perfis() []domain.PerfilMeta { return nil }
+
+func (avaliadorGauntletInvertido) Avaliar(card domain.Player, pos domain.Position, ctx domain.ContextoAvaliacao) domain.AvaliacaoCarta {
+	if !card.PlaysAt(pos) {
+		return domain.AvaliacaoCarta{Disponivel: false}
+	}
+	return domain.AvaliacaoCarta{Disponivel: true, Nota: 100 - card.GGRating, Contexto: ctx}
+}
+
 // gauntletFixtureClub monta um elenco com `perPosition` cartas só daquela
 // posição para cada uma das 11 posições da formação de teste — sem
 // sobreposição de posição entre cartas, para o resultado do matching global
@@ -94,6 +105,21 @@ func TestBuildGauntletPlanMontaQuatroElencosSemRepetirCarta(t *testing.T) {
 	}
 	if total != gauntletTotalCards {
 		t.Fatalf("total de cartas usadas = %d, esperava %d", total, gauntletTotalCards)
+	}
+}
+
+func TestGauntletOptionsUsaAvaliadorSelecionado(t *testing.T) {
+	club := gauntletFixtureClub(8)
+	planoGG := BuildGauntletPlan(club)
+	planoInvertido := BuildGauntletPlanWithOptions(club, GauntletOptions{
+		Evaluator: avaliadorGauntletInvertido{},
+		Contexto:  domain.ContextoAvaliacao{Fonte: domain.FonteBot, Perfil: "teste"},
+	})
+	if planoGG.Status != "ok" || planoInvertido.Status != "ok" {
+		t.Fatalf("planos indisponíveis: gg=%q (%s), bot=%q (%s)", planoGG.Status, planoGG.Reason, planoInvertido.Status, planoInvertido.Reason)
+	}
+	if planoGG.Rounds[len(planoGG.Rounds)-1].Starters[0].Player.ID == planoInvertido.Rounds[len(planoInvertido.Rounds)-1].Starters[0].Player.ID {
+		t.Fatal("trocar o avaliador não alterou a escolha do Gauntlet")
 	}
 }
 
@@ -375,6 +401,47 @@ func TestGauntletNaoRepeteCopiaDaMesmaCartaNaMesmaRodada(t *testing.T) {
 		if vezes > 1 {
 			t.Fatalf("rodada %d escalou a mesma carta %d vezes", round.Round, vezes)
 		}
+	}
+}
+
+// O Gauntlet consome cartas distintas no plano INTEIRO. Duas entradas de
+// clube com o mesmo ID de carta podem ter ClubItemID e nota diferentes quando
+// uma evolução ainda aparece ao lado da original no GG Club, mas o jogo não
+// deixa usar as duas em rodadas diferentes.
+func TestGauntletNaoUsaCopiaDaMesmaCartaEmRodadasDiferentes(t *testing.T) {
+	club := gauntletFixtureClub(8)
+	// Deixa sete goleiros distintos do fixture e acrescenta duas leituras da
+	// mesma carta — o mínimo para que o plano precise escolher entre elas.
+	club.Players = append(club.Players[:7], club.Players[8:]...)
+	cech := domain.ClubPlayer{Player: domain.Player{
+		ID: 67157804, Name: "Petr Čech", CommonName: "Petr Čech", Rating: 97,
+		Position: domain.GK, League: "Ícones", GGRating: 98.35, GGRatingPos: domain.GK,
+		BasePlayerEaID: 48940,
+	}, ClubItemID: "cech-evoluído"}
+	original := cech
+	original.GGRating = 97.97
+	original.ClubItemID = "cech-original"
+	club.Players = append(club.Players, cech, original)
+
+	plan := BuildGauntletPlan(club)
+	if plan.Status != "ok" {
+		t.Fatalf("status = %q, motivo = %q", plan.Status, plan.Reason)
+	}
+	var cechs []domain.ClubPlayer
+	for _, round := range plan.Rounds {
+		for _, starter := range round.Starters {
+			if starter.Player.ID == cech.ID {
+				cechs = append(cechs, starter.Player)
+			}
+		}
+		for _, bench := range round.Bench {
+			if bench.ID == cech.ID {
+				cechs = append(cechs, bench)
+			}
+		}
+	}
+	if len(cechs) != 1 {
+		t.Fatalf("Petr Čech apareceu %d vezes (%+v); o Gauntlet aceita uma carta distinta por plano", len(cechs), cechs)
 	}
 }
 

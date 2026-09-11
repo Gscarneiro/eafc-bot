@@ -10,6 +10,7 @@ import (
 
 // SquadPlan é a recomendação consultiva de escalação do clube inteiro.
 type SquadPlan struct {
+	RatingVersion    int                 `json:"rating_version"`
 	Status           string              `json:"status"`
 	Reason           string              `json:"reason,omitempty"`
 	CurrentAverage   float64             `json:"current_average"`
@@ -38,6 +39,11 @@ type SquadPlan struct {
 // custo mínimo não muda com estas opções.
 type SquadOptions struct {
 	ChemistryModel chemistry.Modelo
+	Evaluator      Avaliador
+	Contexto       domain.ContextoAvaliacao
+	// ContextosPorVaga preserva função, química e estilo de entrosamento
+	// quando a formação repete uma posição lógica.
+	ContextosPorVaga map[int]domain.ContextoAvaliacao
 }
 
 // DefaultSquadOptions usa o modelo de química padrão.
@@ -76,7 +82,7 @@ func OptimizeSquad(club domain.Club) SquadPlan {
 // e slots. O fluxo de custo mínimo evita a heurística de escolher cada
 // posição isoladamente.
 func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
-	plan := SquadPlan{Status: "unavailable"}
+	plan := SquadPlan{Status: "unavailable", RatingVersion: domain.GGRatingVersion}
 	slots := club.Squad.Starters
 	if len(slots) == 0 {
 		plan.Reason = "escalação titular não sincronizada"
@@ -89,15 +95,19 @@ func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 	// GG Rating não pôde rodar (ex.: dado sem GGRatingAt preenchido).
 	plan.CurrentQuimica = chemistry.Avaliar(opt.ChemistryModel, club)
 	for _, s := range slots {
-		if p, ok := club.PlayerByID(s.PlayerID); !ok {
+		if p, ok := club.PlayerForSlot(s); !ok {
 			plan.Reason = "titular ausente do retrato do clube"
 			return plan
-		} else if _, ok := p.GGRatingAt(s.Position); !ok {
-			plan.Reason = "faltam notas GG Rating por posição; nova coleta necessária"
+		} else if avaliacao := avaliarNaReguaDoElenco(p.Player, s.Position, opt.Evaluator, contextoDaVaga(opt.Contexto, opt.ContextosPorVaga, s)); !avaliacao.Disponivel {
+			plan.Reason = "faltam notas da avaliação ativa por vaga; revise a cobertura da fonte"
 			return plan
 		}
 	}
-	chosen, ok := squadMatch(club.Players, slots)
+	players := jogadoresDisponiveisParaOtimizacao(club)
+	chosen, ok := squadMatchWithRatings(players, slots, func(i, j int) (float64, bool) {
+		avaliacao := avaliarNaReguaDoElenco(players[i].Player, slots[j].Position, opt.Evaluator, contextoDaVaga(opt.Contexto, opt.ContextosPorVaga, slots[j]))
+		return avaliacao.Nota, avaliacao.Disponivel
+	})
 	if !ok {
 		plan.Reason = "não há jogadores elegíveis para todos os slots"
 		return plan
@@ -105,13 +115,15 @@ func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 	plan.Starters = make([]SquadAssignment, 0, len(slots))
 	plan.Alternatives = make([]SquadAlternatives, 0, len(slots))
 	for j, s := range slots {
-		r, _ := chosen[j].GGRatingAt(s.Position)
-		cr, _ := club.PlayerByID(s.PlayerID)
-		cur, _ := cr.GGRatingAt(s.Position)
+		rating := avaliarNaReguaDoElenco(chosen[j].Player, s.Position, opt.Evaluator, contextoDaVaga(opt.Contexto, opt.ContextosPorVaga, s))
+		r := rating.Nota
+		cr, _ := club.PlayerForSlot(s)
+		currentRating := avaliarNaReguaDoElenco(cr.Player, s.Position, opt.Evaluator, contextoDaVaga(opt.Contexto, opt.ContextosPorVaga, s))
+		cur := currentRating.Nota
 		plan.CurrentTotal += cur
 		plan.SuggestedTotal += r
 		plan.Starters = append(plan.Starters, SquadAssignment{s.Index, s.Position, chosen[j], r})
-		if chosen[j].ID != s.PlayerID {
+		if chosen[j].IdentityKey() != cr.IdentityKey() {
 			plan.Moves = append(plan.Moves, SquadMove{s.Index, s.Position, cr, chosen[j], cur, r, r - cur})
 		}
 	}
@@ -132,12 +144,13 @@ func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 	}
 	for _, s := range slots {
 		var cs []SquadAssignment
-		for _, p := range club.Players {
+		for _, p := range players {
 			if used[p.PlayerKey()] || !p.PlaysAt(s.Position) {
 				continue
 			}
-			if r, ok := p.GGRatingAt(s.Position); ok {
-				cs = append(cs, SquadAssignment{s.Index, s.Position, p, r})
+			avaliacao := avaliarNaReguaDoElenco(p.Player, s.Position, opt.Evaluator, contextoDaVaga(opt.Contexto, opt.ContextosPorVaga, s))
+			if avaliacao.Disponivel {
+				cs = append(cs, SquadAssignment{s.Index, s.Position, p, avaliacao.Nota})
 			}
 		}
 		sort.Slice(cs, func(a, b int) bool {
@@ -156,6 +169,25 @@ func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 	return plan
 }
 
+// jogadoresDisponiveisParaOtimizacao não promove um alvo do mercado ou de
+// evolução como carta possuída. Se o próprio plano de referência já colocou
+// o alvo no XI, ele permanece para que a comparação descreva aquele cenário.
+func jogadoresDisponiveisParaOtimizacao(club domain.Club) []domain.ClubPlayer {
+	starters := make(map[string]bool, len(club.Squad.Starters))
+	for _, slot := range club.Squad.Starters {
+		if player, ok := club.PlayerForSlot(slot); ok {
+			starters[player.IdentityKey()] = true
+		}
+	}
+	out := make([]domain.ClubPlayer, 0, len(club.Players))
+	for _, player := range club.Players {
+		if !player.AlvoPlano || starters[player.IdentityKey()] {
+			out = append(out, player)
+		}
+	}
+	return out
+}
+
 // squadMatch roda o fluxo de custo mínimo de sempre sobre um pool de cartas
 // e uma lista de slots, e devolve a carta escolhida para cada slot (na mesma
 // ordem de `slots`) — ou false quando não dá pra cobrir todos. É o motor de
@@ -170,6 +202,15 @@ func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 // aceita duas cartas do mesmo jogador no mesmo elenco); o nó de carta
 // continua garantindo um slot por carta. Ver domain.Player.PlayerKey.
 func squadMatch(players []domain.ClubPlayer, slots []domain.SquadSlot) ([]domain.ClubPlayer, bool) {
+	return squadMatchWithRatings(players, slots, func(i, j int) (float64, bool) {
+		return players[i].GGRatingAt(slots[j].Position)
+	})
+}
+
+// squadMatchWithRatings recebe a nota por par carta×vaga. Isso é necessário
+// para duas vagas da mesma posição terem funções e contextos diferentes sem
+// gravar uma nota contextual e falsa dentro da carta.
+func squadMatchWithRatings(players []domain.ClubPlayer, slots []domain.SquadSlot, rating func(playerIndex, slotIndex int) (float64, bool)) ([]domain.ClubPlayer, bool) {
 	keys := map[string]int{}
 	for _, p := range players {
 		if _, seen := keys[p.PlayerKey()]; !seen {
@@ -196,9 +237,12 @@ func squadMatch(players []domain.ClubPlayer, slots []domain.SquadSlot) ([]domain
 		add(playerNode(keys[p.PlayerKey()]), cardNode(i), 1, 0)
 		for j, s := range slots {
 			if p.PlaysAt(s.Position) {
-				r, _ := p.GGRatingAt(s.Position)
+				r, available := rating(i, j)
+				if !available {
+					continue
+				}
 				bonus := 0
-				if p.ID == s.PlayerID {
+				if (s.ClubItemID != "" && p.ClubItemID == s.ClubItemID) || (s.ClubItemID == "" && p.ID == s.PlayerID) {
 					// Um centésimo não evita micro-trocas: aqui o bônus equivale
 					// a 0,1 GG, a tolerância mínima da recomendação.
 					bonus = 100

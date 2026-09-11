@@ -1,24 +1,40 @@
 import type {
+  AgendaResponse,
   CardDetailResponse,
   ConfigResponse,
+	EvaluationCatalogResponse,
   EvolutionFavoritesResponse,
   EvolutionPlanResponse,
   EvolutionProgressResponse,
+  EvolutionProgressListResponse,
   EvolutionCatalogCollection,
   EvolutionCatalogDetailResponse,
   EvolutionAnalysisResponse,
   EvolutionPathsCollection,
+  ExtratoResponse,
+  MesaResponse,
+  PosicoesResponse,
   SavedEvolutionPathView,
   SavedEvolutionPathsResponse,
   GauntletResponse,
+	GameplayFeedback,
+	GameplayFeedbackResponse,
+	GameplayQualityResponse,
   JobStatus,
-	Agenda,
 	MarketPlanResponse,
+  ResumoResponse,
+  SavedSquadPlanInput,
+  SavedSquadPlanView,
+  SavedSquadPlansResponse,
+  SquadEditorEvaluation,
+  SquadEditorResponse,
+  SquadPlanSlot,
   SquadPlanResponse,
   StatusResponse,
   TimeResponse,
   UISettings,
   ODataPage,
+  WatchlistCollection,
 } from "./types";
 import { toSearchParams, type ODataQuery } from "./odata";
 
@@ -47,8 +63,14 @@ export const fetchCollection = <T,>(path: string, query: ODataQuery = {}) => {
 };
 
 export const fetchStatus = () => getJSON<StatusResponse>("/api/status");
+export const fetchResumo = () => getJSON<ResumoResponse>("/api/resumo");
 export const fetchMarketPlan = () => getJSON<MarketPlanResponse>("/api/planos/mercado");
-export const fetchAgenda = () => getJSON<Agenda>("/api/agenda");
+export const fetchAgenda = () => getJSON<AgendaResponse>("/api/agenda");
+export const fetchWatchlist = () => getJSON<WatchlistCollection>("/api/watchlist");
+export const fetchExtrato = (query = "") => getJSON<ExtratoResponse>(`/api/capital/extrato${query ? `?${query}` : ""}`);
+export const fetchPosicoes = () => getJSON<PosicoesResponse>("/api/capital/posicoes");
+export const fetchMesa = (index: number) => getJSON<MesaResponse>(`/api/mercado/mesa?index=${index}`);
+export const fetchEvolutionProgressList = () => getJSON<EvolutionProgressListResponse>("/api/evolucoes/progresso");
 export async function appendFeedback(entry: { action_id: string; status: "aceita" | "adiada" | "descartada"; reason?: string }) {
   const res = await fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
   if (!res.ok) throw new ApiError(res.status, "Não foi possível registrar o feedback local.");
@@ -65,6 +87,38 @@ export async function appendLedger(entry: { kind: string; status: string; gross_
   return res.json();
 }
 export const fetchTime = () => getJSON<TimeResponse>("/api/time");
+export const fetchSquadEditor = () => getJSON<SquadEditorResponse>("/api/editor/elenco");
+export const fetchSavedSquadPlans = () => getJSON<SavedSquadPlansResponse>("/api/planos/elenco/salvos");
+export async function saveSquadPlan(input: SavedSquadPlanInput, id?: string): Promise<SavedSquadPlanView> {
+  const method = id ? "PUT" : "POST";
+  const path = id ? `/api/planos/elenco/salvos/${encodeURIComponent(id)}` : "/api/planos/elenco/salvos";
+  const res = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+  if (!res.ok) { const text = (await res.text()).trim(); throw new ApiError(res.status, text || "Não foi possível salvar o plano."); }
+  return res.json();
+}
+export async function deleteSquadPlan(id: string): Promise<void> {
+  const res = await fetch(`/api/planos/elenco/salvos/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) { const text = (await res.text()).trim(); throw new ApiError(res.status, text || "Não foi possível apagar o plano."); }
+}
+export async function applySquadPlanReference(id: string): Promise<SavedSquadPlanView> {
+  const res = await fetch(`/api/planos/elenco/salvos/${encodeURIComponent(id)}/referencia`, { method: "POST" });
+  if (!res.ok) { const text = (await res.text()).trim(); throw new ApiError(res.status, text || "Não foi possível aplicar a referência."); }
+  return res.json();
+}
+export async function evaluateSquadEditor(formacao: string, vagas: SquadPlanSlot[], estiloJogo?: string): Promise<SquadEditorEvaluation> {
+	const res = await fetch("/api/editor/elenco/avaliar", {
+		method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ formacao, vagas, estilo_jogo: estiloJogo }),
+  });
+  if (!res.ok) { const text = (await res.text()).trim(); throw new ApiError(res.status, text || "Não foi possível avaliar o rascunho."); }
+  return res.json();
+}
+export const fetchGameplayFeedback = () => getJSON<GameplayFeedbackResponse>("/api/feedback/gameplay");
+export const fetchGameplayQuality = () => getJSON<GameplayQualityResponse>("/api/feedback/gameplay/qualidade");
+export async function saveGameplayFeedback(entry: GameplayFeedback): Promise<GameplayFeedback> {
+  const res = await fetch("/api/feedback/gameplay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+  if (!res.ok) { const text = (await res.text()).trim(); throw new ApiError(res.status, text || "Não foi possível registrar a comparação."); }
+  return res.json();
+}
 export const fetchGauntlet = () => getJSON<GauntletResponse>("/api/gauntlet");
 export async function fetchSquadPlan(): Promise<SquadPlanResponse> {
   const res = await fetch("/api/planos/elenco", {
@@ -122,6 +176,7 @@ export async function saveEvolutionProgress(slug: string, completed: string[]): 
 }
 export const fetchJob = () => getJSON<JobStatus>("/api/job");
 export const fetchConfig = () => getJSON<ConfigResponse>("/api/config");
+export const fetchEvaluationCatalog = () => getJSON<EvaluationCatalogResponse>("/api/avaliacao");
 
 export async function saveConfig(settings: UISettings): Promise<ConfigResponse> {
   const res = await fetch("/api/config", {
@@ -132,6 +187,19 @@ export async function saveConfig(settings: UISettings): Promise<ConfigResponse> 
   if (!res.ok) {
     const text = (await res.text()).trim();
     throw new ApiError(res.status, text || `PUT /api/config devolveu ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function saveSaldo(coins: number): Promise<{ coins: number }> {
+  const res = await fetch("/api/saldo", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ coins }),
+  });
+  if (!res.ok) {
+    const text = (await res.text()).trim();
+    throw new ApiError(res.status, text || `PUT /api/saldo devolveu ${res.status}`);
   }
   return res.json();
 }

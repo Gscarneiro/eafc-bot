@@ -3,10 +3,9 @@ import { fetchSquadPlan } from "../api";
 import { asyncGate } from "../components/asyncGate";
 import Chip from "../components/Chip";
 import EmptyState from "../components/EmptyState";
-import GGRating from "../components/GGRating";
 import PageHeader from "../components/PageHeader";
 import Pitch, { canDrawPitch } from "../components/Pitch";
-import { formatSigned } from "../format";
+import { evaluationSourceLabel, formatSigned } from "../format";
 import { useData } from "../useData";
 import type { SquadPlanStarterView, StarterCard as StarterCardData } from "../types";
 import "../shared.css";
@@ -40,6 +39,7 @@ export default function PlanoElenco() {
   const activeIndex = Math.min(scenarioIndex, Math.max(scenarios.length - 1, 0));
   const scenario = scenarios[activeIndex];
   const insufficient = data.status !== "ok" || scenarios.length === 0;
+	const scoreLabel = evaluationSourceLabel(data.avaliacao?.fonte, true);
 
   return (
     <div className="wrap plano-elenco-page">
@@ -75,7 +75,7 @@ export default function PlanoElenco() {
       {insufficient ? (
         <EmptyState
           message={data.reason || "Elenco insuficiente para montar um plano."}
-          hint="O planejador precisa da escalação titular sincronizada em fut.gg/gg-club, com nota GG conhecida em cada posição."
+		  hint="O planejador precisa da escalação titular sincronizada e da cobertura da fonte ativa em cada vaga."
         />
       ) : (
         <>
@@ -90,7 +90,7 @@ export default function PlanoElenco() {
                 onClick={() => setScenarioIndex(i)}
               >
                 <span className="plano-elenco-tab-label">{sc.label || `cenário ${i + 1}`}</span>
-                <span className="plano-elenco-tab-value">{sc.average_rating.toFixed(1)} GG posicional</span>
+				<span className="plano-elenco-tab-value">{sc.average_rating.toFixed(1)} {scoreLabel} posicional</span>
               </button>
             ))}
           </div>
@@ -106,7 +106,7 @@ export default function PlanoElenco() {
                   <Chip tone="flat">química indisponível</Chip>
                 )}
                 <span className="plano-elenco-stats">
-                  força total {scenario.total_rating.toFixed(1)} · média {scenario.average_rating.toFixed(1)} GG posicional
+				  força total {scenario.total_rating.toFixed(1)} · média {scenario.average_rating.toFixed(1)} {scoreLabel} posicional
                 </span>
                 {scenario.chemistry?.verificacao.status === "diverge" && (
                   <span className="plano-elenco-note">
@@ -142,13 +142,13 @@ export default function PlanoElenco() {
                             {m.suggested.player.common_name || m.suggested.player.name}
                           </div>
                           <p className="desc">{m.position}</p>
-                          <div className="plano-elenco-move-ratings">
-                            <GGRating current={m.current.player.gg_rating} currentPosition={m.current.player.gg_rating_pos} positional={m.current_rating} positionalPosition={m.position} />
-                            <span aria-hidden="true">→</span>
-                            <GGRating current={m.suggested.player.gg_rating} currentPosition={m.suggested.player.gg_rating_pos} positional={m.suggested_rating} positionalPosition={m.position} />
-                          </div>
+						  <div className="plano-elenco-move-ratings">
+							<span>{scoreLabel} {m.current_rating.toFixed(1)}</span>
+							<span aria-hidden="true">→</span>
+							<span>{scoreLabel} {m.suggested_rating.toFixed(1)}</span>
+						  </div>
                         </div>
-                        <p className="meta">{formatSigned(m.gain)} GG posicional</p>
+						<p className="meta">{formatSigned(m.gain)} {scoreLabel} posicional</p>
                       </div>
                     ))}
                   </div>

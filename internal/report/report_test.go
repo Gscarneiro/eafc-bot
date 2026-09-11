@@ -41,11 +41,9 @@ func TestSquadSummaryUsaGGRatingQuandoDisponivel(t *testing.T) {
 	}
 }
 
-// Fontes que não são o GG Club (csv, chrome) não mandam GG Rating nenhum.
-// Sem ele, a nota do time cai pro Score() interno em vez de mostrar zero —
-// mas o próprio Score() pode passar de 99, e isso é esperado nesse caso:
-// só existe se a fonte não trouxe o número oficial pra comparar.
-func TestSquadSummaryCaiParaScoreSemGGRating(t *testing.T) {
+// Sem nota na fonte ativa, o resumo expõe a lacuna em vez de trocar
+// silenciosamente para a escala do bot.
+func TestSquadSummaryNaoMisturaAvaliadorSemGGRating(t *testing.T) {
 	club := domain.Club{
 		Players: []domain.ClubPlayer{starter(1, domain.GK, 0)},
 		Squad: domain.Squad{Starters: []domain.SquadSlot{
@@ -53,8 +51,8 @@ func TestSquadSummaryCaiParaScoreSemGGRating(t *testing.T) {
 		}},
 	}
 	avg, _, _, _ := SquadSummary(club)
-	if avg <= 0 {
-		t.Errorf("nota do time = %.2f, esperava cair pro Score() e não zerar", avg)
+	if avg != 0 {
+		t.Errorf("nota do time = %.2f, esperava indisponível (zero no contrato legado)", avg)
 	}
 }
 
@@ -78,6 +76,47 @@ func TestSquadSummaryEloMaisFracoLevaGGRatingComoReferencia(t *testing.T) {
 	}
 	if weakGG != 60.0 {
 		t.Errorf("GG Rating do elo mais fraco = %.1f, esperava 60.0", weakGG)
+	}
+}
+
+// PositionMap tem que comparar a mesma grandeza na barra e na régua: uma
+// carta escalada fora da posição em que o fut.gg calculou o GGRating dela
+// (GGRatingPos) tem uma nota MENOR na posição do slot (via GGRatingAt) — se
+// a régua usasse SquadSummary (que tira média do GGRating cru), a média
+// ficaria puxada pra cima por um número que a própria barra não mostra.
+func TestMapaDePosicoesUsaAMesmaMediaDasBarras(t *testing.T) {
+	foraDePosicao := domain.ClubPlayer{Player: domain.Player{
+		ID: 1, Position: domain.ST, Rating: 85, CommonName: "Fora de posição",
+		GGRating: 90.0, GGRatingPos: domain.ST, // nota alta, mas calculada pra ST
+		GGRatings: map[domain.Position]float64{domain.CAM: 80.0}, // a posição em que ele JOGA
+	}}
+	naPosicao := domain.ClubPlayer{Player: domain.Player{
+		ID: 2, Position: domain.CDM, Rating: 85, CommonName: "Na posição",
+		GGRating: 88.0, GGRatingPos: domain.CDM,
+	}}
+	club := domain.Club{
+		Players: []domain.ClubPlayer{foraDePosicao, naPosicao},
+		Squad: domain.Squad{Starters: []domain.SquadSlot{
+			{Index: 0, Position: domain.CAM, PlayerID: 1}, // escalado fora da posição natural
+			{Index: 1, Position: domain.CDM, PlayerID: 2},
+		}},
+	}
+
+	rows, avg := PositionMap(club)
+	if len(rows) != 2 {
+		t.Fatalf("PositionMap devolveu %d linhas, esperava 2: %+v", len(rows), rows)
+	}
+	if rows[0].Rating != 80.0 {
+		t.Errorf("linha do slot 0 (CAM) = %.1f, esperava 80.0 (GGRatingAt(CAM), não o GGRating cru de 90.0)", rows[0].Rating)
+	}
+	wantAvg := (80.0 + 88.0) / 2
+	if avg < wantAvg-0.01 || avg > wantAvg+0.01 {
+		t.Errorf("média = %.2f, esperava %.2f — a régua tem que somar a MESMA grandeza que as barras (GGRatingAt por slot), não o GGRating cru que SquadSummary usa", avg, wantAvg)
+	}
+	// O resumo deve usar exatamente a mesma régua e a mesma posição da vaga.
+	squadSummaryAvg, _, _, _ := SquadSummary(club)
+	if avg != squadSummaryAvg {
+		t.Fatalf("PositionMap = %.2f e SquadSummary = %.2f; deveriam usar a mesma régua", avg, squadSummaryAvg)
 	}
 }
 

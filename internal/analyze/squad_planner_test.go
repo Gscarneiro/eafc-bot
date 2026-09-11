@@ -71,7 +71,9 @@ func TestBuildSquadScenarioPesoZeroBateComOptimizeSquad(t *testing.T) {
 		t.Fatalf("OptimizeSquad: %q", optimizado.Reason)
 	}
 
-	sc, ok := buildSquadScenario(club.Players, club.Squad.Starters, nil, club.Squad.Starters, club, chemistry.ModeloPadrao(), 0, "")
+	req := DefaultSquadPlanRequest()
+	req.ChemistryModel = chemistry.ModeloPadrao()
+	sc, ok := buildSquadScenario(club.Players, club.Squad.Starters, nil, club.Squad.Starters, club, req, 0, "")
 	if !ok {
 		t.Fatal("buildSquadScenario com peso 0 falhou")
 	}
@@ -82,6 +84,43 @@ func TestBuildSquadScenarioPesoZeroBateComOptimizeSquad(t *testing.T) {
 		if sc.Starters[i].Player.ID != optimizado.Starters[i].Player.ID {
 			t.Fatalf("slot %d: %d vs %d", i, sc.Starters[i].Player.ID, optimizado.Starters[i].Player.ID)
 		}
+	}
+}
+
+func TestSquadPlannerUsaFuncaoDeCadaVagaRepetida(t *testing.T) {
+	club := domain.Club{
+		Players: []domain.ClubPlayer{
+			starterCP(1, mk(85, domain.CM, 80, 70, 80, 80, 75, 80)),
+			starterCP(2, mk(85, domain.CM, 80, 70, 80, 80, 75, 80)),
+			starterCP(3, mk(85, domain.CM, 80, 70, 80, 80, 75, 80)),
+		},
+		Squad: domain.Squad{Starters: []domain.SquadSlot{
+			{Index: 7, Position: domain.CM, PlayerID: 1},
+			{Index: 8, Position: domain.CM, PlayerID: 2},
+		}},
+	}
+	for i := range club.Players {
+		club.Players[i].ID = int64(i + 1)
+	}
+
+	plan := BuildSquadPlan(club, SquadPlanRequest{
+		Goal:          SquadPlanGoalMaiorNota,
+		FormationFrom: FormationObservada,
+		Evaluator:     avaliadorPorFuncaoTeste{},
+		ContextosPorVaga: map[int]domain.ContextoAvaliacao{
+			7: {Fonte: domain.FonteBot, Funcao: "volante"},
+			8: {Fonte: domain.FonteBot, Funcao: "criador"},
+		},
+	})
+	if plan.Status != "ok" || len(plan.Scenarios) == 0 {
+		t.Fatalf("planner indisponível: %+v", plan)
+	}
+	byIndex := make(map[int]SquadAssignment, len(plan.Scenarios[0].Starters))
+	for _, assignment := range plan.Scenarios[0].Starters {
+		byIndex[assignment.Index] = assignment
+	}
+	if byIndex[7].Player.ID != 3 || byIndex[8].Player.ID != 2 {
+		t.Fatalf("XI = %+v, esperava reserva 3 como volante e titular 2 como criador", plan.Scenarios[0].Starters)
 	}
 }
 

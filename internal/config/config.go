@@ -22,15 +22,31 @@ type Config struct {
 	// perfil ao sincronizar o GG Club, e é esse nome que aparece na URL
 	// (fut.gg/gg-club/<nome>/). Pode colar a URL inteira aqui; ela é
 	// normalizada em Load().
-	GamerTag  string        `json:"gamer_tag"`
-	Platform  string        `json:"platform"`
-	DataDir   string        `json:"data_dir"`
-	Postgres  PostgresConf  `json:"postgres"`
-	FutGG     futgg.Config  `json:"futgg"`
-	Market    MarketConf    `json:"market"`
-	Report    ReportConf    `json:"report"`
-	Serve     ServeConf     `json:"serve"`
-	Chemistry ChemistryConf `json:"chemistry"`
+	GamerTag   string         `json:"gamer_tag"`
+	Platform   string         `json:"platform"`
+	DataDir    string         `json:"data_dir"`
+	Postgres   PostgresConf   `json:"postgres"`
+	FutGG      futgg.Config   `json:"futgg"`
+	Market     MarketConf     `json:"market"`
+	Report     ReportConf     `json:"report"`
+	Serve      ServeConf      `json:"serve"`
+	Chemistry  ChemistryConf  `json:"chemistry"`
+	Evaluation EvaluationConf `json:"evaluation"`
+}
+
+// EvaluationConf guarda a escolha explícita da régua. UseBot começa falso:
+// o FUT.GG continua visível até o usuário optar pelo perfil local.
+type EvaluationConf struct {
+	UseBot         bool   `json:"use_bot"`
+	ExternalSource string `json:"external_source"`
+	Profile        string `json:"profile"`
+	Patch          string `json:"patch"`
+	PlayStyle      string `json:"play_style"`
+	// FutbinImport e FutwizImport apontam para exportações locais verificadas.
+	// A coleta por rede de cada fornecedor fica fora do produto até que seu
+	// contrato e permissão estejam comprovados.
+	FutbinImport string `json:"futbin_import,omitempty"`
+	FutwizImport string `json:"futwiz_import,omitempty"`
 }
 
 // ChemistryConf é a regra de entrosamento que o bot usa para pontuar uma
@@ -103,12 +119,15 @@ type PostgresConf struct {
 
 // MarketConf limita quais cartas o bot considera como possível reforço.
 type MarketConf struct {
-	MinRating   int `json:"min_rating"`
-	MaxRating   int `json:"max_rating"`
-	MaxPrice    int `json:"max_price"`
-	Pages       int `json:"pages"`
-	PerPage     int `json:"per_page"`
-	ExtraBudget int `json:"extra_budget"` // moedas além do saldo, se você pretende vender coisas
+	MinRating int `json:"min_rating"`
+	MaxRating int `json:"max_rating"`
+	MaxPrice  int `json:"max_price"`
+	Pages     int `json:"pages"`
+	PerPage   int `json:"per_page"`
+	// ManualCoins substitui o saldo que veio da coleta. Ponteiro distingue
+	// "não configurado" de um saldo manual legitimamente zerado.
+	ManualCoins *int `json:"manual_coins,omitempty"`
+	ExtraBudget int  `json:"extra_budget"` // moedas além do saldo, se você pretende vender coisas
 	// Reserve é quanto NUNCA entra em orçamento de compra — moedas guardadas
 	// para SBC, evolução ou objetivo que você já decidiu separar. Alimenta
 	// domain.Club.Capital diretamente; zero (o padrão) preserva o
@@ -133,10 +152,21 @@ type ReportConf struct {
 // deliberadamente fora deste contrato: a UI é um painel de decisão, não um
 // editor de infraestrutura.
 type UISettings struct {
-	Market    UISettingsMarket    `json:"market"`
-	Report    UISettingsReport    `json:"report"`
-	Serve     UISettingsServe     `json:"serve"`
-	Chemistry UISettingsChemistry `json:"chemistry"`
+	Market     UISettingsMarket     `json:"market"`
+	Report     UISettingsReport     `json:"report"`
+	Serve      UISettingsServe      `json:"serve"`
+	Chemistry  UISettingsChemistry  `json:"chemistry"`
+	Evaluation UISettingsEvaluation `json:"evaluation"`
+}
+
+type UISettingsEvaluation struct {
+	UseBot         bool   `json:"use_bot"`
+	ExternalSource string `json:"external_source"`
+	Profile        string `json:"profile"`
+	Patch          string `json:"patch"`
+	PlayStyle      string `json:"play_style"`
+	FutbinImport   string `json:"futbin_import,omitempty"`
+	FutwizImport   string `json:"futwiz_import,omitempty"`
 }
 
 // UISettingsChemistry expõe só o PESO. O modelo (chemistry.model) fica de
@@ -177,10 +207,11 @@ type UISettingsServe struct {
 // Editable devolve apenas os valores que a tela pode mostrar e alterar.
 func (c Config) Editable() UISettings {
 	return UISettings{
-		Market:    UISettingsMarket{MinRating: c.Market.MinRating, MaxRating: c.Market.MaxRating, MaxPrice: c.Market.MaxPrice, Pages: c.Market.Pages, PerPage: c.Market.PerPage, ExtraBudget: c.Market.ExtraBudget, Reserve: c.Market.Reserve},
-		Report:    UISettingsReport{MinGain: c.Report.MinGain, TrendWindowHrs: c.Report.TrendWindowHrs, AllowOutOfPos: c.Report.AllowOutOfPos, AllowUnpriced: c.Report.AllowUnpriced},
-		Serve:     UISettingsServe{DailyAt: c.Serve.DailyAt, StaleAfterHours: c.Serve.StaleAfterHours, RetentionDays: c.Serve.RetentionDays, CardsMinRating: c.Serve.CardsMinRating, FastRefreshMinutes: c.Serve.FastRefreshMinutes, MomentumWindowHours: c.Serve.MomentumWindowHours, EvolutionFavorites: c.Serve.EvolutionFavorites},
-		Chemistry: UISettingsChemistry{Weight: c.Chemistry.Weight},
+		Market:     UISettingsMarket{MinRating: c.Market.MinRating, MaxRating: c.Market.MaxRating, MaxPrice: c.Market.MaxPrice, Pages: c.Market.Pages, PerPage: c.Market.PerPage, ExtraBudget: c.Market.ExtraBudget, Reserve: c.Market.Reserve},
+		Report:     UISettingsReport{MinGain: c.Report.MinGain, TrendWindowHrs: c.Report.TrendWindowHrs, AllowOutOfPos: c.Report.AllowOutOfPos, AllowUnpriced: c.Report.AllowUnpriced},
+		Serve:      UISettingsServe{DailyAt: c.Serve.DailyAt, StaleAfterHours: c.Serve.StaleAfterHours, RetentionDays: c.Serve.RetentionDays, CardsMinRating: c.Serve.CardsMinRating, FastRefreshMinutes: c.Serve.FastRefreshMinutes, MomentumWindowHours: c.Serve.MomentumWindowHours, EvolutionFavorites: c.Serve.EvolutionFavorites},
+		Chemistry:  UISettingsChemistry{Weight: c.Chemistry.Weight},
+		Evaluation: UISettingsEvaluation{UseBot: c.Evaluation.UseBot, ExternalSource: c.Evaluation.ExternalSource, Profile: c.Evaluation.Profile, Patch: c.Evaluation.Patch, PlayStyle: c.Evaluation.PlayStyle, FutbinImport: c.Evaluation.FutbinImport, FutwizImport: c.Evaluation.FutwizImport},
 	}
 }
 
@@ -198,6 +229,9 @@ func (c *Config) ApplyEditable(v UISettings) error {
 	c.Serve.CardsMinRating, c.Serve.FastRefreshMinutes, c.Serve.MomentumWindowHours = v.Serve.CardsMinRating, v.Serve.FastRefreshMinutes, v.Serve.MomentumWindowHours
 	c.Serve.EvolutionFavorites = v.Serve.EvolutionFavorites
 	c.Chemistry.Weight = v.Chemistry.Weight
+	c.Evaluation.UseBot, c.Evaluation.ExternalSource, c.Evaluation.Profile = v.Evaluation.UseBot, v.Evaluation.ExternalSource, v.Evaluation.Profile
+	c.Evaluation.Patch, c.Evaluation.PlayStyle = v.Evaluation.Patch, v.Evaluation.PlayStyle
+	c.Evaluation.FutbinImport, c.Evaluation.FutwizImport = v.Evaluation.FutbinImport, v.Evaluation.FutwizImport
 	if err := c.Validate(); err != nil {
 		*c = previous
 		return err
@@ -252,7 +286,8 @@ func Default() Config {
 			FastRefreshMinutes:  60,
 			MomentumWindowHours: 24,
 		},
-		Chemistry: ChemistryConf{Model: chemistry.ModeloPadrao().Nome, Weight: 0.25},
+		Chemistry:  ChemistryConf{Model: chemistry.ModeloPadrao().Nome, Weight: 0.25},
+		Evaluation: EvaluationConf{ExternalSource: "futgg", Profile: "meta_competitivo", Patch: "não_validado", PlayStyle: "meta_competitivo"},
 	}
 }
 
@@ -349,8 +384,8 @@ func (c Config) Validate() error {
 	if c.Market.MinRating < 1 || c.Market.MaxRating > 99 || c.Market.MinRating > c.Market.MaxRating {
 		return fmt.Errorf("market.min_rating/max_rating inválidos — use uma faixa entre 1 e 99")
 	}
-	if c.Market.MaxPrice < 0 || c.Market.Pages < 1 || c.Market.PerPage < 1 || c.Market.ExtraBudget < 0 || c.Market.Reserve < 0 {
-		return fmt.Errorf("limites do mercado inválidos — preço, páginas, cartas por página, orçamento extra e reserva não podem ser negativos")
+	if c.Market.MaxPrice < 0 || c.Market.Pages < 1 || c.Market.PerPage < 1 || c.Market.ExtraBudget < 0 || c.Market.Reserve < 0 || c.Market.ManualCoins != nil && *c.Market.ManualCoins < 0 {
+		return fmt.Errorf("limites do mercado inválidos — preço, páginas, cartas por página, saldo manual, orçamento extra e reserva não podem ser negativos")
 	}
 	if c.Report.MinGain < 0 || c.Report.TrendWindowHrs < 1 {
 		return fmt.Errorf("report.min_gain/trend_window_hours inválidos — use ganho não negativo e uma janela positiva")
@@ -363,6 +398,25 @@ func (c Config) Validate() error {
 	}
 	if _, err := chemistry.Escolher(c.Chemistry.Model); err != nil {
 		return err
+	}
+	if c.Evaluation.ExternalSource == "" {
+		return fmt.Errorf("evaluation.external_source não pode ser vazio")
+	}
+	switch c.Evaluation.ExternalSource {
+	case "futgg":
+	case "futbin":
+		if !c.Evaluation.UseBot && strings.TrimSpace(c.Evaluation.FutbinImport) == "" {
+			return fmt.Errorf("evaluation.futbin_import é obrigatório ao selecionar FUTBIN")
+		}
+	case "futwiz":
+		if !c.Evaluation.UseBot && strings.TrimSpace(c.Evaluation.FutwizImport) == "" {
+			return fmt.Errorf("evaluation.futwiz_import é obrigatório ao selecionar FUTWIZ")
+		}
+	default:
+		return fmt.Errorf("evaluation.external_source %q desconhecida; use futgg, futbin ou futwiz", c.Evaluation.ExternalSource)
+	}
+	if c.Evaluation.Profile == "" {
+		return fmt.Errorf("evaluation.profile não pode ser vazio")
 	}
 	return nil
 }
@@ -416,6 +470,35 @@ func (c Config) SaveEditable(path string, v UISettings) error {
 	mergeBloco(raw, "report", v.Report)
 	mergeBloco(raw, "serve", v.Serve)
 	mergeBloco(raw, "chemistry", v.Chemistry)
+	mergeBloco(raw, "evaluation", v.Evaluation)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
+// SaveManualCoins grava só o saldo informado na topbar. Ele fica fora de
+// UISettings de propósito: uma tela de Configurações aberta antes da edição
+// do saldo não pode reenviar um formulário antigo e apagar o valor novo.
+func (c Config) SaveManualCoins(path string, coins int) error {
+	var raw map[string]any
+	if b, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(b, &raw); err != nil {
+			return fmt.Errorf("lendo %s para atualizar saldo: %w", path, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("abrindo %s para atualizar saldo: %w", path, err)
+	}
+	if raw == nil {
+		raw = make(map[string]any)
+	}
+	mergeBloco(raw, "market", struct {
+		ManualCoins int `json:"manual_coins"`
+	}{ManualCoins: coins})
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/cards"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/query"
@@ -21,21 +22,25 @@ import (
 const evolutionAnalysisMinRating = 88
 
 type EvolutionPathImpact struct {
-	Kind            string             `json:"kind"`
-	SlotIndex       int                `json:"slot_index,omitempty"`
-	Position        domain.Position    `json:"position,omitempty"`
-	Starter         *domain.ClubPlayer `json:"starter,omitempty"`
-	StarterGGRating float64            `json:"starter_gg_rating,omitempty"`
-	FinalGGRating   float64            `json:"final_gg_rating,omitempty"`
-	Gain            float64            `json:"gain,omitempty"`
+	Kind              string                `json:"kind"`
+	SlotIndex         int                   `json:"slot_index,omitempty"`
+	Position          domain.Position       `json:"position,omitempty"`
+	Starter           *domain.ClubPlayer    `json:"starter,omitempty"`
+	StarterGGRating   float64               `json:"starter_gg_rating,omitempty"`
+	FinalGGRating     float64               `json:"final_gg_rating,omitempty"`
+	Gain              float64               `json:"gain,omitempty"`
+	StarterEvaluation domain.AvaliacaoCarta `json:"starter_evaluation,omitempty"`
+	FinalEvaluation   domain.AvaliacaoCarta `json:"final_evaluation,omitempty"`
 }
 
 type EvolutionPathCandidate struct {
-	ID          string              `json:"id"`
-	Potential   cards.EvoPotential  `json:"potential"`
-	Impact      EvolutionPathImpact `json:"impact"`
-	VersionHash string              `json:"version_hash"`
-	Saved       bool                `json:"saved"`
+	ID                string                `json:"id"`
+	Potential         cards.EvoPotential    `json:"potential"`
+	Impact            EvolutionPathImpact   `json:"impact"`
+	CurrentEvaluation domain.AvaliacaoCarta `json:"current_evaluation,omitempty"`
+	FinalEvaluation   domain.AvaliacaoCarta `json:"final_evaluation,omitempty"`
+	VersionHash       string                `json:"version_hash"`
+	Saved             bool                  `json:"saved"`
 }
 
 // EvolutionPlayerAnalysis Ã© uma linha por CÃ“PIA fÃ­sica. Paths ficam aninhados
@@ -47,6 +52,7 @@ type EvolutionPlayerAnalysis struct {
 	Status            cards.EvolutionStatus    `json:"status"`
 	Paths             []EvolutionPathCandidate `json:"paths"`
 	BestFinalGGRating float64                  `json:"best_final_gg_rating,omitempty"`
+	BestActiveRating  float64                  `json:"best_active_rating,omitempty"`
 	BestXIGain        float64                  `json:"best_xi_gain,omitempty"`
 	EntraNoXI         bool                     `json:"entra_no_xi"`
 }
@@ -64,7 +70,8 @@ type EvolutionPathsSummary struct {
 
 type evolutionPathsCollectionResponse struct {
 	query.Page[EvolutionPlayerAnalysis]
-	Summary EvolutionPathsSummary `json:"@eafc.summary"`
+	Summary    EvolutionPathsSummary    `json:"@eafc.summary"`
+	Evaluation domain.ContextoAvaliacao `json:"avaliacao"`
 }
 
 type savedEvolutionPathView struct {
@@ -95,7 +102,7 @@ func (s *Server) handleEvolutionPaths(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows := buildEvolutionPlayerAnalyses(snap)
+	rows := s.buildEvolutionPlayerAnalysesAtuais(snap)
 	if backend, ok := s.Store.(store.SavedEvolutionPathStore); ok {
 		if saved, err := backend.ListSavedEvolutionPaths(r.Context(), s.Cycle); err == nil {
 			markSavedEvolutionPaths(rows, saved)
@@ -105,7 +112,7 @@ func (s *Server) handleEvolutionPaths(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, evolutionPathsCollectionResponse{Page: page, Summary: evolutionPathsSummary(rows)})
+	writeJSON(w, evolutionPathsCollectionResponse{Page: page, Summary: evolutionPathsSummary(rows), Evaluation: snap.Avaliacao})
 }
 
 func (s *Server) handleSavedEvolutionPaths(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +128,7 @@ func (s *Server) handleSavedEvolutionPaths(w http.ResponseWriter, r *http.Reques
 	}
 	var current map[string]EvolutionPathCandidate
 	if snap, found, loadErr := s.Store.LatestSnapshot(r.Context(), s.Cycle); loadErr == nil && found {
-		current = candidatesByID(buildEvolutionPlayerAnalyses(snap))
+		current = candidatesByID(s.buildEvolutionPlayerAnalysesAtuais(snap))
 	}
 	value := make([]savedEvolutionPathView, 0, len(saved))
 	for _, entry := range saved {
@@ -147,7 +154,7 @@ func (s *Server) handleSavedEvolutionPathCreate(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	for _, row := range buildEvolutionPlayerAnalyses(snap) {
+	for _, row := range s.buildEvolutionPlayerAnalysesAtuais(snap) {
 		for _, candidate := range row.Paths {
 			if candidate.ID != input.PathID {
 				continue
@@ -178,6 +185,25 @@ func (s *Server) handleSavedEvolutionPathDelete(w http.ResponseWriter, r *http.R
 }
 
 func buildEvolutionPlayerAnalyses(snap store.Snapshot) []EvolutionPlayerAnalysis {
+	registry, _ := analyze.NovoRegistroAvaliadores()
+	if snap.Avaliacao.Fonte == "" {
+		snap.Avaliacao.Fonte = domain.FonteFutGG
+	}
+	return buildEvolutionPlayerAnalysesWithEvaluator(snap, registry)
+}
+
+func (s *Server) buildEvolutionPlayerAnalysesAtuais(snap store.Snapshot) []EvolutionPlayerAnalysis {
+	if snap.Avaliacao.Fonte == "" {
+		snap.Avaliacao = s.resolveEvaluationContext()
+	}
+	return buildEvolutionPlayerAnalysesWithEvaluator(snap, s.resolveEvaluator())
+}
+
+func buildEvolutionPlayerAnalysesWithEvaluator(snap store.Snapshot, evaluator analyze.Avaliador) []EvolutionPlayerAnalysis {
+	var contextosPorVaga map[int]domain.ContextoAvaliacao
+	if plan := snap.PlanoReferencia; plan != nil {
+		contextosPorVaga = contextosDasVagas(snap.Club, *plan, snap.Avaliacao)
+	}
 	rows := make([]EvolutionPlayerAnalysis, 0)
 	for _, player := range snap.Club.Players {
 		if player.Rating < evolutionAnalysisMinRating {
@@ -189,10 +215,13 @@ func buildEvolutionPlayerAnalyses(snap store.Snapshot) []EvolutionPlayerAnalysis
 			row.CardSlug = report.Slug
 			row.Status = report.EvolutionStatus
 			for _, path := range pathsForReport(report) {
-				candidate := evolutionPathCandidate(snap.Cycle, report, player, path, snap.Club)
+				candidate := evolutionPathCandidateWithEvaluator(snap.Cycle, report, player, path, snap.Club, evaluator, snap.Avaliacao, contextosPorVaga)
 				row.Paths = append(row.Paths, candidate)
 				if candidate.Potential.FinalGGRating > row.BestFinalGGRating {
 					row.BestFinalGGRating = candidate.Potential.FinalGGRating
+				}
+				if candidate.FinalEvaluation.Disponivel && candidate.FinalEvaluation.Nota > row.BestActiveRating {
+					row.BestActiveRating = candidate.FinalEvaluation.Nota
 				}
 				if candidate.Impact.Kind == "entra_no_xi" {
 					row.EntraNoXI = true
@@ -203,8 +232,12 @@ func buildEvolutionPlayerAnalyses(snap store.Snapshot) []EvolutionPlayerAnalysis
 			}
 		}
 		sort.SliceStable(row.Paths, func(i, j int) bool {
-			if row.Paths[i].Potential.FinalGGRating != row.Paths[j].Potential.FinalGGRating {
-				return row.Paths[i].Potential.FinalGGRating > row.Paths[j].Potential.FinalGGRating
+			a, b := row.Paths[i].FinalEvaluation, row.Paths[j].FinalEvaluation
+			if a.Disponivel != b.Disponivel {
+				return a.Disponivel
+			}
+			if a.Nota != b.Nota {
+				return a.Nota > b.Nota
 			}
 			return row.Paths[i].Potential.CoinsCost < row.Paths[j].Potential.CoinsCost
 		})
@@ -248,6 +281,11 @@ func pathsForReport(report cards.CardReport) []domain.EvolutionPath {
 }
 
 func evolutionPathCandidate(cycle string, report cards.CardReport, player domain.ClubPlayer, path domain.EvolutionPath, club domain.Club) EvolutionPathCandidate {
+	registry, _ := analyze.NovoRegistroAvaliadores()
+	return evolutionPathCandidateWithEvaluator(cycle, report, player, path, club, registry, domain.ContextoAvaliacao{Fonte: domain.FonteFutGG, Ciclo: cycle}, nil)
+}
+
+func evolutionPathCandidateWithEvaluator(cycle string, report cards.CardReport, player domain.ClubPlayer, path domain.EvolutionPath, club domain.Club, evaluator analyze.Avaliador, contexto domain.ContextoAvaliacao, contextosPorVaga map[int]domain.ContextoAvaliacao) EvolutionPathCandidate {
 	final := path.Final()
 	gain := 0.0
 	if player.GGRating > 0 && final.GGRating > 0 {
@@ -255,49 +293,120 @@ func evolutionPathCandidate(cycle string, report cards.CardReport, player domain
 	}
 	potential := cards.EvoPotential{Path: path, FinalOverall: final.Rating, FinalGGRating: final.GGRating, GGRatingGain: gain, GainedPlayStyles: path.GainedPlayStyles(), CoinsCost: path.CoinsCost, PointsCost: path.PointsCost, TrainingTime: path.TrainingTime}
 	cardKey := evolutionCardKey(player, report.Slug)
-	return EvolutionPathCandidate{ID: evolutionPathID(cycle, cardKey, path), Potential: potential, Impact: evolutionPathImpact(club, player, final), VersionHash: evolutionPathVersion(path)}
+	impact := evolutionPathImpactWithEvaluator(club, player, final, evaluator, contexto, contextosPorVaga)
+	currentEvaluation, finalEvaluation := avaliacoesDoPath(player.Player, final, impact, evaluator, contexto)
+	return EvolutionPathCandidate{ID: evolutionPathID(cycle, cardKey, path), Potential: potential, Impact: impact,
+		CurrentEvaluation: currentEvaluation, FinalEvaluation: finalEvaluation, VersionHash: evolutionPathVersion(path)}
 }
 
 func evolutionPathImpact(club domain.Club, player domain.ClubPlayer, final domain.Player) EvolutionPathImpact {
-	position, finalRating := final.GGRatingPos, final.GGRating
-	if position == "" || finalRating <= 0 {
-		return EvolutionPathImpact{Kind: "sem_comparacao"}
+	registry, _ := analyze.NovoRegistroAvaliadores()
+	return evolutionPathImpactWithEvaluator(club, player, final, registry, domain.ContextoAvaliacao{Fonte: domain.FonteFutGG}, nil)
+}
+
+func evolutionPathImpactWithEvaluator(club domain.Club, player domain.ClubPlayer, final domain.Player, evaluator analyze.Avaliador, contexto domain.ContextoAvaliacao, contextosPorVaga map[int]domain.ContextoAvaliacao) EvolutionPathImpact {
+	if evaluator == nil {
+		return EvolutionPathImpact{Kind: "sem_comparacao", Position: final.GGRatingPos, FinalGGRating: final.GGRating}
 	}
-	starters := starterRatings(club, position)
-	if len(starters) == 0 {
-		return EvolutionPathImpact{Kind: "sem_comparacao", Position: position, FinalGGRating: finalRating}
+	type comparison struct {
+		slot              domain.SquadSlot
+		starter           domain.ClubPlayer
+		starterEvaluation domain.AvaliacaoCarta
+		finalEvaluation   domain.AvaliacaoCarta
+		gain              float64
+		sameCopy          bool
 	}
-	for _, starter := range starters {
-		if samePhysicalClubCard(club, player, starter.Player) {
-			if finalRating > starter.Rating {
-				copy := starter.Player
-				return EvolutionPathImpact{Kind: "melhora_titular", SlotIndex: starter.Index, Position: position, Starter: &copy, StarterGGRating: starter.Rating, FinalGGRating: finalRating, Gain: finalRating - starter.Rating}
+	var restricted *domain.SquadSlot
+	for pass := 0; pass < 2 && restricted == nil; pass++ {
+		for i := range club.Squad.Starters {
+			slot := &club.Squad.Starters[i]
+			if !pathFinalPlaysAt(final, slot.Position) {
+				continue
 			}
-			return EvolutionPathImpact{Kind: "nao_supera", SlotIndex: starter.Index, Position: position, StarterGGRating: starter.Rating, FinalGGRating: finalRating}
-		}
-	}
-	// Uma versÃ£o do mesmo atleta jÃ¡ no XI sÃ³ pode substituir aquela mesma
-	// vaga; afirmar que ela ocupa outro slot criaria um XI ilegal em duplicata.
-	for _, starter := range starters {
-		if starter.Player.PlayerKey() == player.PlayerKey() {
-			if finalRating > starter.Rating {
-				copy := starter.Player
-				return EvolutionPathImpact{Kind: "entra_no_xi", SlotIndex: starter.Index, Position: position, Starter: &copy, StarterGGRating: starter.Rating, FinalGGRating: finalRating, Gain: finalRating - starter.Rating}
+			starter, ok := club.PlayerForSlot(*slot)
+			if !ok {
+				continue
 			}
-			return EvolutionPathImpact{Kind: "nao_supera", SlotIndex: starter.Index, Position: position, StarterGGRating: starter.Rating, FinalGGRating: finalRating}
+			if (pass == 0 && samePhysicalClubCard(club, player, starter)) || (pass == 1 && starter.PlayerKey() == player.PlayerKey()) {
+				restricted = slot
+				break
+			}
 		}
 	}
-	weakest := starters[0]
-	for _, starter := range starters[1:] {
-		if starter.Rating < weakest.Rating {
-			weakest = starter
+	var comparisons []comparison
+	for _, slot := range club.Squad.Starters {
+		if restricted != nil && slot.Index != restricted.Index {
+			continue
+		}
+		if !pathFinalPlaysAt(final, slot.Position) {
+			continue
+		}
+		starter, ok := club.PlayerForSlot(slot)
+		if !ok {
+			continue
+		}
+		ctx := contexto
+		if specific, ok := contextosPorVaga[slot.Index]; ok {
+			ctx = specific
+		}
+		ctx.Posicao = slot.Position
+		starterEvaluation := evaluator.Avaliar(starter.Player, slot.Position, ctx)
+		finalEvaluation := evaluator.Avaliar(final, slot.Position, ctx)
+		if !starterEvaluation.Disponivel || !finalEvaluation.Disponivel {
+			continue
+		}
+		comparisons = append(comparisons, comparison{slot: slot, starter: starter, starterEvaluation: starterEvaluation,
+			finalEvaluation: finalEvaluation, gain: finalEvaluation.Nota - starterEvaluation.Nota,
+			sameCopy: samePhysicalClubCard(club, player, starter)})
+	}
+	if len(comparisons) == 0 {
+		position, rating := final.GGRatingPos, final.GGRating
+		return EvolutionPathImpact{Kind: "sem_comparacao", Position: position, FinalGGRating: rating}
+	}
+	best := comparisons[0]
+	for _, candidate := range comparisons[1:] {
+		if candidate.gain > best.gain {
+			best = candidate
 		}
 	}
-	if finalRating > weakest.Rating {
-		copy := weakest.Player
-		return EvolutionPathImpact{Kind: "entra_no_xi", SlotIndex: weakest.Index, Position: position, Starter: &copy, StarterGGRating: weakest.Rating, FinalGGRating: finalRating, Gain: finalRating - weakest.Rating}
+	starter := best.starter
+	starterGG, _ := starter.GGRatingAt(best.slot.Position)
+	finalGG, _ := final.GGRatingAt(best.slot.Position)
+	kind := "nao_supera"
+	if best.gain > 0 {
+		if best.sameCopy {
+			kind = "melhora_titular"
+		} else {
+			kind = "entra_no_xi"
+		}
 	}
-	return EvolutionPathImpact{Kind: "nao_supera", SlotIndex: weakest.Index, Position: position, StarterGGRating: weakest.Rating, FinalGGRating: finalRating}
+	return EvolutionPathImpact{Kind: kind, SlotIndex: best.slot.Index, Position: best.slot.Position, Starter: &starter,
+		StarterGGRating: starterGG, FinalGGRating: finalGG, Gain: best.gain,
+		StarterEvaluation: best.starterEvaluation, FinalEvaluation: best.finalEvaluation}
+}
+
+func pathFinalPlaysAt(final domain.Player, position domain.Position) bool {
+	return final.GGRatingPos == position || final.PlaysAt(position)
+}
+
+func avaliacoesDoPath(current, final domain.Player, impact EvolutionPathImpact, evaluator analyze.Avaliador, contexto domain.ContextoAvaliacao) (domain.AvaliacaoCarta, domain.AvaliacaoCarta) {
+	position := impact.Position
+	ctx := contexto
+	if impact.FinalEvaluation.Disponivel {
+		position = impact.FinalEvaluation.Contexto.Posicao
+		ctx = impact.FinalEvaluation.Contexto
+	}
+	if position == "" {
+		position = final.GGRatingPos
+	}
+	if position == "" {
+		position = final.Position
+	}
+	ctx.Posicao = position
+	if position == "" || evaluator == nil {
+		return domain.AvaliacaoCarta{Contexto: ctx, Motivo: "posição final ausente"}, domain.AvaliacaoCarta{Contexto: ctx, Motivo: "posição final ausente"}
+	}
+	return evaluator.Avaliar(current, position, ctx), evaluator.Avaliar(final, position, ctx)
 }
 
 type starterRating struct {

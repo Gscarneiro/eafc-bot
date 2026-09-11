@@ -36,6 +36,15 @@ func TestMergeCurrentPriceTrendsIgnoraPrecoDesconhecido(t *testing.T) {
 	}
 }
 
+func detalhesDefensivos(n int) *domain.DetailedAttributes {
+	v := func() *int { value := n; return &value }
+	return &domain.DetailedAttributes{
+		Acceleration: v(), SprintSpeed: v(), Reactions: v(), DefensiveAwareness: v(),
+		StandingTackle: v(), SlidingTackle: v(), Strength: v(), Aggression: v(),
+		Jumping: v(), ShortPassing: v(), Composure: v(), BallControl: v(),
+	}
+}
+
 // A reserva existia no config mas não entrava em nenhuma decisão: Budget
 // somava cash+raisable+extra_budget direto, sem descontar market.reserve —
 // então configurar uma reserva não mudava NADA na lista de upgrades. Este
@@ -54,6 +63,8 @@ func TestAnalyzeAndBuildOrcamentoDescontaReserva(t *testing.T) {
 	candidata := domain.Player{ID: 2, Rating: 90, Position: domain.CB,
 		Attributes: domain.Attributes{Pace: 90, Shooting: 90, Passing: 90, Dribbling: 90, Defending: 90, Physical: 90},
 		Price:      domain.Price{Coins: 5000}}
+	titular.DetailedAttributes = detalhesDefensivos(50)
+	candidata.DetailedAttributes = detalhesDefensivos(90)
 
 	club := domain.Club{
 		GamerTag: "BilingualBee", Cycle: "26", Coins: 5000,
@@ -63,6 +74,7 @@ func TestAnalyzeAndBuildOrcamentoDescontaReserva(t *testing.T) {
 
 	build := func(reserve int) analyze.Upgrade {
 		cfg := config.Default()
+		cfg.Evaluation.UseBot = true
 		cfg.GamerTag = club.GamerTag
 		cfg.Market.Reserve = reserve
 		snap := &futgg.Snapshot{Club: club, Market: []domain.Player{candidata}}
@@ -84,6 +96,40 @@ func TestAnalyzeAndBuildOrcamentoDescontaReserva(t *testing.T) {
 	}
 }
 
+func TestAnalyzeAndBuildSaldoManualSubstituiZeroDaColeta(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.NewJSON(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	titular := domain.Player{ID: 1, Rating: 70, Position: domain.CB,
+		Attributes: domain.Attributes{Pace: 50, Shooting: 50, Passing: 50, Dribbling: 50, Defending: 50, Physical: 50}}
+	candidata := domain.Player{ID: 2, Rating: 90, Position: domain.CB,
+		Attributes: domain.Attributes{Pace: 90, Shooting: 90, Passing: 90, Dribbling: 90, Defending: 90, Physical: 90},
+		Price:      domain.Price{Coins: 5_000}}
+	titular.DetailedAttributes = detalhesDefensivos(50)
+	candidata.DetailedAttributes = detalhesDefensivos(90)
+	snap := &futgg.Snapshot{Club: domain.Club{
+		GamerTag: "BilingualBee", Cycle: "26", Coins: 0,
+		Players: []domain.ClubPlayer{{Player: titular, InSquad: true, SquadSlot: domain.CB}},
+		Squad:   domain.Squad{Starters: []domain.SquadSlot{{Position: domain.CB, PlayerID: titular.ID}}},
+	}, Market: []domain.Player{candidata}}
+	cfg := config.Default()
+	cfg.Evaluation.UseBot = true
+	saldo := 5_000
+	cfg.Market.ManualCoins = &saldo
+
+	data, err := analyzeAndBuild(ctx, cfg, st, snap, time.Now(), true, nil, analyze.GauntletPlan{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Club.Coins != saldo || len(data.Upgrades) != 1 || !data.Upgrades[0].Affordable {
+		t.Fatalf("saldo manual não entrou no orçamento: coins=%d upgrades=%+v", snap.Club.Coins, data.Upgrades)
+	}
+}
+
 // Um compromisso planejado no ledger é tão real para o orçamento quanto a
 // reserva: a coleta seguinte não pode voltar a recomendar gastar essas moedas
 // só porque o snapshot anterior foi criado antes do lançamento local.
@@ -99,8 +145,11 @@ func TestAnalyzeAndBuildOrcamentoDescontaCompromissoDoLedger(t *testing.T) {
 	}
 	titular := domain.Player{ID: 1, Rating: 70, Position: domain.CB, Attributes: domain.Attributes{Pace: 50, Shooting: 50, Passing: 50, Dribbling: 50, Defending: 50, Physical: 50}}
 	candidata := domain.Player{ID: 2, Rating: 90, Position: domain.CB, Attributes: domain.Attributes{Pace: 90, Shooting: 90, Passing: 90, Dribbling: 90, Defending: 90, Physical: 90}, Price: domain.Price{Coins: 5000}}
+	titular.DetailedAttributes = detalhesDefensivos(50)
+	candidata.DetailedAttributes = detalhesDefensivos(90)
 	club := domain.Club{GamerTag: "BilingualBee", Cycle: "26", Coins: 5000, Players: []domain.ClubPlayer{{Player: titular, InSquad: true, SquadSlot: domain.CB}}, Squad: domain.Squad{Starters: []domain.SquadSlot{{Position: domain.CB, PlayerID: 1}}}}
 	cfg := config.Default()
+	cfg.Evaluation.UseBot = true
 	cfg.GamerTag = club.GamerTag
 	data, err := analyzeAndBuild(ctx, cfg, st, &futgg.Snapshot{Club: club, Market: []domain.Player{candidata}}, time.Now(), true, nil, analyze.GauntletPlan{})
 	if err != nil {

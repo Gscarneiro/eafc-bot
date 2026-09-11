@@ -1,3 +1,6 @@
 .rank-row.unaffordable {
   opacity: 0.62;
 }
+.vigiadas-panel { margin-top: var(--space-6); }
+.vigiadas-panel .panel-head-meta { color: var(--turf); text-decoration: none; font-weight: 700; }
+.vigiadas-panel .panel-head-meta:hover { text-decoration: underline; }

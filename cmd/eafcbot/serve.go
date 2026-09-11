@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
 	"math/rand"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"runtime"
@@ -18,6 +21,7 @@ import (
 	"github.com/gscarneiro/eafc-bot/internal/analyze"
 	"github.com/gscarneiro/eafc-bot/internal/api"
 	"github.com/gscarneiro/eafc-bot/internal/config"
+	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/scheduler"
 	"github.com/gscarneiro/eafc-bot/internal/store"
 	"github.com/gscarneiro/eafc-bot/internal/webui"
@@ -106,15 +110,38 @@ func cmdServe(ctx context.Context, args []string) error {
 	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,
 		EvolutionMinRating: cfg.Serve.CardsMinRating, EvolutionExtraBudget: cfg.Market.ExtraBudget,
-		MarketReserve:    cfg.Market.Reserve,
-		ChemistryModel:   cfg.ChemistryModel(),
+		MarketReserve:  cfg.Market.Reserve,
+		UpgradeMinGain: cfg.Report.MinGain, UpgradeAllowOutOfPos: cfg.Report.AllowOutOfPos,
+		UpgradeAllowUnpriced: cfg.Report.AllowUnpriced,
+		ChemistryModel:       cfg.ChemistryModel(),
+		EvaluationContext: func() domain.ContextoAvaliacao {
+			current := d.config()
+			fonte := domain.FonteAvaliacao(current.Evaluation.ExternalSource)
+			if current.Evaluation.UseBot {
+				fonte = domain.FonteBot
+			}
+			return domain.ContextoAvaliacao{Fonte: fonte, Perfil: current.Evaluation.Profile, Ciclo: current.FutGG.Cycle, Patch: current.Evaluation.Patch, Plataforma: current.Platform, EstiloJogo: current.Evaluation.PlayStyle}
+		},
 		CacheTTL:         10 * time.Second,
 		Trigger:          func() { go d.run(context.Background()) },
 		Status:           d.status,
 		EvolutionAdvisor: evolutionAdvisor,
 	}
 	apiSrv.Config = &api.ConfigEditor{
-		Get:          func() config.UISettings { return d.config().Editable() },
+		Get:      func() config.UISettings { return d.config().Editable() },
+		GetCoins: func() *int { return d.config().Market.ManualCoins },
+		UpdateCoins: func(coins int) (int, error) {
+			current := d.config()
+			current.Market.ManualCoins = &coins
+			if err := current.Validate(); err != nil {
+				return 0, err
+			}
+			if err := current.SaveManualCoins(*cfgPath, coins); err != nil {
+				return 0, fmt.Errorf("gravando saldo: %w", err)
+			}
+			d.setConfig(current)
+			return coins, nil
+		},
 		GetFavorites: func() []string { return splitFavorites(d.config().Serve.EvolutionFavorites) },
 		UpdateFavorites: func(favorites []string) error {
 			current := d.config()
@@ -126,6 +153,7 @@ func cmdServe(ctx context.Context, args []string) error {
 			return nil
 		},
 		GetProgress: func(slug string) []string { return d.config().Serve.EvolutionProgress[slug] },
+		AllProgress: func() map[string][]string { return d.config().Serve.EvolutionProgress },
 		UpdateProgress: func(slug string, completed []string) error {
 			current := d.config()
 			if err := current.SaveEvolutionProgress(*cfgPath, slug, completed); err != nil {
@@ -235,22 +263,80 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 		return err
 	}
 
+	agora := time.Now()
+
+	// Watchlist, ledger e 29 dias de preço ANTES de analyzeAndBuild — nessa
+	// ordem de propósito, por dois motivos:
+	//  1. analyzeAndBuild lê o ledger (Committed, pro orçamento disponível)
+	//     e o histórico de preço (Trends) pra calcular Upgrades/Evolutions;
+	//     semear depois faria a primeira análise ignorar os dois.
+	//  2. demoSeedPriceHistory precisa rodar ANTES do SavePrices que
+	//     analyzeAndBuild dispara sozinho pro mercado — ver o comentário da
+	//     função pra por quê (a mesma trava de 1h de SavePricesAt morde dos
+	//     dois lados, dependendo da ordem).
+	for _, entry := range demoWatchlist() {
+		if err := st.UpsertWatchlist(ctx, cfg.FutGG.Cycle, entry); err != nil {
+			return fmt.Errorf("semeando watchlist de demo: %w", err)
+		}
+	}
+	for _, entry := range demoLedger(agora) {
+		if err := st.AppendLedger(ctx, cfg.FutGG.Cycle, entry); err != nil {
+			return fmt.Errorf("semeando ledger de demo: %w", err)
+		}
+	}
+	if err := demoSeedPriceHistory(ctx, st, cfg.FutGG.Cycle, agora); err != nil {
+		return err
+	}
+
 	gauntletPlan := analyze.BuildGauntletPlanWithOptions(snap.Club, analyze.GauntletOptions{ChemistryModel: cfg.ChemistryModel()})
-	if _, err := analyzeAndBuild(ctx, cfg, st, snap, time.Now(), false, demoCardReports(snap.Club), gauntletPlan); err != nil {
+	data, err := analyzeAndBuild(ctx, cfg, st, snap, agora, false, demoCardReports(snap.Club), gauntletPlan)
+	if err != nil {
+		return err
+	}
+
+	// Snapshots dos 29 dias ANTERIORES, com Nota/Saldo derivando até o valor
+	// de hoje — precisa de data.SquadScore, por isso só depois daqui.
+	if err := demoHistoricalSnapshots(ctx, st, cfg.FutGG.Cycle, agora, data.SquadScore, snap.Club.Coins); err != nil {
 		return err
 	}
 
 	fmt.Println("modo demo: dados fictícios, sem rede — a análise mostra paths")
-	fmt.Println("confirmados, alternativos, sem path e um candidato que entra no XI.")
+	fmt.Println("confirmados, alternativos, sem path, falha de coleta e um grafo com")
+	fmt.Println("ramificação e reencontro; 30 dias de preço/nota, watchlist, extrato,")
+	fmt.Println("tarefas concluídas e paths salvos já vêm semeados.")
 	demoCfg := cfg
+	// Progresso de evolução (PUT /api/evolucoes/{slug}/progresso) é uma
+	// anotação local por slug+nome — os nomes batem com os Chain de
+	// demoCardReports/demoBranchingCardReport de propósito, senão o
+	// checklist do Workbench nunca bateria com nada.
+	demoCfg.Serve.EvolutionProgress = map[string][]string{
+		"osimhen-88": {"Ponta Explosiva"},
+		"j-david-88": {"Caçador de Área", "Artilheiro Implacável", "Matador de Área"},
+		"yildiz-79":  {"Ala Veloz"},
+	}
 	apiSrv := &api.Server{
 		Store: st, Cycle: cfg.FutGG.Cycle, History: cfg.Serve.RetentionDays,
 		EvolutionMinRating: cfg.Serve.CardsMinRating, EvolutionExtraBudget: cfg.Market.ExtraBudget,
 		MarketReserve:  cfg.Market.Reserve,
-		ChemistryModel: cfg.ChemistryModel(),
-		CacheTTL:       10 * time.Second,
-		Trigger:        func() {}, // não há job de verdade para acionar no demo
-		Status:         func() api.JobStatus { return api.JobStatus{} },
+		UpgradeMinGain: demoCfg.Report.MinGain, UpgradeAllowOutOfPos: demoCfg.Report.AllowOutOfPos,
+		UpgradeAllowUnpriced: demoCfg.Report.AllowUnpriced,
+		ChemistryModel:       cfg.ChemistryModel(),
+		EvaluationContext: func() domain.ContextoAvaliacao {
+			fonte := domain.FonteAvaliacao(demoCfg.Evaluation.ExternalSource)
+			if demoCfg.Evaluation.UseBot {
+				fonte = domain.FonteBot
+			}
+			return domain.ContextoAvaliacao{Fonte: fonte, Perfil: demoCfg.Evaluation.Profile, Ciclo: demoCfg.FutGG.Cycle, Patch: demoCfg.Evaluation.Patch, Plataforma: demoCfg.Platform, EstiloJogo: demoCfg.Evaluation.PlayStyle}
+		},
+		CacheTTL: 10 * time.Second,
+		Trigger:  func() {}, // não há job de verdade para acionar no demo
+		Status: func() api.JobStatus {
+			st := api.JobStatus{DailyAt: demoCfg.Serve.DailyAt}
+			if next, err := scheduler.Next(time.Now(), demoCfg.Serve.DailyAt); err == nil {
+				st.NextRun = &next
+			}
+			return st
+		},
 		EvolutionAdvisor: advisor.Func(func(_ context.Context, _ []byte) (advisor.AnalysisResult, error) {
 			return advisor.AnalysisResult{
 				Verdict:       "situacional",
@@ -263,13 +349,22 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 		}),
 	}
 	apiSrv.Config = &api.ConfigEditor{
-		Get:          func() config.UISettings { return demoCfg.Editable() },
+		Get:      func() config.UISettings { return demoCfg.Editable() },
+		GetCoins: func() *int { return demoCfg.Market.ManualCoins },
+		UpdateCoins: func(coins int) (int, error) {
+			demoCfg.Market.ManualCoins = &coins
+			if err := demoCfg.Validate(); err != nil {
+				return 0, err
+			}
+			return coins, nil
+		},
 		GetFavorites: func() []string { return splitFavorites(demoCfg.Serve.EvolutionFavorites) },
 		UpdateFavorites: func(favorites []string) error {
 			demoCfg.Serve.EvolutionFavorites = strings.Join(favorites, ",")
 			return nil
 		},
 		GetProgress: func(slug string) []string { return demoCfg.Serve.EvolutionProgress[slug] },
+		AllProgress: func() map[string][]string { return demoCfg.Serve.EvolutionProgress },
 		UpdateProgress: func(slug string, completed []string) error {
 			if demoCfg.Serve.EvolutionProgress == nil {
 				demoCfg.Serve.EvolutionProgress = map[string][]string{}
@@ -291,7 +386,112 @@ func serveDemo(ctx context.Context, cfg config.Config, dist fs.FS, open bool) er
 			return demoCfg.Editable(), nil
 		},
 	}
+
+	// As duas semeaduras abaixo passam pelo handler HTTP de verdade em vez
+	// de reimplementar a montagem de agenda/id de path — os dois cálculos
+	// (analyze.AcaoID por trás de /api/agenda, evolutionPathID por trás de
+	// /api/evolucoes/caminhos) são privados a internal/api de propósito, e
+	// reproduzi-los aqui arriscaria os dois divergirem em silêncio. Rodar
+	// contra o próprio servidor garante que o dado semeado é exatamente o
+	// que a tela veria batendo nessas rotas.
+	if err := demoSeedAgendaFeedback(ctx, apiSrv, st, cfg.FutGG.Cycle, 2); err != nil {
+		return fmt.Errorf("semeando feedback de demo: %w", err)
+	}
+	if err := demoSeedSavedPaths(apiSrv, "osimhen-88", "j-david-88"); err != nil {
+		return fmt.Errorf("semeando paths salvos de demo: %w", err)
+	}
+
 	return serveHTTP(ctx, demoCfg, dist, apiSrv, open)
+}
+
+// demoSeedAgendaFeedback marca até `n` ações de "agora" como já aceitas,
+// usando o id que o próprio /api/agenda calcula — um id digitado à mão
+// tornaria "concluídas" coincidência, não prova de join real com o
+// feedback (ver AgendaResponse.Concluidas em internal/api/agenda.go).
+func demoSeedAgendaFeedback(ctx context.Context, apiSrv *api.Server, st store.Store, cycle string, n int) error {
+	req := httptest.NewRequest(http.MethodGet, "/api/agenda", nil)
+	w := httptest.NewRecorder()
+	apiSrv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		return fmt.Errorf("consultando agenda: status %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Agenda struct {
+			Agora []struct {
+				ID string `json:"id"`
+			} `json:"agora"`
+		} `json:"agenda"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		return fmt.Errorf("decodificando agenda: %w", err)
+	}
+	for i, item := range resp.Agenda.Agora {
+		if i >= n {
+			break
+		}
+		entry := domain.DecisionFeedback{
+			ID: fmt.Sprintf("demo-feedback-%d", i+1), ActionID: item.ID, Cycle: cycle,
+			Status: domain.FeedbackAceita, Reason: "demo: já resolvido", RecordedAt: time.Now(),
+		}
+		if err := st.AppendFeedback(ctx, cycle, entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// demoSeedSavedPaths salva, para cada slug pedido, o candidato de caminho
+// com cadeia de 3 evoluções (ver demoCardReports: só Osimhen tem um
+// alternate assim, e David só tem isso como Best) — é o que dá pra
+// /api/evolucoes/progresso mostrar "1 de 3" ao lado de "3 de 3" em vez de
+// dois caminhos de um passo só. O id vem do próprio /api/evolucoes/caminhos,
+// nunca calculado aqui (ver o comentário em serveDemo).
+func demoSeedSavedPaths(apiSrv *api.Server, slugs ...string) error {
+	req := httptest.NewRequest(http.MethodGet, "/api/evolucoes/caminhos", nil)
+	w := httptest.NewRecorder()
+	apiSrv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		return fmt.Errorf("consultando caminhos: status %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Value []struct {
+			CardSlug string `json:"card_slug"`
+			Paths    []struct {
+				ID        string `json:"id"`
+				Potential struct {
+					Path struct {
+						Chain []string `json:"chain"`
+					} `json:"path"`
+				} `json:"potential"`
+			} `json:"paths"`
+		} `json:"value"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		return fmt.Errorf("decodificando caminhos: %w", err)
+	}
+	want := make(map[string]bool, len(slugs))
+	for _, slug := range slugs {
+		want[slug] = true
+	}
+	for _, row := range resp.Value {
+		if !want[row.CardSlug] {
+			continue
+		}
+		for _, path := range row.Paths {
+			if len(path.Potential.Path.Chain) != 3 {
+				continue
+			}
+			body, _ := json.Marshal(map[string]string{"path_id": path.ID})
+			saveReq := httptest.NewRequest(http.MethodPost, "/api/evolucoes/caminhos/salvos", bytes.NewReader(body))
+			saveW := httptest.NewRecorder()
+			apiSrv.Handler().ServeHTTP(saveW, saveReq)
+			if saveW.Code != http.StatusOK {
+				return fmt.Errorf("salvando path de %s: status %d: %s", row.CardSlug, saveW.Code, saveW.Body.String())
+			}
+			break
+		}
+	}
+	return nil
 }
 
 func serveHTTP(ctx context.Context, cfg config.Config, dist fs.FS, apiSrv *api.Server, open bool) error {
@@ -371,8 +571,16 @@ func (d *daemon) setConfig(cfg config.Config) {
 
 func (d *daemon) status() api.JobStatus {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.st
+	st := d.st
+	d.mu.Unlock()
+	// NextRun mora aqui, não em internal/api, porque só cmd conhece
+	// internal/scheduler — api.JobStatus é só o envelope.
+	dailyAt := d.config().Serve.DailyAt
+	st.DailyAt = dailyAt
+	if next, err := scheduler.Next(time.Now(), dailyAt); err == nil {
+		st.NextRun = &next
+	}
+	return st
 }
 
 func (d *daemon) run(ctx context.Context) {

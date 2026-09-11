@@ -1,4 +1,5 @@
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { fetchWatchlist } from "../api";
 import { asyncGate } from "../components/asyncGate";
 import Chip from "../components/Chip";
 import EmptyState from "../components/EmptyState";
@@ -10,7 +11,8 @@ import TrendChart from "../components/TrendChart";
 import { formatCoins, formatSigned } from "../format";
 import { formatFilter, type Filter } from "../odata";
 import { useCollection } from "../useCollection";
-import type { MercadoCollection, Upgrade, UpgradeFunnel } from "../types";
+import { useData } from "../useData";
+import type { MercadoCollection, Upgrade, UpgradeFunnel, WatchlistRow } from "../types";
 import "../shared.css";
 import "./Mercado.css";
 
@@ -27,8 +29,42 @@ function MercadoEmpty({ funnel }: { funnel: UpgradeFunnel }) {
   </div>;
 }
 
+function Vigiadas({ rows }: { rows: WatchlistRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <section className="panel vigiadas-panel">
+      <div className="panel-head">
+        <span>Vigiadas <span className="panel-head-sub">/ Watchlist</span></span>
+        <Link className="panel-head-meta" to="/mercado/plano">gerenciar</Link>
+      </div>
+      <div className="tablewrap">
+        <table>
+          <thead><tr><th>Carta</th><th>30d</th><th className="num">Preço</th><th className="num">Variação</th></tr></thead>
+          <tbody>
+            {rows.map((row) => {
+              const points = (row.series ?? []).map((pt) => ({ label: pt.observed_at, value: pt.coins }));
+              return (
+                <tr key={row.entry.id}>
+                  <td className="namecell">
+                    <span>{row.entry.name}</span>
+                    {row.entry.protected && <Chip tone="alert"> protegida</Chip>}
+                  </td>
+                  <td>{points.length >= 2 ? <TrendChart data={points} compact height={16} /> : <span className="chart-empty-inline">—</span>}</td>
+                  <td className="num coin">{row.player?.price?.coins ? formatCoins(row.player.price.coins) : "—"}</td>
+                  <td className="num">{row.has_trend ? <span className={row.trend.change_pct >= 0 ? "up" : "down"}>{formatSigned(row.trend.change_pct)}%</span> : "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export default function Mercado() {
   const collection = useCollection<Upgrade>("/api/mercado", { defaultOrderBy: [{ field: "efficiency", desc: true }], pageSize: 20 });
+  const watchlistData = useData(fetchWatchlist, []);
   const [params, setParams] = useSearchParams();
   const sort = params.get("sort") || "efficiency";
   const position = params.get("position") || "todas";
@@ -87,5 +123,6 @@ export default function Mercado() {
       })}</div>
       <Pagination page={collection.page} pages={collection.pages} onPage={collection.setPage} />
     </>}
+    <Vigiadas rows={watchlistData.data?.value ?? []} />
   </div>;
 }

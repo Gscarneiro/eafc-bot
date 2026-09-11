@@ -171,7 +171,7 @@ func normalizeGauntletRequest(req GauntletRequest) GauntletRequest {
 // comportamento.
 func BuildGauntletPlanFromRequest(club domain.Club, req GauntletRequest) GauntletPlan {
 	req = normalizeGauntletRequest(req)
-	plan := GauntletPlan{Status: "unavailable"}
+	plan := GauntletPlan{Status: "unavailable", RatingVersion: domain.GGRatingVersion, CardIdentityVersion: GauntletCardIdentityVersion}
 
 	if err := req.Rules.Validate(); err != nil {
 		plan.Reason = err.Error()
@@ -196,11 +196,11 @@ func BuildGauntletPlanFromRequest(club domain.Club, req GauntletRequest) Gauntle
 
 	pool := gauntletPoolExcluding(club, req.Excluded)
 	totalCards := req.Rules.Rodadas * (req.Rules.Titulares + req.Rules.Reservas)
-	if len(pool) < totalCards {
+	if distinct := gauntletDistinctCardCount(pool); distinct < totalCards {
 		plan.Reason = fmt.Sprintf(
-			"elenco tem %d cartas elegíveis com GG Rating conhecido (após exclusões), precisa de %d "+
+			"elenco tem %d cartas distintas elegíveis com GG Rating conhecido (após exclusões), precisa de %d "+
 				"(%d titulares + %d reservas em %d rodadas) para montar o plano",
-			len(pool), totalCards, req.Rules.Rodadas*req.Rules.Titulares, req.Rules.Rodadas*req.Rules.Reservas, req.Rules.Rodadas)
+			distinct, totalCards, req.Rules.Rodadas*req.Rules.Titulares, req.Rules.Rodadas*req.Rules.Reservas, req.Rules.Rodadas)
 		return plan
 	}
 	plan.Warnings = gauntletWarnings(pool)
@@ -262,7 +262,7 @@ func resolveFormationSource(club domain.Club, source FormationSource, manualSlot
 			return nil, "", fmt.Errorf("escalação titular não sincronizada")
 		}
 		for _, s := range slots {
-			if _, ok := club.PlayerByID(s.PlayerID); !ok {
+			if _, ok := club.PlayerForSlot(s); !ok {
 				return nil, "", fmt.Errorf("titular ausente do retrato do clube")
 			}
 		}
@@ -294,6 +294,14 @@ func gauntletPoolExcluding(club domain.Club, excluded map[int64]bool) []gauntlet
 		}
 	}
 	return pool
+}
+
+func gauntletDistinctCardCount(pool []gauntletCard) int {
+	ids := make(map[int64]bool, len(pool))
+	for _, card := range pool {
+		ids[card.p.ID] = true
+	}
+	return len(ids)
 }
 
 // gauntletUsedIndices devolve o conjunto de índices do pool que NÃO estão
@@ -450,13 +458,18 @@ func gauntletBuildRounds(pool []gauntletCard, slots []domain.SquadSlot, rodadas 
 		rounds[round-1] = squad
 		roundCards[round-1] = cards
 
-		usedIdx := make(map[int]bool, len(picked))
+		usedCardID := make(map[int64]bool, len(picked))
 		for _, idx := range picked {
-			usedIdx[idx] = true
+			for _, c := range available {
+				if c.idx == idx {
+					usedCardID[c.p.ID] = true
+					break
+				}
+			}
 		}
 		rest := make([]gauntletCard, 0, len(available)-len(picked))
 		for _, c := range available {
-			if !usedIdx[c.idx] {
+			if !usedCardID[c.p.ID] {
 				rest = append(rest, c)
 			}
 		}
@@ -479,6 +492,7 @@ func resolveAllGauntletLocks(pool []gauntletCard, slots []domain.SquadSlot, lock
 ) {
 	lockedByRound = map[int][]gauntletLockedPick{}
 	usedCard := map[int]bool{}
+	usedCardID := map[int64]bool{}
 	usedSlotByRound := map[int]map[int]bool{}
 
 	for _, lock := range locks {
@@ -487,7 +501,7 @@ func resolveAllGauntletLocks(pool []gauntletCard, slots []domain.SquadSlot, lock
 		if lock.ClubItemID != "" {
 			who = fmt.Sprintf("cópia %q", lock.ClubItemID)
 			for _, c := range pool {
-				if c.p.ClubItemID == lock.ClubItemID && !usedCard[c.idx] {
+				if c.p.ClubItemID == lock.ClubItemID && !usedCard[c.idx] && !usedCardID[c.p.ID] {
 					candidates = append(candidates, c)
 					break
 				}
@@ -499,7 +513,7 @@ func resolveAllGauntletLocks(pool []gauntletCard, slots []domain.SquadSlot, lock
 			}
 			key := p.PlayerKey()
 			for _, c := range pool {
-				if c.key == key && !usedCard[c.idx] {
+				if c.key == key && !usedCard[c.idx] && !usedCardID[c.p.ID] {
 					candidates = append(candidates, c)
 				}
 			}
@@ -543,6 +557,7 @@ func resolveAllGauntletLocks(pool []gauntletCard, slots []domain.SquadSlot, lock
 		})
 		usedSlot[bestSlot] = true
 		usedCard[chosen.idx] = true
+		usedCardID[chosen.p.ID] = true
 	}
 
 	slotsByRound = map[int][]domain.SquadSlot{}
@@ -556,7 +571,7 @@ func resolveAllGauntletLocks(pool []gauntletCard, slots []domain.SquadSlot, lock
 		slotsByRound[round] = rem
 	}
 	for _, c := range pool {
-		if !usedCard[c.idx] {
+		if !usedCard[c.idx] && !usedCardID[c.p.ID] {
 			remainingPool = append(remainingPool, c)
 		}
 	}
@@ -655,7 +670,7 @@ func gauntletStrategyDescription(s GauntletStrategy) string {
 		return "Crescente: uma rodada por vez, da última para a primeira — cada rodada leva o melhor XI possível " +
 			"entre as cartas que ainda sobraram, por matching global de GG Rating (nunca posição por posição " +
 			"isolada). Os melhores ficam guardados para a última partida e a força cresce por construção. " +
-			"Nenhum elenco tem duas versões do mesmo jogador, banco incluso, porque o jogo não aceita. Reservas " +
-			"usam as cartas elegíveis restantes mais fracas, sem tirar lugar de titular nenhum."
+			"O plano inteiro não repete a mesma carta, banco incluso; cópia original e evoluída com o mesmo id " +
+			"contam como uma carta só. Reservas usam as cartas elegíveis restantes mais fracas, sem tirar lugar de titular nenhum."
 	}
 }

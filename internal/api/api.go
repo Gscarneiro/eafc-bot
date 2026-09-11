@@ -6,6 +6,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -33,7 +34,9 @@ import (
 const priceSeriesWindow = 30 * 24 * time.Hour
 
 const (
-	benchMinimumRating   = 88
+	// O campo @eafc.minimum_rating continua no contrato por compatibilidade,
+	// mas zero declara explicitamente que o banco não tem corte de overall.
+	benchMinimumRating   = 0
 	benchDefaultPageSize = 24
 	benchMaximumPageSize = 48
 )
@@ -49,6 +52,15 @@ type JobStatus struct {
 	LastStarted *time.Time `json:"last_started,omitempty"`
 	LastSuccess *time.Time `json:"last_success,omitempty"`
 	LastError   string     `json:"last_error,omitempty"`
+	// NextRun/DailyAt são calculados por quem monta o Server (cmd/eafcbot),
+	// nunca aqui: internal/api não pode importar internal/scheduler sem
+	// inverter a camada (scheduler decide QUANDO rodar; api só expõe). Nil
+	// quando o processo não agenda coleta sozinho (ex.: `serve -demo`).
+	// "Próxima coleta PROGRAMADA" é a leitura certa do rótulo — o scheduler
+	// também roda antes disso na subida se o último snapshot estiver velho
+	// (ver ShouldRunNow), então NextRun não é garantia de que nada roda antes.
+	NextRun *time.Time `json:"next_run,omitempty"`
+	DailyAt string     `json:"daily_at,omitempty"`
 }
 
 // Server monta as rotas. Trigger e Status são as únicas pontes para fora
@@ -69,10 +81,21 @@ type Server struct {
 	// orçamento de compra recalculado por request (evoluções confirmadas,
 	// status). O mesmo valor que cmd/eafcbot usa para o snapshot gravado.
 	MarketReserve int
+	// UpgradeMinGain, UpgradeAllowOutOfPos e UpgradeAllowUnpriced espelham
+	// report.*. Quando a referência do editor muda o XI, a API recompõe o
+	// mercado na mesma política do job, sem esperar a próxima coleta.
+	UpgradeMinGain       float64
+	UpgradeAllowOutOfPos bool
+	UpgradeAllowUnpriced bool
 	// ChemistryModel espelha chemistry.model. Zero-valor (Nome=="") cai no
 	// modelo padrão via resolveChemistryModel — mantém compatibilidade com
 	// servidores de teste que não configuram isto.
 	ChemistryModel chemistry.Modelo
+	// Evaluator e EvaluationContext mantêm a fonte escolhida fora das rotas.
+	// O contexto é consultado por request para uma alteração de preferência
+	// refletir imediatamente sem reiniciar o servidor.
+	Evaluator         analyze.Avaliador
+	EvaluationContext func() domain.ContextoAvaliacao
 	// CacheTTL evita reler snapshots grandes a cada chamada da UI. Zero mantém
 	// o comportamento sem cache e é útil para testes que trocam o store entre
 	// requisições.
@@ -102,12 +125,36 @@ func (s *Server) resolveChemistryModel() chemistry.Modelo {
 	return s.ChemistryModel
 }
 
+func (s *Server) resolveEvaluator() analyze.Avaliador {
+	if s.Evaluator != nil {
+		return s.Evaluator
+	}
+	r, err := analyze.NovoRegistroAvaliadores()
+	if err != nil {
+		return nil
+	}
+	return r
+}
+
+func (s *Server) resolveEvaluationContext() domain.ContextoAvaliacao {
+	ctx := domain.ContextoAvaliacao{Fonte: domain.FonteFutGG}
+	if s.EvaluationContext != nil {
+		ctx = s.EvaluationContext()
+	}
+	if ctx.Fonte == "" {
+		ctx.Fonte = domain.FonteFutGG
+	}
+	return ctx
+}
+
 // ConfigEditor expõe somente o subconjunto de preferências que a UI pode
 // alterar. Update deve persistir e trocar a configuração em execução; a API
 // não conhece o caminho do arquivo nem credenciais.
 type ConfigEditor struct {
 	Get             func() config.UISettings
 	Update          func(config.UISettings) (config.UISettings, error)
+	GetCoins        func() *int
+	UpdateCoins     func(int) (int, error)
 	EnvLocked       []string
 	GetFavorites    func() []string
 	UpdateFavorites func([]string) error
@@ -117,6 +164,12 @@ type ConfigEditor struct {
 	// docs/planos/copiloto/03-plano-evolucao-e-workbench.md.
 	GetProgress    func(slug string) []string
 	UpdateProgress func(slug string, completed []string) error
+	// AllProgress devolve o mapa inteiro slug→passos concluídos — usado pelo
+	// painel "Evoluções / pipeline" de Hoje, que precisa somar progresso de
+	// vários paths salvos numa tela só e não pode chamar GetProgress uma vez
+	// por path. Opcional: nil quando o Server não expõe (mesma convenção dos
+	// outros campos deste editor).
+	AllProgress func() map[string][]string
 }
 
 type ConfigResponse struct {
@@ -124,9 +177,14 @@ type ConfigResponse struct {
 	EnvLocked []string          `json:"env_locked"`
 }
 
+type SaldoResponse struct {
+	Coins int `json:"coins"`
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.handleStatus)
+	mux.HandleFunc("GET /api/resumo", s.handleResumo)
 	mux.HandleFunc("GET /api/saude", s.handleSaude)
 	mux.HandleFunc("GET /api/time", s.handleTime)
 	mux.HandleFunc("GET /api/time/{slug}", s.handleTimeSlug)
@@ -135,7 +193,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/gauntlet", s.handleGauntlet)
 	mux.HandleFunc("GET /api/mercado", s.handleMercado)
 	mux.HandleFunc("GET /api/planos/mercado", s.handleMarketPlan)
+	mux.HandleFunc("GET /api/mercado/mesa", s.handleMesa)
 	mux.HandleFunc("GET /api/agenda", s.handleAgenda)
+	mux.HandleFunc("GET /api/watchlist", s.handleWatchlistList)
 	mux.HandleFunc("POST /api/watchlist", s.guardLocalWrite(s.handleWatchlistCreate))
 	mux.HandleFunc("PUT /api/watchlist/{id}", s.guardLocalWrite(s.handleWatchlistUpdate))
 	mux.HandleFunc("DELETE /api/watchlist/{id}", s.guardLocalWrite(s.handleWatchlistDelete))
@@ -143,6 +203,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/planos/sbc", s.guardLocalWrite(s.handlePlanoSBC))
 	mux.HandleFunc("GET /api/feedback", s.handleFeedback)
 	mux.HandleFunc("POST /api/feedback", s.guardLocalWrite(s.handleFeedbackAppend))
+	mux.HandleFunc("GET /api/feedback/gameplay", s.handleGameplayFeedback)
+	mux.HandleFunc("GET /api/feedback/gameplay/qualidade", s.handleGameplayFeedbackQuality)
+	mux.HandleFunc("POST /api/feedback/gameplay", s.guardLocalWrite(s.handleGameplayFeedbackUpsert))
 	mux.HandleFunc("POST /api/import/club", s.guardLocalWrite(s.handleClubImport))
 	mux.HandleFunc("GET /api/evolucoes/caminhos", s.handleEvolutionPaths)
 	mux.HandleFunc("GET /api/evolucoes/caminhos/salvos", s.handleSavedEvolutionPaths)
@@ -162,6 +225,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/capital/investimentos", s.handleCapitalInvestimentos)
 	mux.HandleFunc("GET /api/capital/vendas", s.handleCapitalVendas)
 	mux.HandleFunc("GET /api/capital/sbcs", s.handleCapitalSBCs)
+	mux.HandleFunc("GET /api/capital/extrato", s.handleCapitalExtrato)
+	mux.HandleFunc("GET /api/capital/posicoes", s.handleCapitalPosicoes)
 	mux.HandleFunc("GET /api/hoje/novidades", s.handleHojeNovidades)
 	mux.HandleFunc("GET /api/hoje/noticias", s.handleHojeNoticias)
 	mux.HandleFunc("GET /api/hoje/sbcs", s.handleHojeSBCs)
@@ -171,12 +236,22 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/job", s.handleJobStatus)
 	mux.HandleFunc("POST /api/job", s.guardLocalWrite(s.handleJobTrigger))
 	mux.HandleFunc("POST /api/planos/elenco", s.guardLocalWrite(s.handleSquadPlan))
+	mux.HandleFunc("GET /api/editor/elenco", s.handleSquadEditor)
+	mux.HandleFunc("POST /api/editor/elenco/avaliar", s.guardLocalWrite(s.handleSquadEditorEvaluate))
+	mux.HandleFunc("GET /api/planos/elenco/salvos", s.handleSavedSquadPlans)
+	mux.HandleFunc("POST /api/planos/elenco/salvos", s.guardLocalWrite(s.handleSavedSquadPlanCreate))
+	mux.HandleFunc("PUT /api/planos/elenco/salvos/{id}", s.guardLocalWrite(s.handleSavedSquadPlanUpdate))
+	mux.HandleFunc("DELETE /api/planos/elenco/salvos/{id}", s.guardLocalWrite(s.handleSavedSquadPlanDelete))
+	mux.HandleFunc("POST /api/planos/elenco/salvos/{id}/referencia", s.guardLocalWrite(s.handleSavedSquadPlanReference))
+	mux.HandleFunc("GET /api/avaliacao", s.handleEvaluationCatalog)
 	if s.Config != nil {
 		mux.HandleFunc("GET /api/config", s.handleConfig)
 		mux.HandleFunc("PUT /api/config", s.guardLocalWrite(s.handleConfigUpdate))
+		mux.HandleFunc("PUT /api/saldo", s.guardLocalWrite(s.handleSaldoUpdate))
 		mux.HandleFunc("GET /api/evolucoes/favoritos", s.handleFavorites)
 		mux.HandleFunc("PUT /api/evolucoes/favoritos", s.guardLocalWrite(s.handleFavoritesUpdate))
 		mux.HandleFunc("PUT /api/evolucoes/{slug}/progresso", s.guardLocalWrite(s.handleEvolucoesProgressoUpdate))
+		mux.HandleFunc("GET /api/evolucoes/progresso", s.handleEvolucoesProgressoList)
 	}
 	if s.PairingToken == "" {
 		return mux
@@ -276,6 +351,46 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, ConfigResponse{Settings: out, EnvLocked: s.Config.EnvLocked})
 }
 
+func (s *Server) handleSaldoUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.Config == nil || s.Config.UpdateCoins == nil {
+		http.Error(w, "saldo manual indisponível", http.StatusNotImplemented)
+		return
+	}
+	var in SaldoResponse
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, fmt.Sprintf("lendo saldo: %v", err), http.StatusBadRequest)
+		return
+	}
+	if in.Coins < 0 {
+		http.Error(w, "saldo não pode ser negativo", http.StatusUnprocessableEntity)
+		return
+	}
+	coins, err := s.Config.UpdateCoins(in.Coins)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, SaldoResponse{Coins: coins})
+}
+
+func (s *Server) manualCoins() *int {
+	if s.Config == nil || s.Config.GetCoins == nil {
+		return nil
+	}
+	return s.Config.GetCoins()
+}
+
+func (s *Server) snapshotHistory(ctx context.Context, days int) ([]store.SnapshotSummary, error) {
+	history, err := s.Store.SnapshotHistory(ctx, s.Cycle, days)
+	if err != nil || len(history) == 0 {
+		return history, err
+	}
+	if coins := s.manualCoins(); coins != nil {
+		history[len(history)-1].Coins = *coins
+	}
+	return history, nil
+}
+
 // load busca o snapshot mais recente, já respondendo o erro HTTP certo
 // quando não há nenhum ainda — estado normal na primeira subida, antes da
 // primeira coleta terminar.
@@ -290,20 +405,60 @@ func (s *Server) load(w http.ResponseWriter, r *http.Request) (store.Snapshot, b
 			http.StatusServiceUnavailable)
 		return store.Snapshot{}, false
 	}
+	// Snapshots anteriores Ã  familiaridades_funcao ainda carregam os IDs crus
+	// e o catÃ¡logo. Reidratar somente a cÃ³pia de resposta evita mudar a
+	// fotografia e permite que plano, mercado e editor usem o mesmo contexto.
+	futgg.PreencherFamiliaridadesDoClube(&snap.Club, snap.RoleCatalog)
+	futgg.PreencherFamiliaridadesDoMercado(snap.Market, snap.RoleCatalog)
+	if coins := s.manualCoins(); coins != nil {
+		snap.Club.Coins = *coins
+		snap.Capital = snap.Club.Capital(s.EvolutionExtraBudget, s.MarketReserve, snap.Capital.Committed)
+	}
+	referenciaAplicada := s.aplicarPlanoReferencia(r.Context(), &snap)
+	if referenciaAplicada || s.contextoDeAvaliacaoMudou(snap.Avaliacao) {
+		s.recalcularAnalisesAtuais(&snap)
+	}
 	return snap, true
+}
+
+// contextoDeAvaliacaoMudou só entra em ação em servidores que receberam a
+// preferência viva. Testes e binários antigos sem essa ponte conservam o
+// snapshot pronto; serve, por sua vez, recompõe toda decisão quando o usuário
+// muda a régua sem precisar disparar uma coleta de rede.
+func (s *Server) contextoDeAvaliacaoMudou(snapshot domain.ContextoAvaliacao) bool {
+	if s.EvaluationContext == nil {
+		return false
+	}
+	atual := s.resolveEvaluationContext()
+	return snapshot.Fonte != atual.Fonte || snapshot.Perfil != atual.Perfil ||
+		snapshot.Patch != atual.Patch || snapshot.Plataforma != atual.Plataforma ||
+		snapshot.EstiloJogo != atual.EstiloJogo || snapshot.Ciclo != atual.Ciclo
 }
 
 // TopMove é a melhor jogada disponível hoje — um upgrade de mercado ou uma
 // evolução — para o herói do status abrir com uma recomendação de verdade
 // em vez de só números. Nil quando não há upgrade dentro do orçamento nem
 // evolução que valha a pena (analyze.FindUpgrades/FindEvolutions vazios).
+// GrossCost/Recoup/Profit/Efficiency e Rationale só valem para Kind ==
+// "upgrade" — uma evolução não tem venda embutida nem eficiência comparável
+// (escalas diferentes, ver CLAUDE.md "duas notas, dois domínios").
 type TopMove struct {
-	Kind     string          `json:"kind"` // "upgrade" | "evolution"
-	Slot     domain.Position `json:"slot"`
-	Headline string          `json:"headline"` // "Saliba -> Bastoni no CB", pronto pra exibir
-	Gain     float64         `json:"gain"`     // escala de analyze.Score() — comparável entre os dois kinds
-	NetCost  int             `json:"net_cost"`
-	Link     string          `json:"link"` // "/mercado" ou "/evolucoes", pra onde levar ao clicar
+	Kind       string          `json:"kind"` // "upgrade" | "evolution"
+	Slot       domain.Position `json:"slot"`
+	Headline   string          `json:"headline"` // "Saliba -> Bastoni no CB", pronto pra exibir
+	Gain       float64         `json:"gain"`     // escala de analyze.Score() — comparável entre os dois kinds
+	GrossCost  int             `json:"gross_cost,omitempty"`
+	Recoup     int             `json:"recoup,omitempty"`
+	NetCost    int             `json:"net_cost"`
+	Profit     int             `json:"profit,omitempty"`
+	Efficiency float64         `json:"efficiency,omitempty"`
+	Rationale  []string        `json:"rationale,omitempty"`
+	Link       string          `json:"link"` // "/mercado" ou "/evolucoes", pra onde levar ao clicar
+	// ActionID casa com analyze.AcaoAgenda.ID da MESMA decisão (ver
+	// analyze.AcaoID/EvoAcaoID) — os botões desta carta postam feedback com
+	// este id, então marcar "aceita" aqui já marca a tarefa correspondente
+	// na Agenda, sem duplicar rastreabilidade.
+	ActionID string `json:"action_id"`
 }
 
 // bestMove escolhe entre o melhor upgrade e a melhor evolução do dia pela
@@ -315,13 +470,30 @@ func bestMove(snap store.Snapshot) *TopMove {
 	var best *TopMove
 	if len(snap.Upgrades) > 0 {
 		u := snap.Upgrades[0]
+		// tipo espelha a mesma distinção que analyze.acaoAgendaMercado faz ao
+		// montar o MarketAction correspondente — não replica a checagem de
+		// capital disponível nem de conflito de vaga (PlanMarket precisa da
+		// lista inteira pra isso), só a causa mais comum de a Agenda não virar
+		// "comprar": preço ausente.
+		tipo := string(analyze.MarketBuy)
+		if u.Unpriced {
+			tipo = string(analyze.MarketObserve)
+		} else if !u.Affordable {
+			tipo = string(analyze.MarketWait)
+		}
 		best = &TopMove{
-			Kind:     "upgrade",
-			Slot:     u.Slot,
-			Headline: fmt.Sprintf("%s -> %s no %s", u.Current.Display(), u.Candidate.Display(), u.Slot),
-			Gain:     u.Gain,
-			NetCost:  u.NetCost,
-			Link:     "/mercado",
+			Kind:       "upgrade",
+			Slot:       u.Slot,
+			Headline:   fmt.Sprintf("%s -> %s no %s", u.Current.Display(), u.Candidate.Display(), u.Slot),
+			Gain:       u.Gain,
+			GrossCost:  u.GrossCost,
+			Recoup:     u.Recoup,
+			NetCost:    u.NetCost,
+			Profit:     u.Profit,
+			Efficiency: u.Efficiency,
+			Rationale:  u.Rationale,
+			Link:       "/mercado",
+			ActionID:   analyze.AcaoID(tipo, u.Candidate.ID, u.Candidate.Name),
 		}
 	}
 	if len(snap.EvoMatches) > 0 {
@@ -334,6 +506,7 @@ func bestMove(snap store.Snapshot) *TopMove {
 				Gain:     m.Gain,
 				NetCost:  m.Cost,
 				Link:     "/evolucoes",
+				ActionID: analyze.EvoAcaoID(m.Player.ID, m.Evolution.ID),
 			}
 		}
 	}
@@ -377,12 +550,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		// Snapshots anteriores ao contrato de capital continuam legíveis.
 		capital = snap.Club.Capital(s.EvolutionExtraBudget, s.MarketReserve, 0)
 	}
-	avg, weakSlot, weakName, weakGG := report.SquadSummary(snap.Club)
+	avg, weakSlot, weakName, weakGG := report.SquadSummaryWithEvaluator(snap.Club, s.resolveEvaluator(), snap.Avaliacao, contextosAtuaisDasVagas(snap))
 	sbcs, objs := report.RankChallenges(snap.SBCs, snap.Objectives)
 
-	hist, err := s.Store.SnapshotHistory(r.Context(), s.Cycle, s.History)
+	hist, err := s.snapshotHistory(r.Context(), s.History)
 	if err != nil {
 		hist = nil // o gráfico é enfeite, não motivo para a rota inteira falhar
+	}
+	diff := snap.Diff
+	if len(hist) >= 2 {
+		diff.CoinsDelta = hist[len(hist)-1].Coins - hist[len(hist)-2].Coins
 	}
 
 	writeJSON(w, StatusResponse{
@@ -396,7 +573,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		WeakestName:     weakName,
 		WeakestGGRating: weakGG,
 		TopMove:         bestMove(snap),
-		Diff:            snap.Diff,
+		Diff:            diff,
 		NewCards:        snap.NewCards,
 		News:            snap.FreshNews,
 		SBCs:            sbcs,
@@ -459,6 +636,8 @@ func (s *Server) handleSaude(w http.ResponseWriter, r *http.Request) {
 type RosterCard struct {
 	Player   domain.ClubPlayer `json:"player"`
 	CardSlug string            `json:"card_slug,omitempty"`
+	// Leitura só é preenchido no banco de /api/time — ver leituraDoBot.
+	Leitura *LeituraDoBot `json:"leitura,omitempty"`
 }
 
 // StarterCard acrescenta o slot físico — ver o comentário de
@@ -476,14 +655,42 @@ type StarterCard struct {
 
 // TimeResponse é o elenco: os titulares na ordem do fut.gg, e o banco.
 type TimeResponse struct {
-	Formation     string               `json:"formation"`
-	Starters      []StarterCard        `json:"starters"`
-	Bench         []RosterCard         `json:"bench"`
-	BenchPage     int                  `json:"bench_page"`
-	BenchPageSize int                  `json:"bench_page_size"`
-	BenchTotal    int                  `json:"bench_total"`
-	Optimization  SquadOptimization    `json:"optimization"`
-	Quimica       *chemistry.Resultado `json:"chemistry,omitempty"`
+	Avaliacao     domain.ContextoAvaliacao `json:"avaliacao"`
+	Formation     string                   `json:"formation"`
+	Starters      []StarterCard            `json:"starters"`
+	Bench         []RosterCard             `json:"bench"`
+	BenchPage     int                      `json:"bench_page"`
+	BenchPageSize int                      `json:"bench_page_size"`
+	BenchTotal    int                      `json:"bench_total"`
+	Optimization  SquadOptimization        `json:"optimization"`
+	Quimica       *chemistry.Resultado     `json:"chemistry,omitempty"`
+	// TopMove é "Jogada de hoje" — o mesmo bestMove de StatusResponse,
+	// reaproveitado aqui pra Meu time não precisar buscar /api/status só
+	// por este card.
+	TopMove *TopMove `json:"top_move,omitempty"`
+	// PositionMap é o "Mapa de posições": um GG Rating por slot físico do
+	// XI (na posição do slot, não a nota crua da carta — ver
+	// report.PositionMap) mais a régua de comparação (mesma grandeza).
+	PositionMap []PositionMapRow `json:"position_map"`
+	Regua       float64          `json:"regua"`
+	// SlotOutlook é a anotação de cada slot (banco supera / mercado sem
+	// cotação / teto / sem dado) — ver analyze.SlotOutlook.
+	SlotOutlook []analyze.SlotOutlook `json:"slot_outlook"`
+	// PriceSeries/PriceHistoryStatus cobrem só os eaIds da PÁGINA atual do
+	// banco (Bench acima) — o mesmo classificador de 5 estados de
+	// handleTimeSlug, ver priceHistoryStatus.
+	PriceSeries        map[int64][]store.PricePoint `json:"price_series"`
+	PriceHistoryStatus map[int64]string             `json:"price_history_status"`
+}
+
+// PositionMapRow é o espelho tagueado de report.PositionMapRow — aquele
+// tipo não tem tag JSON de propósito (é struct de html/template, não
+// contrato HTTP; ver CLAUDE.md sobre store.Snapshot/report.Data).
+type PositionMapRow struct {
+	Index    int               `json:"index"`
+	Position domain.Position   `json:"position"`
+	Player   domain.ClubPlayer `json:"player"`
+	Rating   float64           `json:"rating"`
 }
 
 type SquadOptimization struct {
@@ -526,15 +733,15 @@ func (s *Server) currentChemistry(snap store.Snapshot) *chemistry.Resultado {
 	return chemistry.Avaliar(s.resolveChemistryModel(), snap.Club)
 }
 
-// chemistryByPlayer indexa um Resultado por carta, para popular
-// StarterCard.Quimica sem busca linear por titular.
-func chemistryByPlayer(res *chemistry.Resultado) map[int64]chemistry.Jogador {
+// chemistryBySlot indexa o resultado pela vaga física. PlayerID não basta
+// porque duas cópias da mesma carta podem estar em slots distintos.
+func chemistryBySlot(res *chemistry.Resultado) map[int]chemistry.Jogador {
 	if res == nil {
 		return nil
 	}
-	m := make(map[int64]chemistry.Jogador, len(res.Jogadores))
+	m := make(map[int]chemistry.Jogador, len(res.Jogadores))
 	for _, j := range res.Jogadores {
-		m[j.PlayerID] = j
+		m[j.Index] = j
 	}
 	return m
 }
@@ -584,23 +791,34 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 	lookup := newCardSlugLookup(reports)
 
 	quimicaAtual := s.currentChemistry(snap)
-	quimicaPorCarta := chemistryByPlayer(quimicaAtual)
+	quimicaPorVaga := chemistryBySlot(quimicaAtual)
+	contextosPorVaga := contextosAtuaisDasVagas(snap)
+	evaluator := s.resolveEvaluator()
+	avaliacoesDasVagas := analyze.EvaluateSquadSlots(snap.Club, evaluator, snap.Avaliacao, contextosPorVaga)
+	avaliacaoPorVaga := make(map[int]domain.AvaliacaoCarta, len(avaliacoesDasVagas))
+	for _, item := range avaliacoesDasVagas {
+		avaliacaoPorVaga[item.Index] = item.Evaluation
+	}
 
 	main := report.MainSquad(snap.Club)
 	starters := make([]StarterCard, len(main))
-	inSquad := make(map[int64]bool, len(main))
+	inSquad := make(map[string]bool, len(main))
 	for i, c := range main {
-		j, temQuimica := quimicaPorCarta[c.Player.ID]
+		j, temQuimica := quimicaPorVaga[c.Index]
+		positionRating := 0.0
+		if evaluation := avaliacaoPorVaga[c.Index]; evaluation.Disponivel {
+			positionRating = evaluation.Nota
+		}
 		starters[i] = StarterCard{
 			RosterCard:       RosterCard{Player: c.Player, CardSlug: lookup.slug(c.Player)},
 			Index:            c.Index,
 			Position:         c.Position,
-			PositionGGRating: func() float64 { v, _ := c.Player.GGRatingAt(c.Position); return v }(),
+			PositionGGRating: positionRating,
 		}
 		if temQuimica {
 			starters[i].Quimica = &j
 		}
-		inSquad[c.Player.ID] = true
+		inSquad[c.Player.IdentityKey()] = true
 	}
 
 	benchPlayers := filteredBench(snap.Club.Players, inSquad, r)
@@ -614,17 +832,42 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 	if to > total {
 		to = total
 	}
-	bench := make([]RosterCard, 0, to-from)
-	for _, p := range benchPlayers[from:to] {
-		bench = append(bench, RosterCard{Player: p, CardSlug: lookup.slug(p)})
+	pagePlayers := benchPlayers[from:to]
+	ids := make([]int64, len(pagePlayers))
+	for i, p := range pagePlayers {
+		ids[i] = p.ID
+	}
+	series, seriesErr := s.Store.PriceSeries(r.Context(), s.Cycle, ids, priceSeriesWindow)
+	priceSeries := make(map[int64][]store.PricePoint, len(pagePlayers))
+	priceStatus := make(map[int64]string, len(pagePlayers))
+	for _, id := range ids {
+		var pts []store.PricePoint
+		if seriesErr == nil {
+			pts = series[id]
+		}
+		priceSeries[id] = pts
+		priceStatus[id] = priceHistoryStatus(pts, seriesErr)
 	}
 
-	// snap.SquadPlan.Quimica nil é o sentinela de snapshot gravado antes
-	// deste campo existir (mesmo padrão de GauntletPlan.Status=="") —
-	// recompõe o plano inteiro, sem tocar rede: OptimizeSquad é puro.
+	swaps := s.currentSquadSwaps(snap)
+	leituras := s.leituraByPlayerComTrocas(r.Context(), snap, pagePlayers, swaps)
+	bench := make([]RosterCard, 0, to-from)
+	for _, p := range pagePlayers {
+		card := RosterCard{Player: p, CardSlug: lookup.slug(p)}
+		if l, ok := leituras[leituraPlayerKey(p)]; ok {
+			card.Leitura = &l
+		}
+		bench = append(bench, card)
+	}
+
+	// Planos com notas antigas precisam refazer também a escolha dos
+	// jogadores, não só os totais. O clube salvo basta, sem tocar rede.
+	// Mantém o recálculo de snapshots anteriores ao campo de química.
 	squadPlan := snap.SquadPlan
-	if squadPlan.Quimica == nil {
-		squadPlan = analyze.OptimizeSquadWithOptions(snap.Club, analyze.SquadOptions{ChemistryModel: s.resolveChemistryModel()})
+	if squadPlan.Quimica == nil || squadPlan.RatingVersion != domain.GGRatingVersion {
+		squadPlan = analyze.OptimizeSquadWithOptions(snap.Club, analyze.SquadOptions{
+			ChemistryModel: s.resolveChemistryModel(), Evaluator: evaluator, Contexto: snap.Avaliacao, ContextosPorVaga: contextosPorVaga,
+		})
 	}
 
 	opt := SquadOptimization{
@@ -651,16 +894,143 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 	if formation == "" {
 		formation = inferFormation(snap.Club.Squad.Starters)
 	}
+
+	positionRows, positionAvg := report.PositionMapWithEvaluator(snap.Club, evaluator, snap.Avaliacao, contextosPorVaga)
+	positionMap := make([]PositionMapRow, len(positionRows))
+	for i, row := range positionRows {
+		positionMap[i] = PositionMapRow{Index: row.Index, Position: row.Position, Player: row.Player, Rating: row.Rating}
+	}
+
 	writeJSON(w, TimeResponse{
-		Formation:     formation,
-		Starters:      starters,
-		Bench:         bench,
-		BenchPage:     page,
-		BenchPageSize: pageSize,
-		BenchTotal:    total,
-		Optimization:  opt,
-		Quimica:       quimicaAtual,
+		Avaliacao:          snap.Avaliacao,
+		Formation:          formation,
+		Starters:           starters,
+		Bench:              bench,
+		BenchPage:          page,
+		BenchPageSize:      pageSize,
+		BenchTotal:         total,
+		Optimization:       opt,
+		Quimica:            quimicaAtual,
+		TopMove:            bestMove(snap),
+		PositionMap:        positionMap,
+		Regua:              positionAvg,
+		SlotOutlook:        analyze.BuildSlotOutlooksWithEvaluations(snap.Club, swaps, snap.Upgrades, avaliacoesDasVagas),
+		PriceSeries:        priceSeries,
+		PriceHistoryStatus: priceStatus,
 	})
+}
+
+// priceHistoryStatus classifica a série de preço de uma carta em 5 estados
+// — extraído pra handleTime (banco, várias cartas de uma vez) e
+// handleTimeSlug (uma carta) nunca divergirem no critério.
+func priceHistoryStatus(pts []store.PricePoint, err error) string {
+	if err != nil {
+		return "falha_leitura"
+	}
+	if len(pts) == 0 {
+		return "sem_historico"
+	}
+	todosExtintos := true
+	for _, pt := range pts {
+		if !pt.Extinct {
+			todosExtintos = false
+			break
+		}
+	}
+	if todosExtintos {
+		return "sem_oferta"
+	}
+	if len(pts) == 1 {
+		return "amostra_unica"
+	}
+	return "historico_parcial"
+}
+
+// leituraByPlayer monta "Leitura do bot" (ver leituraDoBot) para um
+// subconjunto do banco — usado por handleTime e handleReservas, os dois
+// lugares que mostram a tabela do banco. sellCandidates vem do CLUBE
+// inteiro (FindSellCandidates não aplica o piso de rating do banco, e
+// Recommendation depende de swaps/evolução globais, não da página pedida);
+// fodderMatches só precisa dos jogadores desta página.
+func (s *Server) leituraByPlayer(ctx context.Context, snap store.Snapshot, players []domain.ClubPlayer) map[string]LeituraDoBot {
+	return s.leituraByPlayerComTrocas(ctx, snap, players, s.currentSquadSwaps(snap))
+}
+
+// currentSquadSwaps recalcula as trocas com a preferência ativa. Além de
+// refletir a troca de avaliador sem nova coleta, isto impede que snapshots
+// gravados antes da nota por vaga continuem dizendo que uma carta melhora o XI
+// por causa da melhor posição dela.
+func (s *Server) currentSquadSwaps(snap store.Snapshot) []analyze.SquadSwap {
+	contexto := snap.Avaliacao
+	if contexto.Fonte == "" {
+		contexto = s.resolveEvaluationContext()
+	}
+	var contextosPorVaga map[int]domain.ContextoAvaliacao
+	if plan := snap.PlanoReferencia; plan != nil {
+		contextosPorVaga = contextosDasVagas(snap.Club, *plan, contexto)
+	}
+	return analyze.FindSquadSwapsWithOptions(snap.Club, analyze.SquadSwapOptions{
+		Evaluator: s.resolveEvaluator(), Contexto: contexto, ContextosPorVaga: contextosPorVaga,
+	})
+}
+
+func (s *Server) leituraByPlayerComTrocas(ctx context.Context, snap store.Snapshot, players []domain.ClubPlayer, swaps []analyze.SquadSwap) map[string]LeituraDoBot {
+	sellCandidates, _ := analyze.FindSellCandidates(snap.Club, snap.Cards, swaps, analyze.DefaultSellOptions())
+	sellByKey := make(map[string]analyze.SellCandidate, len(sellCandidates))
+	for _, sc := range sellCandidates {
+		sellByKey[leituraPlayerKey(sc.Player)] = sc
+	}
+	fodderMatches := analyze.FodderMatches(players, fodderSignals(ctx, s, snap))
+	promotions := promotionsByPlayer(swaps)
+
+	out := make(map[string]LeituraDoBot, len(players))
+	for _, p := range players {
+		key := leituraPlayerKey(p)
+		sc, hasSell := sellByKey[key]
+		swap := promotions[key]
+		if !hasSell && swap == nil {
+			continue
+		}
+		if swap != nil {
+			// A troca sem custo tem prioridade sobre uma leitura antiga de
+			// venda/evolução. Ela é ligada à cópia física logo abaixo.
+			sc = analyze.SellCandidate{Player: p, Recommendation: "promover"}
+		}
+		trend, hasTrend := snap.Trends[p.ID]
+		out[key] = leituraDoBot(sc, trend, hasTrend, fodderMatches[p.ID], swap)
+	}
+	return out
+}
+
+// leituraPlayerKey preserva cópias físicas. Sem ClubItemID, só a carta cujo
+// EA ID aparece uma vez em promotionsByPlayer recebe a recomendação; duas
+// cópias indistintas não podem ganhar a mesma vaga por suposição.
+func leituraPlayerKey(player domain.ClubPlayer) string {
+	if player.ClubItemID != "" {
+		return "item:" + player.ClubItemID
+	}
+	return fmt.Sprintf("card:%d", player.ID)
+}
+
+func promotionsByPlayer(swaps []analyze.SquadSwap) map[string]*analyze.SquadSwap {
+	withoutItem := make(map[int64]int)
+	for _, swap := range swaps {
+		if swap.Candidate.ClubItemID == "" {
+			withoutItem[swap.Candidate.ID]++
+		}
+	}
+	out := make(map[string]*analyze.SquadSwap, len(swaps))
+	for i := range swaps {
+		swap := &swaps[i]
+		if swap.Candidate.ClubItemID != "" {
+			out[leituraPlayerKey(swap.Candidate)] = swap
+			continue
+		}
+		if withoutItem[swap.Candidate.ID] == 1 {
+			out[leituraPlayerKey(swap.Candidate)] = swap
+		}
+	}
+	return out
 }
 
 func benchPage(r *http.Request) (int, int) {
@@ -678,14 +1048,14 @@ func benchPage(r *http.Request) (int, int) {
 	return page, size
 }
 
-func filteredBench(players []domain.ClubPlayer, starters map[int64]bool, r *http.Request) []domain.ClubPlayer {
+func filteredBench(players []domain.ClubPlayer, starters map[string]bool, r *http.Request) []domain.ClubPlayer {
 	q := r.URL.Query()
 	search := strings.ToLower(strings.TrimSpace(q.Get("bench_search")))
 	position := domain.Position(strings.ToUpper(strings.TrimSpace(q.Get("bench_position"))))
 	tradeable := q.Get("bench_tradeable")
 	out := make([]domain.ClubPlayer, 0)
 	for _, p := range players {
-		if starters[p.ID] || p.Rating < benchMinimumRating {
+		if starters[p.IdentityKey()] {
 			continue
 		}
 		if search != "" && !strings.Contains(strings.ToLower(p.Display()), search) {
@@ -741,6 +1111,19 @@ type CardDetailResponse struct {
 	RelatedCards                  []RosterCard                 `json:"related_cards,omitempty"`
 	PlayStyleRecommendations      []PlayStyleRecommendation    `json:"play_style_recommendations,omitempty"`
 	PlayStyleRecommendationSource string                       `json:"play_style_recommendation_source"`
+	// Completed é o progresso de evolução marcado à mão pelo usuário para esta
+	// carta (ConfigEditor.GetProgress) — nunca aplicado na conta EA, só uma
+	// anotação local. Embutido aqui pra o Workbench de /time/:slug não precisar
+	// de um segundo fetch em /api/evolucoes/plano/:slug só pra saber o que já
+	// foi marcado como concluído.
+	Completed []string `json:"completed,omitempty"`
+	// BestPathID é o MESMO id determinístico que /api/evolucoes/caminhos
+	// calcula pra este path (evolutionPathID, função de cycle+carta+cadeia) —
+	// não um id novo. É o que permite o botão "salvar path" desta tela chamar
+	// o POST /api/evolucoes/caminhos/salvos já existente sem duplicar a lista
+	// inteira de candidatos só pra achar um id.
+	BestPathID    string `json:"best_path_id,omitempty"`
+	BestPathSaved bool   `json:"best_path_saved,omitempty"`
 }
 
 type PlayStyleRecommendation struct {
@@ -811,30 +1194,12 @@ func (s *Server) handleTimeSlug(w http.ResponseWriter, r *http.Request) {
 		c := entry.Report
 		c.Player.Foot = domain.NormalizeFoot(c.Player.Foot)
 		entry.Player.Foot = c.Player.Foot
+		series, seriesErr := s.Store.PriceSeries(r.Context(), s.Cycle, []int64{c.Player.ID}, priceSeriesWindow)
 		var pts []store.PricePoint
-		status := "sem_historico"
-		if series, err := s.Store.PriceSeries(r.Context(), s.Cycle, []int64{c.Player.ID}, priceSeriesWindow); err == nil {
+		if seriesErr == nil {
 			pts = series[c.Player.ID]
-			if len(pts) > 0 {
-				todosExtintos := true
-				for _, pt := range pts {
-					if !pt.Extinct {
-						todosExtintos = false
-						break
-					}
-				}
-				if todosExtintos {
-					status = "sem_oferta"
-				}
-			}
-			if len(pts) == 1 && status != "sem_oferta" {
-				status = "amostra_unica"
-			} else if len(pts) > 1 && status != "sem_oferta" {
-				status = "historico_parcial"
-			}
-		} else {
-			status = "falha_leitura"
 		}
+		status := priceHistoryStatus(pts, seriesErr)
 		related := make([]RosterCard, 0)
 		for _, other := range entries {
 			if other.Slug != slug && other.Player.PlayerKey() == entry.Player.PlayerKey() && other.Player.PlayerKey() != "card:0" {
@@ -858,7 +1223,26 @@ func (s *Server) handleTimeSlug(w http.ResponseWriter, r *http.Request) {
 		for _, pos := range positions {
 			recommendations = append(recommendations, recommendationFor(c.Player, pos, c.ByPosition, snap.PlayStyleCatalog))
 		}
-		writeJSON(w, CardDetailResponse{CardReport: *c, PriceSeries: pts, GeneratedAt: snap.GeneratedAt, PlayStyleCatalog: snap.PlayStyleCatalog, PriceHistoryStatus: status, RelatedCards: related, PlayStyleRecommendations: recommendations, PlayStyleRecommendationSource: "fallback_bot_oficial_indisponivel"})
+		var completed []string
+		if s.Config != nil && s.Config.GetProgress != nil {
+			completed = s.Config.GetProgress(slug)
+		}
+		var bestPathID string
+		var bestPathSaved bool
+		if c.Best != nil && c.Player.Rating >= evolutionAnalysisMinRating {
+			bestPathID = evolutionPathID(snap.Cycle, evolutionCardKey(c.Player, c.Slug), c.Best.Path)
+			if backend, ok := s.Store.(store.SavedEvolutionPathStore); ok {
+				if saved, err := backend.ListSavedEvolutionPaths(r.Context(), s.Cycle); err == nil {
+					for _, item := range saved {
+						if item.PathID == bestPathID {
+							bestPathSaved = true
+							break
+						}
+					}
+				}
+			}
+		}
+		writeJSON(w, CardDetailResponse{CardReport: *c, PriceSeries: pts, GeneratedAt: snap.GeneratedAt, PlayStyleCatalog: snap.PlayStyleCatalog, PriceHistoryStatus: status, RelatedCards: related, PlayStyleRecommendations: recommendations, PlayStyleRecommendationSource: "fallback_bot_oficial_indisponivel", Completed: completed, BestPathID: bestPathID, BestPathSaved: bestPathSaved})
 		return
 	}
 	http.NotFound(w, r)
@@ -916,15 +1300,16 @@ type GauntletRoundView struct {
 // GauntletResponse é a tela inteira do Gauntlet: as 4 rodadas, mais o que
 // motivou o plano (regras, avisos) e os objetivos ativos relacionados.
 type GauntletResponse struct {
-	GeneratedAt time.Time           `json:"generated_at"`
-	Formation   string              `json:"formation"`
-	Status      string              `json:"status"`
-	Reason      string              `json:"reason,omitempty"`
-	Rules       string              `json:"rules"`
-	Strategy    string              `json:"strategy,omitempty"`
-	Warnings    []string            `json:"warnings,omitempty"`
-	Objectives  []domain.Objective  `json:"objectives"`
-	Rounds      []GauntletRoundView `json:"rounds"`
+	GeneratedAt time.Time                `json:"generated_at"`
+	Avaliacao   domain.ContextoAvaliacao `json:"avaliacao"`
+	Formation   string                   `json:"formation"`
+	Status      string                   `json:"status"`
+	Reason      string                   `json:"reason,omitempty"`
+	Rules       string                   `json:"rules"`
+	Strategy    string                   `json:"strategy,omitempty"`
+	Warnings    []string                 `json:"warnings,omitempty"`
+	Objectives  []domain.Objective       `json:"objectives"`
+	Rounds      []GauntletRoundView      `json:"rounds"`
 }
 
 // hasGauntletPlanQuery diz se a requisição pede um plano DIFERENTE do
@@ -974,16 +1359,15 @@ func (s *Server) handleGauntlet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Snapshot antigo gravado antes deste campo existir: Status vazio é o
-	// sentinela (ver o comentário de store.Snapshot.GauntletPlan) — recompõe
-	// direto do clube já carregado, sem tocar rede. O mesmo recompute vale
-	// quando a requisição pede estratégia/rodadas/peso de química diferentes
-	// do que a coleta calculou (ver hasGauntletPlanQuery) — /api/gauntlet
-	// continua sendo a única rota, sem esperar POST /api/planos/elenco (fase
-	// 02 do plano do copiloto, ainda não construída).
-	plan := snap.GauntletPlan
+	// A versão impede servir escolhas feitas com a regra antiga de notas.
+	// Recompõe do clube salvo, sem rede, assim como nos snapshots sem plano
+	// e nas requisições com estratégia/rodadas/peso de química diferentes.
 	rules := analyze.DefaultGauntletRules()
-	if plan.Status == "" || hasGauntletPlanQuery(r) {
+	plan := snap.GauntletPlan
+	if plan.Status == "" || plan.RatingVersion != domain.GGRatingVersion || plan.CardIdentityVersion != analyze.GauntletCardIdentityVersion || !sameGauntletContext(plan.Avaliacao, snap.Avaliacao) || hasGauntletPlanQuery(r) {
+		// Snapshots antigos não guardam a chave de fonte/contexto. Recalcular
+		// localmente é barato e impede servir uma rodada do FUT.GG depois que
+		// a pessoa escolheu bot, FUTBIN ou FUTWIZ.
 		req := analyze.DefaultGauntletRequest()
 		req.ChemistryModel = s.resolveChemistryModel()
 		if err := applyGauntletQuery(&req, r); err != nil {
@@ -991,13 +1375,21 @@ func (s *Server) handleGauntlet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rules = req.Rules
-		plan = analyze.BuildGauntletPlanFromRequest(snap.Club, req)
+		club := analyze.ClubeNaRegua(snap.Club, s.resolveEvaluator(), snap.Avaliacao)
+		plan = analyze.BuildGauntletPlanFromRequest(club, req)
+		plan.Avaliacao = snap.Avaliacao
+	}
+	if hasGauntletPlanQuery(r) {
+		req := analyze.DefaultGauntletRequest()
+		_ = applyGauntletQuery(&req, r)
+		rules = req.Rules
 	}
 
 	lookup := newCardSlugLookup(snap.Cards)
 
 	resp := GauntletResponse{
 		GeneratedAt: snap.GeneratedAt,
+		Avaliacao:   snap.Avaliacao,
 		Formation:   plan.Formation,
 		Status:      plan.Status,
 		Reason:      plan.Reason,
@@ -1031,6 +1423,12 @@ func (s *Server) handleGauntlet(w http.ResponseWriter, r *http.Request) {
 		resp.Rounds = append(resp.Rounds, rv)
 	}
 	writeJSON(w, resp)
+}
+
+func sameGauntletContext(left, right domain.ContextoAvaliacao) bool {
+	return left.Fonte == right.Fonte && left.Perfil == right.Perfil && left.VersaoPerfil == right.VersaoPerfil &&
+		left.VersaoMotor == right.VersaoMotor && left.Ciclo == right.Ciclo && left.Patch == right.Patch &&
+		left.Plataforma == right.Plataforma && left.EstiloJogo == right.EstiloJogo
 }
 
 // gauntletObjectives filtra os objetivos ativos cujo grupo, nome ou alguma
@@ -1229,7 +1627,7 @@ func weakestStarterByGG(club domain.Club, position domain.Position) (domain.Club
 		if slot.Position != position {
 			continue
 		}
-		player, ok := club.PlayerByID(slot.PlayerID)
+		player, ok := club.PlayerForSlot(slot)
 		if !ok || player.GGRating <= 0 {
 			continue
 		}

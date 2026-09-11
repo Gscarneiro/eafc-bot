@@ -55,13 +55,20 @@ type GauntletSquad struct {
 // únicas (44 titulares + 28 reservas), força crescente da rodada 1 para a
 // 4 — cálculo determinístico em Go, sem chamada de rede nem de LLM.
 type GauntletPlan struct {
-	Status    string          `json:"status"` // "ok" | "unavailable"
-	Reason    string          `json:"reason,omitempty"`
-	Formation string          `json:"formation"`
-	Rounds    []GauntletSquad `json:"rounds"`
-	Warnings  []string        `json:"warnings,omitempty"`
-	Strategy  string          `json:"strategy,omitempty"`
+	RatingVersion       int                      `json:"rating_version"`
+	CardIdentityVersion int                      `json:"card_identity_version"`
+	Avaliacao           domain.ContextoAvaliacao `json:"avaliacao,omitempty"`
+	Status              string                   `json:"status"` // "ok" | "unavailable"
+	Reason              string                   `json:"reason,omitempty"`
+	Formation           string                   `json:"formation"`
+	Rounds              []GauntletSquad          `json:"rounds"`
+	Warnings            []string                 `json:"warnings,omitempty"`
+	Strategy            string                   `json:"strategy,omitempty"`
 }
+
+// GauntletCardIdentityVersion invalida planos que ainda permitiam duas
+// leituras da mesma carta (mesmo Player.ID) em rodadas distintas.
+const GauntletCardIdentityVersion = 1
 
 // StarterIDs lista, sem repetição, o id (Player.ID) de todo titular
 // escalado em qualquer rodada — usado para forçar cards.BuildReports a
@@ -85,11 +92,11 @@ func (p GauntletPlan) StarterIDs() []int64 {
 	return ids
 }
 
-// GauntletOptions governa como BuildGauntletPlan explica o plano. Por ora só
-// o modelo de química importa — ver o comentário equivalente em
-// SquadOptions.
+// GauntletOptions governa a régua e o modelo de química usados no plano.
 type GauntletOptions struct {
 	ChemistryModel chemistry.Modelo
+	Evaluator      Avaliador
+	Contexto       domain.ContextoAvaliacao
 }
 
 // DefaultGauntletOptions usa o modelo de química padrão.
@@ -115,11 +122,14 @@ func BuildGauntletPlan(club domain.Club) GauntletPlan {
 // BuildGauntletPlan não precisa mudar nada; o motor geral (regras
 // versionadas, estratégias, locks, exclusões) mora em gauntlet_rules.go.
 func BuildGauntletPlanWithOptions(club domain.Club, opt GauntletOptions) GauntletPlan {
+	club = ClubeNaRegua(club, opt.Evaluator, opt.Contexto)
 	req := DefaultGauntletRequest()
 	if opt.ChemistryModel.Nome != "" {
 		req.ChemistryModel = opt.ChemistryModel
 	}
-	return BuildGauntletPlanFromRequest(club, req)
+	plan := BuildGauntletPlanFromRequest(club, req)
+	plan.Avaliacao = opt.Contexto
+	return plan
 }
 
 // gauntletWarnings avisa sobre as cartas em que a trava de "um jogador por
@@ -151,11 +161,10 @@ func gauntletPool(club domain.Club) []gauntletCard {
 	return gauntletPoolExcluding(club, nil)
 }
 
-// gauntletCard é uma carta do pool com a identidade já resolvida. O índice é
-// a chave de "já usei esta carta": Player.ID não serve, porque ter duas
-// CÓPIAS da mesma carta no clube é normal no FUT — usá-lo faria a segunda
-// cópia desaparecer junto com a primeira, mesmo podendo servir noutra
-// rodada.
+// gauntletCard é uma leitura de carta do pool. idx identifica a leitura para
+// o motor; Player.ID identifica a carta do jogo e só pode aparecer uma vez
+// no plano inteiro, mesmo se o GG Club trouxer uma cópia evoluída e a
+// original com ClubItemID diferentes.
 type gauntletCard struct {
 	idx int
 	p   domain.ClubPlayer
@@ -206,6 +215,7 @@ func matchGauntletRound(pool []gauntletCard, formation []domain.SquadSlot) ([]Ga
 	// fora do grafo mantém a busca de caminho barata (o elenco real passa de
 	// 800 cartas e só uma fração serve a cada formação).
 	cards := make([]gauntletCard, 0, len(pool))
+	cardByID := map[int64]int{}
 	keys := map[string]int{} // PlayerKey -> índice do nó de jogador
 	for _, c := range pool {
 		eligible := false
@@ -218,9 +228,18 @@ func matchGauntletRound(pool []gauntletCard, formation []domain.SquadSlot) ([]Ga
 		if !eligible {
 			continue
 		}
+		if i, seen := cardByID[c.p.ID]; seen {
+			// A evolução é a leitura útil quando o site devolve também a base;
+			// a escolha permanece estável se as duas empatam.
+			if gauntletCardBetterForFormation(c, cards[i], formation) {
+				cards[i] = c
+			}
+			continue
+		}
 		if _, seen := keys[c.key]; !seen {
 			keys[c.key] = len(keys)
 		}
+		cardByID[c.p.ID] = len(cards)
 		cards = append(cards, c)
 	}
 	if len(cards) < len(formation) || len(keys) < len(formation) {
@@ -280,6 +299,22 @@ func matchGauntletRound(pool []gauntletCard, formation []domain.SquadSlot) ([]Ga
 	return out, picked, true
 }
 
+// gauntletCardBetterForFormation escolhe a melhor leitura de uma mesma carta
+// sem depender da ordem que o GG Club devolve. Só é chamado para Player.ID
+// iguais, nunca compara versões distintas de uma carta.
+func gauntletCardBetterForFormation(candidate, current gauntletCard, formation []domain.SquadSlot) bool {
+	var candidateTotal, currentTotal float64
+	for _, slot := range formation {
+		if rating, ok := candidate.p.GGRatingAt(slot.Position); ok {
+			candidateTotal += rating
+		}
+		if rating, ok := current.p.GGRatingAt(slot.Position); ok {
+			currentTotal += rating
+		}
+	}
+	return candidateTotal > currentTotal
+}
+
 // gauntletBench pega, entre as cartas do pool que não viraram titular, as
 // mais fracas primeiro: reserva é só cobertura, não deveria consumir uma
 // carta que sobrou sem função melhor (ver CLAUDE.md, decisão fechada).
@@ -311,6 +346,12 @@ func gauntletBench(pool []gauntletCard, used map[int]bool) []gauntletCard {
 // fecharam).
 func assignBench(rounds []GauntletSquad, bench []gauntletCard, reservasPerRound int) int {
 	used := make(map[int]bool, len(rounds)*reservasPerRound)
+	usedCardID := make(map[int64]bool, len(rounds)*(gauntletStartersCount+reservasPerRound))
+	for _, round := range rounds {
+		for _, starter := range round.Starters {
+			usedCardID[starter.Player.ID] = true
+		}
+	}
 	for i := range rounds {
 		keys := make(map[string]bool, len(rounds[i].Starters)+reservasPerRound)
 		for _, a := range rounds[i].Starters {
@@ -320,10 +361,10 @@ func assignBench(rounds []GauntletSquad, bench []gauntletCard, reservasPerRound 
 			if len(rounds[i].Bench) == reservasPerRound {
 				break
 			}
-			if used[c.idx] || keys[c.key] {
+			if used[c.idx] || usedCardID[c.p.ID] || keys[c.key] {
 				continue
 			}
-			used[c.idx], keys[c.key] = true, true
+			used[c.idx], usedCardID[c.p.ID], keys[c.key] = true, true, true
 			rounds[i].Bench = append(rounds[i].Bench, c.p)
 		}
 		if len(rounds[i].Bench) < reservasPerRound {

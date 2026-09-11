@@ -38,14 +38,15 @@ type FodderValue struct {
 }
 
 type ClubInsight struct {
-	Kind       string       `json:"kind"`
-	Headline   string       `json:"headline"`
-	Detail     string       `json:"detail"`
-	Confidence string       `json:"confidence"`
-	Source     string       `json:"source,omitempty"`
-	ObservedAt time.Time    `json:"observed_at,omitempty"`
-	Score      *BotScore    `json:"bot_score,omitempty"`
-	Fodder     *FodderValue `json:"fodder_value,omitempty"`
+	Kind       string                 `json:"kind"`
+	Headline   string                 `json:"headline"`
+	Detail     string                 `json:"detail"`
+	Confidence string                 `json:"confidence"`
+	Source     string                 `json:"source,omitempty"`
+	ObservedAt time.Time              `json:"observed_at,omitempty"`
+	Score      *BotScore              `json:"bot_score,omitempty"`
+	Avaliacao  *domain.AvaliacaoCarta `json:"avaliacao,omitempty"`
+	Fodder     *FodderValue           `json:"fodder_value,omitempty"`
 }
 
 // BuildCollectionMemory reduz os rollups a uma visão por versão de carta. A
@@ -142,34 +143,53 @@ func BuildFodderValue(collection []CollectionCard) FodderValue {
 	return out
 }
 
-// BuildClubInsights produz frases curtas e rastreáveis. Um BotScore só é
-// comparado com outro de mesmo perfil/ciclo/função; quando não há par válido,
-// a função ainda exibe a nota individual sem fingir ranking.
+// BuildClubInsights preserva o contrato antigo de uma leitura do clube. A
+// API usa BuildClubInsightsWithEvaluator para que a fonte selecionada seja a
+// mesma de todas as outras decisões do produto.
 func BuildClubInsights(club domain.Club, collection []CollectionCard) []ClubInsight {
+	return BuildClubInsightsWithEvaluator(club, collection, nil, domain.ContextoAvaliacao{Fonte: domain.FonteFutGG}, nil)
+}
+
+// BuildClubInsightsWithEvaluator produz frases curtas e rastreáveis pela
+// régua ativa. Quando uma carta ocupa o XI, a nota usa o contexto da vaga
+// física; isto evita que dois CM com funções distintas virem a mesma nota.
+func BuildClubInsightsWithEvaluator(club domain.Club, collection []CollectionCard, evaluator Avaliador, contexto domain.ContextoAvaliacao, contextosPorVaga map[int]domain.ContextoAvaliacao) []ClubInsight {
 	observedAt, source := club.SyncedAt, club.Source
-	var best *BotScore
+	var best *domain.AvaliacaoCarta
 	var bestName string
 	for _, item := range collection {
 		pos := item.Player.Position
-		if item.Player.InSquad && item.Player.SquadSlot != "" {
-			pos = item.Player.SquadSlot
+		ctx := contexto
+		for _, slot := range club.Squad.Starters {
+			current, ok := club.PlayerForSlot(slot)
+			if !ok || current.IdentityKey() != item.Player.IdentityKey() {
+				continue
+			}
+			pos = slot.Position
+			ctx = contextoDaVaga(contexto, contextosPorVaga, slot)
+			break
 		}
-		score := EvaluateBotScore(item.Player.Player, pos, DefaultBotScoreProfile)
-		if best == nil {
-			candidate := score
-			best = &candidate
-			bestName = item.Player.Display()
+		avaliacao := avaliarNaReguaDoElenco(item.Player.Player, pos, evaluator, ctx)
+		if !avaliacao.Disponivel {
 			continue
 		}
-		if delta, ok := CompareBotScores(score, *best); ok && delta > 0 {
-			candidate := score
+		if best == nil || avaliacao.Nota > best.Nota {
+			candidate := avaliacao
 			best = &candidate
 			bestName = item.Player.Display()
 		}
 	}
 	var out []ClubInsight
 	if best != nil {
-		out = append(out, ClubInsight{Kind: "bot_score", Headline: "BotScore de " + bestName, Detail: fmt.Sprintf("%.2f em %s pelo perfil %s", best.Total, best.Position, best.Profile), Confidence: best.Confidence, Source: source, ObservedAt: observedAt, Score: best})
+		confidence := "confirmada"
+		if best.Parcial {
+			confidence = "incompleta"
+		}
+		label := string(best.Contexto.Fonte)
+		if best.Contexto.Fonte == domain.FonteBot {
+			label = "nota do bot"
+		}
+		out = append(out, ClubInsight{Kind: "avaliacao", Headline: label + " de " + bestName, Detail: fmt.Sprintf("%.1f em %s", best.Nota, best.Contexto.Posicao), Confidence: confidence, Source: source, ObservedAt: observedAt, Avaliacao: best})
 	}
 	fodder := BuildFodderValue(collection)
 	out = append(out, ClubInsight{Kind: "fodder_value", Headline: "Valor de cartas fora do XI", Detail: fmt.Sprintf("%d cópias · %d negociáveis · %d coins líquidos observados", fodder.Cards, fodder.Tradeable, fodder.NetCoins), Confidence: fodder.Confidence, Source: source, ObservedAt: observedAt, Fodder: &fodder})

@@ -161,7 +161,7 @@ func DoClube(club domain.Club) ([]Titular, bool) {
 	}
 	xi := make([]Titular, 0, len(club.Squad.Starters))
 	for _, s := range club.Squad.Starters {
-		p, ok := club.PlayerByID(s.PlayerID)
+		p, ok := club.PlayerForSlot(s)
 		if !ok {
 			continue
 		}

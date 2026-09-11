@@ -24,8 +24,10 @@ type Upgrade struct {
 	// Unpriced marca a carta cujo preço não foi possível obter. Ela entra
 	// na lista ranqueada só por ganho, e o relatório precisa deixar claro
 	// que o custo é desconhecido em vez de mostrar zero.
-	Unpriced  bool     `json:"unpriced"`
-	Rationale []string `json:"rationale"` // por que essa troca, em texto
+	Unpriced            bool                  `json:"unpriced"`
+	Rationale           []string              `json:"rationale"` // por que essa troca, em texto
+	CurrentEvaluation   domain.AvaliacaoCarta `json:"current_evaluation,omitempty"`
+	CandidateEvaluation domain.AvaliacaoCarta `json:"candidate_evaluation,omitempty"`
 }
 
 // UpgradeOptions controla o que conta como sugestão aceitável.
@@ -39,6 +41,11 @@ type UpgradeOptions struct {
 	// o relatório útil quando a fonte de dados não entrega cotação — sem
 	// isso, "preço zero" reprova tudo e a seção de trocas sai vazia.
 	AllowUnpriced bool
+	Evaluator     Avaliador
+	Contexto      domain.ContextoAvaliacao
+	// ContextosPorVaga mantém função, química simulada e estilo de cada slot
+	// físico. A mesma posição pode aparecer duas vezes com papéis diferentes.
+	ContextosPorVaga map[int]domain.ContextoAvaliacao
 }
 
 // DefaultUpgradeOptions deixa visíveis ganhos pequenos, para que a tela de
@@ -93,7 +100,9 @@ type UpgradeFunnel struct {
 func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) ([]Upgrade, UpgradeFunnel) {
 	owned := make(map[int64]bool, len(club.Players))
 	for _, p := range club.Players {
-		owned[p.ID] = true
+		if !p.AlvoPlano {
+			owned[p.ID] = true
+		}
 	}
 
 	funnel := UpgradeFunnel{Considered: len(market), MinGain: opt.MinGain}
@@ -131,12 +140,20 @@ func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) 
 	// comparados contra o mercado independentemente, e o mais forte também
 	// pode receber sugestão de reforço.
 	for _, squadSlot := range club.Squad.Starters {
-		current, ok := club.PlayerByID(squadSlot.PlayerID)
+		current, ok := club.PlayerForSlot(squadSlot)
 		if !ok {
 			continue
 		}
 		slot := squadSlot.Position
-		curScore := EvaluateBotScore(current.Player, slot, DefaultBotScoreProfile).Total
+		contexto := opt.Contexto
+		if porVaga, ok := opt.ContextosPorVaga[squadSlot.Index]; ok {
+			contexto = porVaga
+		}
+		currentEval := avaliarOpcional(current.Player, slot, opt.Evaluator, contexto)
+		if !currentEval.Disponivel {
+			continue
+		}
+		curScore := currentEval.Nota
 		recoup := current.NetSellValue()
 
 		var perSlot []Upgrade
@@ -147,7 +164,11 @@ func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) 
 			}
 			fitsSomeSlot[i] = true
 
-			candScore := EvaluateBotScore(cand, slot, DefaultBotScoreProfile).Total
+			candidateEval := avaliarOpcional(cand, slot, opt.Evaluator, contexto)
+			if !candidateEval.Disponivel {
+				continue
+			}
+			candScore := candidateEval.Nota
 			gain := candScore - curScore
 			if gain < opt.MinGain {
 				if !funnel.HasBest || gain > funnel.BestGain {
@@ -166,16 +187,17 @@ func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) 
 				// Sem cotação não há como calcular desembolso nem
 				// eficiência. Fingir um número aqui seria pior que admitir.
 				perSlot = append(perSlot, Upgrade{
-					Slot:           slot,
-					Current:        current,
-					Candidate:      cand,
-					CurrentScore:   curScore,
-					CandidateScore: candScore,
-					Gain:           gain,
-					Recoup:         recoup,
-					Affordable:     true,
-					Unpriced:       true,
-					Rationale:      explain(current.Player, cand, slot),
+					Slot:              slot,
+					Current:           current,
+					Candidate:         cand,
+					CurrentScore:      curScore,
+					CandidateScore:    candScore,
+					Gain:              gain,
+					Recoup:            recoup,
+					Affordable:        true,
+					Unpriced:          true,
+					Rationale:         explain(current.Player, cand, slot),
+					CurrentEvaluation: currentEval, CandidateEvaluation: candidateEval,
 				})
 				continue
 			}
@@ -199,19 +221,20 @@ func FindUpgrades(club domain.Club, market []domain.Player, opt UpgradeOptions) 
 			eff := gain / (denom / 10000.0)
 
 			perSlot = append(perSlot, Upgrade{
-				Slot:           slot,
-				Current:        current,
-				Candidate:      cand,
-				CurrentScore:   curScore,
-				CandidateScore: candScore,
-				Gain:           gain,
-				GrossCost:      cand.Price.Coins,
-				Recoup:         recoup,
-				NetCost:        net,
-				Profit:         profit,
-				Efficiency:     eff,
-				Affordable:     affordable,
-				Rationale:      explain(current.Player, cand, slot),
+				Slot:              slot,
+				Current:           current,
+				Candidate:         cand,
+				CurrentScore:      curScore,
+				CandidateScore:    candScore,
+				Gain:              gain,
+				GrossCost:         cand.Price.Coins,
+				Recoup:            recoup,
+				NetCost:           net,
+				Profit:            profit,
+				Efficiency:        eff,
+				Affordable:        affordable,
+				Rationale:         explain(current.Player, cand, slot),
+				CurrentEvaluation: currentEval, CandidateEvaluation: candidateEval,
 			})
 		}
 
@@ -395,71 +418,6 @@ func abs(v int) int {
 
 // WeakestLinks aponta os titulares que mais destoam do resto do time.
 // É por onde começar quando o orçamento é curto.
-func WeakestLinks(club domain.Club, n int) []struct {
-	Slot     domain.Position
-	Player   domain.ClubPlayer
-	Score    float64
-	GapToAvg float64
-} {
-	type entry = struct {
-		Slot     domain.Position
-		Player   domain.ClubPlayer
-		Score    float64
-		GapToAvg float64
-	}
-	var all []entry
-
-	// Slot físico, não posição lógica — mesmo motivo de FindUpgrades: uma
-	// formação com posição repetida (dois CB) precisa dos dois na lista,
-	// senão um deles nunca aparece como "elo mais fraco".
-	haveGG := true
-	for _, squadSlot := range club.Squad.Starters {
-		p, ok := club.PlayerByID(squadSlot.PlayerID)
-		if !ok {
-			continue
-		}
-		slot := squadSlot.Position
-		all = append(all, entry{Slot: slot, Player: p, Score: EvaluateBotScore(p.Player, slot, DefaultBotScoreProfile).Total})
-		if p.GGRating <= 0 {
-			haveGG = false
-		}
-	}
-	if len(all) == 0 {
-		return nil
-	}
-
-	// "Mais fraco" usa o GG Rating do fut.gg quando o XI inteiro tem essa
-	// nota — é o número que a pessoa já confere no site, não um cálculo
-	// deste bot. Score() (a fórmula própria, com pesos por função e bônus
-	// de PlayStyle) continua decidindo O QUE FAZER a respeito — quais
-	// trocas de mercado valem a pena — mas não decide mais QUEM é o mais
-	// fraco: essas são perguntas diferentes, e só a segunda é opinião
-	// nossa. Sem GG Rating em algum titular (fonte que não é o GG Club:
-	// csv, chrome), cai pro Score() como antes.
-	if haveGG {
-		var sum float64
-		for _, e := range all {
-			sum += e.Player.GGRating
-		}
-		avg := sum / float64(len(all))
-		for i := range all {
-			all[i].GapToAvg = all[i].Player.GGRating - avg
-		}
-		sort.Slice(all, func(i, j int) bool { return all[i].Player.GGRating < all[j].Player.GGRating })
-	} else {
-		var sum float64
-		for _, e := range all {
-			sum += e.Score
-		}
-		avg := sum / float64(len(all))
-		for i := range all {
-			all[i].GapToAvg = all[i].Score - avg
-		}
-		sort.Slice(all, func(i, j int) bool { return all[i].GapToAvg < all[j].GapToAvg })
-	}
-
-	if len(all) > n {
-		all = all[:n]
-	}
-	return all
+func WeakestLinks(club domain.Club, n int) []WeakLink {
+	return WeakestLinksFromEvaluations(EvaluateSquadSlots(club, nil, domain.ContextoAvaliacao{}, nil), n)
 }

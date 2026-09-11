@@ -28,6 +28,7 @@ import (
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/futgg"
+	"github.com/gscarneiro/eafc-bot/internal/ratingsource"
 	"github.com/gscarneiro/eafc-bot/internal/report"
 	"github.com/gscarneiro/eafc-bot/internal/store"
 )
@@ -68,6 +69,8 @@ func run() error {
 		return cmdDemo(args)
 	case "quimica":
 		return cmdQuimica(ctx, args)
+	case "perfil":
+		return cmdPerfil(ctx, args)
 	case "import":
 		return cmdImportClub(ctx, args)
 	case "help", "-h", "--help":
@@ -103,6 +106,14 @@ func usage() {
                          (-modelo escolhe outro modelo; -calibrar reproduz o
                          modelo contra os snapshots guardados, -dias limita
                          quantos)
+	  perfil validar         valida os perfis de nota compilados no binário
+	  perfil comparar        compara dois perfis no último snapshot local
+	  perfil propor          registra evidências e um pacote candidato imutável
+	  perfil propostas       lista propostas e o estado de revisão
+	  perfil aprovar         aprova explicitamente uma proposta candidata
+	  perfil rejeitar        rejeita explicitamente uma proposta candidata
+	  perfil ativar          torna um perfil do bot a régua ativa, com histórico
+	  perfil reverter        restaura a escolha anterior de perfil
   import club             valida e importa um JSON/CSV LOCAL do clube
                          (-file; -dry-run nunca grava; rejeita segredos)
 
@@ -274,6 +285,37 @@ func runJob(ctx context.Context, cfg config.Config, st store.Store, outPath stri
 	}
 	snap.PlayStyleCatalog = client.PlayStyleCatalog(ctx)
 	snap.RoleCatalog = client.Roles(ctx)
+	futgg.PreencherFamiliaridadesDoClube(&snap.Club, snap.RoleCatalog)
+	futgg.PreencherFamiliaridadesDoMercado(snap.Market, snap.RoleCatalog)
+	for _, external := range []struct {
+		source domain.FonteAvaliacao
+		path   string
+	}{
+		{source: domain.FonteFUTBIN, path: cfg.Evaluation.FutbinImport},
+		{source: domain.FonteFUTWIZ, path: cfg.Evaluation.FutwizImport},
+	} {
+		source, path := external.source, external.path
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		document, loadErr := ratingsource.Ler(path)
+		if loadErr == nil && document.Fonte != source {
+			loadErr = fmt.Errorf("o arquivo declara a fonte %s, esperava %s", document.Fonte, source)
+		}
+		if loadErr != nil {
+			snap.Errors = append(snap.Errors, "notas "+string(source)+": "+loadErr.Error())
+			continue
+		}
+		result, applyErr := ratingsource.Aplicar(document, &snap.Club, &snap.Market)
+		if applyErr != nil {
+			snap.Errors = append(snap.Errors, "notas "+string(source)+": "+applyErr.Error())
+			continue
+		}
+		fmt.Printf("  %d notas posicionais de %s aplicadas\n", result.Aplicadas, source)
+		if len(result.Ausentes) > 0 {
+			snap.Errors = append(snap.Errors, fmt.Sprintf("notas %s: %d cartas importadas não foram encontradas nesta coleta", source, len(result.Ausentes)))
+		}
+	}
 	fmt.Printf("  %d cartas · %d evoluções · %d SBCs · %d notícias\n",
 		len(snap.Market), len(snap.Evolutions), len(snap.SBCs), len(snap.News))
 	if snap.Stats.RobotsBypassed > 0 {
@@ -300,7 +342,15 @@ func runJob(ctx context.Context, cfg config.Config, st store.Store, outPath stri
 	// os titulares que ele escolhe entram em requiredIDs abaixo, para
 	// forçar CardReport deles mesmo abaixo do corte normal de rating.
 	chemModel := cfg.ChemistryModel()
-	gauntletPlan := analyze.BuildGauntletPlanWithOptions(snap.Club, analyze.GauntletOptions{ChemistryModel: chemModel})
+	gauntletEvaluator, gauntletEvaluatorErr := analyze.NovoRegistroAvaliadores()
+	if gauntletEvaluatorErr != nil {
+		snap.Errors = append(snap.Errors, "carregando avaliador do Gauntlet: "+gauntletEvaluatorErr.Error())
+	}
+	gauntletPlan := analyze.BuildGauntletPlanWithOptions(snap.Club, analyze.GauntletOptions{
+		ChemistryModel: chemModel,
+		Evaluator:      gauntletEvaluator,
+		Contexto:       contextoAvaliacao(cfg),
+	})
 
 	var cardReports []cards.CardReport
 	if !dryRun && len(snap.Club.Players) > 0 {
@@ -344,6 +394,12 @@ func runJob(ctx context.Context, cfg config.Config, st store.Store, outPath stri
 func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 	snap *futgg.Snapshot, started time.Time, dryRun bool, cardReports []cards.CardReport,
 	gauntletPlan analyze.GauntletPlan) (report.Data, error) {
+	// A Community API nem sempre publica o saldo. Quando o usuário informou
+	// um valor na topbar, ele passa a ser a fonte do caixa também nas coletas
+	// seguintes; sem isto, cada sincronização voltaria silenciosamente a zero.
+	if cfg.Market.ManualCoins != nil {
+		snap.Club.Coins = *cfg.Market.ManualCoins
+	}
 
 	// Uma capital só, usada tanto para exibição quanto para decisão: Budget
 	// era cash+raisable ad-hoc, sem reserva nenhuma — orçamento de compra e
@@ -364,12 +420,28 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 	upOpt.MinGain = cfg.Report.MinGain
 	upOpt.AllowOutOfPos = cfg.Report.AllowOutOfPos
 	upOpt.AllowUnpriced = cfg.Report.AllowUnpriced
+	evaluator, evaluatorErr := analyze.NovoRegistroAvaliadores()
+	if evaluatorErr != nil {
+		snap.Errors = append(snap.Errors, "carregando avaliador: "+evaluatorErr.Error())
+	}
+	contexto := contextoAvaliacao(cfg)
+	upOpt.Evaluator, upOpt.Contexto = evaluator, contexto
+	// O plano recebido pode ter sido criado por um snapshot antigo ou antes
+	// de a preferência de nota mudar. Recalculá-lo aqui garante que o plano
+	// persistido usa a mesma fonte e perfil das outras recomendações.
+	gauntletPlan = analyze.BuildGauntletPlanWithOptions(snap.Club, analyze.GauntletOptions{
+		ChemistryModel: cfg.ChemistryModel(),
+		Evaluator:      evaluator,
+		Contexto:       contexto,
+	})
 
 	upgrades, upFunnel := analyze.FindUpgrades(snap.Club, snap.Market, upOpt)
 	evos := analyze.FindEvolutionsWithOptions(snap.Club, snap.Evolutions, analyze.EvolutionOptions{
 		Budget:              budget,
 		MinRating:           cfg.Serve.CardsMinRating,
 		IncludeUnaffordable: true,
+		Evaluator:           evaluator,
+		Contexto:            contexto,
 	})
 	if len(cardReports) > 0 {
 		slugByID := make(map[int64]string, len(cardReports))
@@ -441,6 +513,8 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 		TrendWindow:    window,
 		Started:        started,
 		MaxRows:        cfg.Report.MaxRows,
+		Evaluator:      evaluator,
+		Contexto:       contexto,
 		CardReports:    cardReports,
 		Momentum:       momentum,
 		SBCCostTrends:  sbcCostTrends,
@@ -463,6 +537,7 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 				Duration:         time.Since(started),
 				Cycle:            snap.Club.Cycle,
 				BotScoreProfile:  string(analyze.DefaultBotScoreProfile),
+				Avaliacao:        contexto,
 				Club:             snap.Club,
 				Capital:          capital,
 				Market:           snap.Market,
@@ -547,6 +622,17 @@ func mergeCurrentPriceTrends(trends map[int64]store.PriceTrend, club domain.Club
 	}
 	for _, p := range market {
 		add(p)
+	}
+}
+
+func contextoAvaliacao(cfg config.Config) domain.ContextoAvaliacao {
+	fonte := domain.FonteAvaliacao(cfg.Evaluation.ExternalSource)
+	if cfg.Evaluation.UseBot {
+		fonte = domain.FonteBot
+	}
+	return domain.ContextoAvaliacao{
+		Fonte: fonte, Perfil: cfg.Evaluation.Profile, Ciclo: cfg.FutGG.Cycle,
+		Patch: cfg.Evaluation.Patch, Plataforma: cfg.Platform, EstiloJogo: cfg.Evaluation.PlayStyle,
 	}
 }
 

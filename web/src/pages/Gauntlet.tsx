@@ -8,7 +8,7 @@ import ExpandIcon from "../components/ExpandIcon";
 import GGRating from "../components/GGRating";
 import PageHeader from "../components/PageHeader";
 import Pitch, { canDrawPitch } from "../components/Pitch";
-import { formatCoins, formatDateTime, formatSigned, isZeroTime, styleNames } from "../format";
+import { evaluationSourceLabel, formatCoins, formatDateTime, formatSigned, isZeroTime, styleNames } from "../format";
 import { useData } from "../useData";
 import type { GauntletStarterView, RosterCard, StarterCard as StarterCardData } from "../types";
 import "../shared.css";
@@ -42,6 +42,7 @@ export default function Gauntlet() {
   const activeIndex = Math.min(roundIndex, Math.max(rounds.length - 1, 0));
   const round = rounds[activeIndex];
   const insufficient = data.status !== "ok" || rounds.length === 0;
+	const scoreLabel = evaluationSourceLabel(data.avaliacao?.fonte, true);
 
   return (
     <div className="wrap gauntlet-page">
@@ -84,7 +85,7 @@ export default function Gauntlet() {
       {insufficient ? (
         <EmptyState
           message={data.reason || "Elenco insuficiente para montar o Gauntlet."}
-          hint="O Gauntlet precisa de 72 cartas do clube com GG Rating conhecido (44 titulares + 28 reservas) e da escalação titular sincronizada em fut.gg/gg-club."
+		  hint="O Gauntlet precisa de 72 cartas cobertas pela fonte ativa (44 titulares + 28 reservas) e da escalação titular sincronizada."
         />
       ) : (
         <>
@@ -102,7 +103,7 @@ export default function Gauntlet() {
                 }}
               >
                 <span className="gauntlet-round-tab-label">Rodada {r.round}</span>
-                <span className="gauntlet-round-tab-value">{r.average_rating.toFixed(1)} GG posicional</span>
+				<span className="gauntlet-round-tab-value">{r.average_rating.toFixed(1)} {scoreLabel} posicional</span>
               </button>
             ))}
           </div>
@@ -118,7 +119,7 @@ export default function Gauntlet() {
                   <Chip tone="flat">química indisponível</Chip>
                 )}
                 <span className="gauntlet-round-stats">
-                  força total {round.total_rating.toFixed(1)} · média {round.average_rating.toFixed(1)} GG posicional
+				  força total {round.total_rating.toFixed(1)} · média {round.average_rating.toFixed(1)} {scoreLabel} posicional
                 </span>
                 {round.chemistry?.verificacao.status === "diverge" && (
                   <span className="gauntlet-round-note">
@@ -139,13 +140,14 @@ export default function Gauntlet() {
               <section>
                 <h2>Titulares e potencial de evolução</h2>
                 <p className="section-note">
-                  Só caminhos com nota final confirmada pelo fut.gg para a posição escalada aparecem aqui.
+				  As rotas mostram a nota publicada pelo FUT.GG; a escalação da rodada usa a fonte ativa acima.
                 </p>
                 <div className="gauntlet-starter-list">
                   {(round.starters ?? []).map((s, i) => (
                     <StarterRow
                       key={`${round.round}-${s.player.club_item_id || s.player.id}-${s.index}`}
                       starter={s}
+					  scoreLabel={scoreLabel}
                       open={openStarter === i}
                       onToggle={() => setOpenStarter(openStarter === i ? null : i)}
                     />
@@ -172,7 +174,7 @@ export default function Gauntlet() {
   );
 }
 
-function StarterRow({ starter, open, onToggle }: { starter: GauntletStarterView; open: boolean; onToggle: () => void }) {
+function StarterRow({ starter, open, onToggle, scoreLabel }: { starter: GauntletStarterView; open: boolean; onToggle: () => void; scoreLabel: string }) {
   const p = starter.player;
   const potentials = starter.potentials ?? [];
   const hasPotential = potentials.length > 0;
@@ -184,7 +186,7 @@ function StarterRow({ starter, open, onToggle }: { starter: GauntletStarterView;
           {p.image_url && <img src={p.image_url} alt="" loading="lazy" />}
           <div className="gauntlet-starter-player-text">
             <strong>{p.common_name || p.name}</strong>
-            <GGRating current={p.gg_rating} currentPosition={p.gg_rating_pos} positional={starter.rating} positionalPosition={starter.position} />
+				<span className="gauntlet-active-rating">{scoreLabel} {starter.rating.toFixed(1)} · {starter.position}</span>
           </div>
         </div>
         {starter.card_slug && (

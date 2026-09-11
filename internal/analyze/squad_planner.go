@@ -54,6 +54,11 @@ type SquadPlanRequest struct {
 	Excluded       map[int64]bool // Player.ID excluído do pool inteiro
 	MaxScenarios   int            // 3-5; fora da faixa é ajustado, não recusado
 	ChemistryModel chemistry.Modelo
+	Evaluator      Avaliador
+	Contexto       domain.ContextoAvaliacao
+	// ContextosPorVaga preserva as escolhas do editor quando a formação
+	// repete uma posição lógica, por exemplo dois CM com funções distintas.
+	ContextosPorVaga map[int]domain.ContextoAvaliacao
 }
 
 const (
@@ -147,33 +152,33 @@ func BuildSquadPlan(club domain.Club, req SquadPlanRequest) SquadPlannerPlan {
 	}
 	plan.Formation = formationLabel
 
-	// A checagem de "titular presente e com nota conhecida" só faz sentido
+	// A checagem de "titular presente e com nota ativa conhecida" só faz sentido
 	// para a formação OBSERVADA — ela é o que dá a cada slot um "titular
 	// atual" pra comparar (ver squadPlanMoves). Formação manual não tem
 	// titular atual nenhum: todo mundo escolhido é uma "sugestão" nova.
 	if req.FormationFrom == FormationObservada {
 		for _, s := range slots {
-			p, ok := club.PlayerByID(s.PlayerID)
+			p, ok := club.PlayerForSlot(s)
 			if !ok {
 				plan.Reason = "titular ausente do retrato do clube"
 				return plan
 			}
-			if _, ok := p.GGRatingAt(s.Position); !ok {
-				plan.Reason = "faltam notas GG Rating por posição; nova coleta necessária"
+			if avaliacao := avaliarNaReguaDoElenco(p.Player, s.Position, req.Evaluator, contextoDaVaga(req.Contexto, req.ContextosPorVaga, s)); !avaliacao.Disponivel {
+				plan.Reason = "faltam notas da avaliação ativa por vaga; revise a cobertura da fonte"
 				return plan
 			}
 		}
 	}
 
-	players := squadPlanPoolExcluding(club.Players, req.Excluded)
+	players := squadPlanPoolExcluding(jogadoresDisponiveisParaOtimizacao(club), req.Excluded)
 
-	locked, remainingSlots, remainingPlayers, err := resolveSquadPlanLocks(players, slots, req.Locks, club)
+	locked, remainingSlots, remainingPlayers, err := resolveSquadPlanLocks(players, slots, req.Locks, club, req)
 	if err != nil {
 		plan.Reason = err.Error()
 		return plan
 	}
 
-	baseline, ok := buildSquadScenario(remainingPlayers, remainingSlots, locked, slots, club, req.ChemistryModel, 0, "")
+	baseline, ok := buildSquadScenario(remainingPlayers, remainingSlots, locked, slots, club, req, 0, "")
 	if !ok {
 		plan.Reason = "não há jogadores elegíveis para todos os slots"
 		return plan
@@ -187,7 +192,7 @@ func BuildSquadPlan(club domain.Club, req SquadPlanRequest) SquadPlannerPlan {
 
 	plan.Status = "ok"
 	plan.Scenarios = scenarios
-	plan.Needs = squadPlanNeeds(baseline, players)
+	plan.Needs = squadPlanNeeds(baseline, players, req)
 	return plan
 }
 
@@ -213,7 +218,7 @@ func squadPlanPoolExcluding(players []domain.ClubPlayer, excluded map[int64]bool
 // Position pedida; sem ele, garante que uma cópia do JOGADOR entra como
 // titular na melhor combinação carta×slot livre que sobrar — sem prometer
 // qual cópia nem qual slot exato (ver o comentário de SquadPlanLock).
-func resolveSquadPlanLocks(players []domain.ClubPlayer, slots []domain.SquadSlot, locks []SquadPlanLock, club domain.Club) (
+func resolveSquadPlanLocks(players []domain.ClubPlayer, slots []domain.SquadSlot, locks []SquadPlanLock, club domain.Club, req SquadPlanRequest) (
 	locked []SquadAssignment, remainingSlots []domain.SquadSlot, remainingPlayers []domain.ClubPlayer, err error,
 ) {
 	usedSlot := make(map[int]bool, len(locks))
@@ -256,10 +261,11 @@ func resolveSquadPlanLocks(players []domain.ClubPlayer, slots []domain.SquadSlot
 				if lock.ClubItemID != "" && lock.Position != "" && s.Position != lock.Position {
 					continue // posição só é honrada junto de ClubItemID confirmado
 				}
-				r, ok := players[ci].GGRatingAt(s.Position)
-				if !ok {
+				avaliacao := avaliarNaReguaDoElenco(players[ci].Player, s.Position, req.Evaluator, contextoDaVaga(req.Contexto, req.ContextosPorVaga, s))
+				if !avaliacao.Disponivel {
 					continue
 				}
+				r := avaliacao.Nota
 				if !found || r > bestRating {
 					bestIdx, bestSlot, bestRating, found = ci, si, r, true
 				}
@@ -292,17 +298,21 @@ func resolveSquadPlanLocks(players []domain.ClubPlayer, slots []domain.SquadSlot
 // aplica chemistrySwapSquad. Devolve false quando nem o matching básico
 // (sem química nenhuma) cobre todos os slots.
 func buildSquadScenario(players []domain.ClubPlayer, remainingSlots []domain.SquadSlot, locked []SquadAssignment,
-	allSlots []domain.SquadSlot, club domain.Club, m chemistry.Modelo, weight float64, label string,
+	allSlots []domain.SquadSlot, club domain.Club, req SquadPlanRequest, weight float64, label string,
 ) (SquadPlanScenario, bool) {
 	var starters []SquadAssignment
 	if len(remainingSlots) > 0 {
-		chosen, ok := squadMatch(players, remainingSlots)
+		chosen, ok := squadMatchWithRatings(players, remainingSlots, func(playerIndex, slotIndex int) (float64, bool) {
+			slot := remainingSlots[slotIndex]
+			avaliacao := avaliarNaReguaDoElenco(players[playerIndex].Player, slot.Position, req.Evaluator, contextoDaVaga(req.Contexto, req.ContextosPorVaga, slot))
+			return avaliacao.Nota, avaliacao.Disponivel
+		})
 		if !ok {
 			return SquadPlanScenario{}, false
 		}
 		for j, s := range remainingSlots {
-			r, _ := chosen[j].GGRatingAt(s.Position)
-			starters = append(starters, SquadAssignment{s.Index, s.Position, chosen[j], r})
+			avaliacao := avaliarNaReguaDoElenco(chosen[j].Player, s.Position, req.Evaluator, contextoDaVaga(req.Contexto, req.ContextosPorVaga, s))
+			starters = append(starters, SquadAssignment{s.Index, s.Position, chosen[j], avaliacao.Nota})
 		}
 	}
 	starters = append(starters, locked...)
@@ -319,7 +329,7 @@ func buildSquadScenario(players []domain.ClubPlayer, remainingSlots []domain.Squ
 		for _, l := range locked {
 			lockedIdx[l.Index] = true
 		}
-		starters = chemistrySwapSquad(starters, squadPlanLeftover(players, starters), m, weight, lockedIdx)
+		starters = chemistrySwapSquad(starters, squadPlanLeftover(players, starters), req.ChemistryModel, weight, lockedIdx, req)
 	}
 
 	sc := SquadPlanScenario{Label: label, ChemistryWeight: weight, Starters: starters}
@@ -329,8 +339,8 @@ func buildSquadScenario(players []domain.ClubPlayer, remainingSlots []domain.Squ
 	if len(starters) > 0 {
 		sc.AverageRating = sc.TotalRating / float64(len(starters))
 	}
-	sc.Moves = squadPlanMoves(starters, allSlots, club)
-	sc.Quimica = quimicaDaSugestao(m, starters)
+	sc.Moves = squadPlanMoves(starters, allSlots, club, req)
+	sc.Quimica = quimicaDaSugestao(req.ChemistryModel, starters)
 	return sc, true
 }
 
@@ -353,7 +363,7 @@ func squadPlanLeftover(allPlayers []domain.ClubPlayer, starters []SquadAssignmen
 // squadPlanMoves compara o XI escolhido contra o titular ATUAL de cada slot
 // (allSlots, que inclui os slots travados por lock) — formação manual não
 // tem "atual" nenhum (PlayerID zero), então não gera movimento.
-func squadPlanMoves(starters []SquadAssignment, allSlots []domain.SquadSlot, club domain.Club) []SquadMove {
+func squadPlanMoves(starters []SquadAssignment, allSlots []domain.SquadSlot, club domain.Club, req SquadPlanRequest) []SquadMove {
 	byIndex := make(map[int]domain.SquadSlot, len(allSlots))
 	for _, s := range allSlots {
 		byIndex[s.Index] = s
@@ -361,14 +371,18 @@ func squadPlanMoves(starters []SquadAssignment, allSlots []domain.SquadSlot, clu
 	var moves []SquadMove
 	for _, a := range starters {
 		s, ok := byIndex[a.Index]
-		if !ok || s.PlayerID == 0 || a.Player.ID == s.PlayerID {
+		if !ok || s.PlayerID == 0 {
 			continue
 		}
-		cr, ok := club.PlayerByID(s.PlayerID)
-		if !ok {
+		cr, ok := club.PlayerForSlot(s)
+		if !ok || a.Player.IdentityKey() == cr.IdentityKey() {
 			continue
 		}
-		cur, _ := cr.GGRatingAt(s.Position)
+		avaliacao := avaliarNaReguaDoElenco(cr.Player, s.Position, req.Evaluator, contextoDaVaga(req.Contexto, req.ContextosPorVaga, s))
+		if !avaliacao.Disponivel {
+			continue
+		}
+		cur := avaliacao.Nota
 		moves = append(moves, SquadMove{a.Index, a.Position, cr, a.Player, cur, a.Rating, a.Rating - cur})
 	}
 	return moves
@@ -379,7 +393,7 @@ func squadPlanMoves(starters []SquadAssignment, allSlots []domain.SquadSlot, clu
 // chemistry.Contador, DEPOIS do matching por nota. Peso 0 nunca é chamado
 // (ver o guard em buildSquadScenario), preservando por construção o
 // comportamento de OptimizeSquad para quem não pediu química ponderada.
-func chemistrySwapSquad(starters []SquadAssignment, leftover []domain.ClubPlayer, m chemistry.Modelo, weight float64, lockedIdx map[int]bool) []SquadAssignment {
+func chemistrySwapSquad(starters []SquadAssignment, leftover []domain.ClubPlayer, m chemistry.Modelo, weight float64, lockedIdx map[int]bool, req SquadPlanRequest) []SquadAssignment {
 	xi := make([]chemistry.Titular, len(starters))
 	for i, a := range starters {
 		xi[i] = chemistry.Titular{Index: a.Index, Position: a.Position, Player: a.Player.Player}
@@ -395,12 +409,14 @@ func chemistrySwapSquad(starters []SquadAssignment, leftover []domain.ClubPlayer
 			continue // travado por lock: a busca de química não pode desfazer a garantia
 		}
 		cur := out[slotIdx]
+		slot := domain.SquadSlot{Index: cur.Index, Position: cur.Position}
 		bestCandidate, bestScore := -1, 0.0
 		for pi, cand := range pool {
-			r, ok := cand.GGRatingAt(cur.Position)
-			if !ok {
+			avaliacao := avaliarNaReguaDoElenco(cand.Player, cur.Position, req.Evaluator, contextoDaVaga(req.Contexto, req.ContextosPorVaga, slot))
+			if !avaliacao.Disponivel {
 				continue
 			}
+			r := avaliacao.Nota
 			conflict := false
 			for j, other := range out {
 				if j != slotIdx && other.Player.PlayerKey() == cand.PlayerKey() {
@@ -422,7 +438,7 @@ func chemistrySwapSquad(starters []SquadAssignment, leftover []domain.ClubPlayer
 			continue
 		}
 		chosen := pool[bestCandidate]
-		newRating, _ := chosen.GGRatingAt(cur.Position)
+		newRating := avaliarNaReguaDoElenco(chosen.Player, cur.Position, req.Evaluator, contextoDaVaga(req.Contexto, req.ContextosPorVaga, slot)).Nota
 		pool[bestCandidate] = out[slotIdx].Player
 		out[slotIdx].Player = chosen
 		out[slotIdx].Rating = newRating
@@ -448,7 +464,7 @@ func paretoSquadScenarios(players []domain.ClubPlayer, remainingSlots []domain.S
 	var candidates []SquadPlanScenario
 	seen := map[string]bool{}
 	for _, w := range squadPlanWeightSweep {
-		sc, ok := buildSquadScenario(players, remainingSlots, locked, allSlots, club, req.ChemistryModel, w, "")
+		sc, ok := buildSquadScenario(players, remainingSlots, locked, allSlots, club, req, w, "")
 		if !ok {
 			continue
 		}
@@ -575,8 +591,8 @@ const squadPlanNeedGapThreshold = 3.0
 // visão mais objetiva do elenco), as posições sem alternativa no banco ou
 // notavelmente abaixo da média do time. Nunca escolhe uma compra — isso é
 // FindUpgrades, do lado do mercado.
-func squadPlanNeeds(baseline SquadPlanScenario, players []domain.ClubPlayer) []SquadPlanNeed {
-	altCount := squadPlanAlternativeCounts(baseline.Starters, players)
+func squadPlanNeeds(baseline SquadPlanScenario, players []domain.ClubPlayer, req SquadPlanRequest) []SquadPlanNeed {
+	altCount := squadPlanAlternativeCounts(baseline.Starters, players, req)
 	var needs []SquadPlanNeed
 	for _, a := range baseline.Starters {
 		switch {
@@ -589,7 +605,7 @@ func squadPlanNeeds(baseline SquadPlanScenario, players []domain.ClubPlayer) []S
 	return needs
 }
 
-func squadPlanAlternativeCounts(starters []SquadAssignment, players []domain.ClubPlayer) map[int]int {
+func squadPlanAlternativeCounts(starters []SquadAssignment, players []domain.ClubPlayer, req SquadPlanRequest) map[int]int {
 	used := make(map[string]bool, len(starters))
 	for _, a := range starters {
 		used[a.Player.PlayerKey()] = true
@@ -601,7 +617,9 @@ func squadPlanAlternativeCounts(starters []SquadAssignment, players []domain.Clu
 			if used[p.PlayerKey()] || !p.PlaysAt(a.Position) {
 				continue
 			}
-			if _, ok := p.GGRatingAt(a.Position); ok {
+			slot := domain.SquadSlot{Index: a.Index, Position: a.Position}
+			avaliacao := avaliarNaReguaDoElenco(p.Player, a.Position, req.Evaluator, contextoDaVaga(req.Contexto, req.ContextosPorVaga, slot))
+			if avaliacao.Disponivel {
 				count++
 			}
 		}

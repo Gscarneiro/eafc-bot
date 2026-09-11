@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: eafc
+          POSTGRES_PASSWORD: eafc
+          POSTGRES_DB: eafc_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U eafc -d eafc_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: eafc
+      PGPASSWORD: eafc
+      PGDATABASE: eafc_test
+
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@v4
+
+      - name: Preparar Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Instalar dependências da interface
+        run: npm ci --prefix web
+
+      - name: Instalar Chromium dos testes de interação
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Compilar e testar a interface
+        run: |
+          npm --prefix web run build
+          npm --prefix web test -- --run
+
+      - name: Verificar formatação Go
+        shell: bash
+        run: |
+          arquivos="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$arquivos" ]; then
+            echo "Arquivos Go fora do gofmt:"
+            echo "$arquivos"
+            exit 1
+          fi
+
+      - name: Validar código Go
+        run: |
+          go vet ./...
+          go test ./... -count=1
+
+      # O build padrão embute internal/webui/dist, produzido acima.
+      - name: Compilar o binário padrão
+        run: go build ./cmd/eafcbot
+
+      - name: Aplicar migrações em Postgres vazio
+        shell: bash
+        run: |
+          for arquivo in migrations/*.sql; do
+            echo "Aplicando $arquivo"
+            psql -v ON_ERROR_STOP=1 -f "$arquivo"
+          done

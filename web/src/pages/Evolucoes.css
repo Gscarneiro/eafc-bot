@@ -1,4 +1,4 @@
-.evo-catalog-page { max-width: 1240px; }
+.evo-catalog-page { max-width: calc(var(--content-width) + 40px); }
 .evo-catalog-hero { display:flex; align-items:center; justify-content:space-between; gap:28px; margin: 22px 0 20px; padding: 26px 30px; border:1px solid var(--rule-strong); border-radius: var(--radius-lg); background: linear-gradient(120deg, var(--turf-bg), var(--panel) 60%); box-shadow: var(--shadow-sm); }
 .evo-catalog-hero h2 { margin: 6px 0 8px; font-size: clamp(24px, 4vw, 38px); letter-spacing:-.035em; }
 .evo-catalog-hero p { max-width: 630px; margin:0; color:var(--ink-2); font-size:15px; line-height:1.55; }
@@ -33,14 +33,14 @@
 .evo-card-meta strong { color:var(--gain); }
 .evo-card-cost { color:var(--coin); }
 .evo-card-actions { display:flex; align-items:center; gap:13px; }
-.btn-primary { background:var(--turf); border-color:var(--turf); color:#fff; text-decoration:none; }
-.btn-primary:hover { background:color-mix(in srgb, var(--turf) 88%, #000); color:#fff; }
+/* .btn (cor, hover, text-decoration) mora em shared.css — antes esta regra
+   duplicava a convenção com #fff cravado, que ignorava o tema claro. */
 .evo-source-link { color:var(--turf); font:600 11px var(--font-mono); text-decoration:none; }
 .evo-source-link:hover { text-decoration:underline; }
 .evo-catalog-footnote { margin:20px 0 0; color:var(--ink-3); font:11px var(--font-mono); line-height:1.55; }
 
 /* detalhe / laboratório */
-.evo-detail-page { max-width:1240px; }
+.evo-detail-page { max-width: calc(var(--content-width) + 40px); }
 .evo-detail-crumb { display:inline-flex; margin-bottom:12px; color:var(--turf); font:600 12px var(--font-mono); text-decoration:none; }
 .evo-detail-crumb:hover { text-decoration:underline; }
 .evo-detail-hero { display:grid; grid-template-columns:minmax(0,1fr) 250px; gap:22px; align-items:stretch; margin-bottom:18px; }
@@ -107,7 +107,7 @@
 .evo-path-row span { color:var(--gain); font:700 12px var(--font-mono); }
 
 /* análise: a rota é uma trilha física, não uma tabela de números soltos. */
-.evo-analysis-page, .evo-saved-page { max-width:1240px; }
+.evo-analysis-page, .evo-saved-page { max-width: calc(var(--content-width) + 40px); }
 .evo-analysis-hero { display:grid; grid-template-columns:minmax(0,1fr) 210px; gap:24px; align-items:stretch; margin:22px 0 18px; padding:26px 30px; border:1px solid var(--rule-strong); border-radius:var(--radius-lg); background:linear-gradient(118deg, var(--turf-bg), var(--panel) 62%); box-shadow:var(--shadow-sm); }
 .evo-analysis-hero h2 { margin:6px 0 8px; font-size:clamp(25px,4vw,40px); letter-spacing:-.04em; }
 .evo-analysis-hero p { max-width:700px; margin:0; color:var(--ink-2); font-size:15px; line-height:1.55; }

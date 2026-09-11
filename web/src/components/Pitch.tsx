@@ -1,11 +1,17 @@
 import { Link } from "react-router-dom";
-import type { StarterCard } from "../types";
-import GGRating, { formatGGRating, shouldShowPositionalGGRating } from "./GGRating";
+import type { SlotOutlook, StarterCard } from "../types";
+import GGRating, { formatGGRating } from "./GGRating";
 import "./Pitch.css";
 
 interface PitchProps {
   formation: string;
   starters: StarterCard[];
+  // outlook e regua vêm de TimeResponse.slot_outlook/.regua — pra colorir
+  // a borda de cada chit com a MESMA leitura que o painel "Mapa de
+  // posições" usa (ver internal/analyze.SlotOutlook), nunca uma conta
+  // própria da tela.
+  outlook?: SlotOutlook[];
+  weakestIndex?: number;
 }
 
 function parseRows(formation: string): number[] | undefined {
@@ -20,49 +26,72 @@ export function canDrawPitch(formation: string, startersCount: number): boolean 
   return parseRows(formation) !== undefined && startersCount === 11;
 }
 
-export default function Pitch({ formation, starters }: PitchProps) {
+export default function Pitch({ formation, starters, outlook, weakestIndex }: PitchProps) {
   const rows = parseRows(formation);
   if (!rows || starters.length !== 11) return null;
   const sorted = starters.slice().sort((a, b) => a.index - b.index);
-  const goalkeeper = sorted[0];
+  const goalkeeper = sorted[0]!;
   let cursor = 1;
   const lines = rows.map((size) => {
     const line = sorted.slice(cursor, cursor + size);
     cursor += size;
     return line;
   });
+  const outlookByIndex = new Map((outlook ?? []).map((o) => [o.index, o]));
 
-  return <div className="pitch"><div className="pitch-field">
-    {[...lines].reverse().map((line, index) => <div className="pitch-row" key={index}>
-      {line.slice().reverse().map((card) => <PlayerChit key={card.player.club_item_id || `${card.index}-${card.player.id}`} card={card} />)}
-    </div>)}
-    <div className="pitch-row pitch-row-gk"><PlayerChit card={goalkeeper} /></div>
-  </div></div>;
+  return (
+    <div className="pitch-field">
+      {[...lines].reverse().map((line, index) => (
+        <div className="pitch-row" key={index}>
+          {line.slice().reverse().map((card) => (
+            <PlayerChit key={card.player.club_item_id || `${card.index}-${card.player.id}`} card={card} outlook={outlookByIndex.get(card.index)} isWeakest={card.index === weakestIndex} />
+          ))}
+        </div>
+      ))}
+      <div className="pitch-row pitch-row-gk">
+        <PlayerChit card={goalkeeper} outlook={outlookByIndex.get(goalkeeper.index)} isWeakest={goalkeeper.index === weakestIndex} />
+      </div>
+    </div>
+  );
 }
 
-function PlayerChit({ card }: { card: StarterCard }) {
+function PlayerChit({ card, outlook, isWeakest }: { card: StarterCard; outlook?: SlotOutlook; isWeakest: boolean }) {
   const player = card.player;
   const chem = card.chemistry;
-  // Fora de posição é a ÚNICA forma de perder entrosamento sob o modelo
-  // padrão (ver internal/chemistry) — é o dado mais acionável que existe
-  // aqui, então ganha destaque visual próprio, não só um número a mais.
-  const chemLabel = chem ? (chem.fora_de_posicao ? "fora de posição — sem entrosamento" : `entrosamento ${chem.pontos}/3`) : "";
-  const currentLabel = `GG atual ${formatGGRating(player.gg_rating)}${player.gg_rating_pos ? ` · ${player.gg_rating_pos}` : ""}`;
-  const positionalLabel = shouldShowPositionalGGRating(player.gg_rating, card.position_gg_rating)
-    ? `, GG posicional ${formatGGRating(card.position_gg_rating)} · ${card.position}`
-    : "";
-  const label = `${player.common_name || player.name}, ${card.position}, ${currentLabel}${positionalLabel}${chemLabel ? `, ${chemLabel}` : ""}`;
-  const content = <>
-    {player.image_url && <img className="chit-image" src={player.image_url} alt="" loading="lazy" />}
-    {!player.image_url && <span className="chit-fallback"><strong>{player.common_name || player.name}</strong><small>{card.position}</small></span>}
-    {chem && (
-      <span className={`chit-chem${chem.fora_de_posicao ? " out-of-position" : ""}`} title={chemLabel} aria-hidden="true">
-        {chem.fora_de_posicao ? "!" : chem.pontos}
-      </span>
-    )}
-    <GGRating current={player.gg_rating} currentPosition={player.gg_rating_pos} positional={card.position_gg_rating} positionalPosition={card.position} variant="pitch" />
-  </>;
-  return <div className="pitch-chit">
-    {card.card_slug ? <Link to={`/time/${card.card_slug}`} className="chit-link" aria-label={label}>{content}</Link> : <div className="chit-link" title={label}>{content}</div>}
-  </div>;
+  const tone = isWeakest ? "cost" : outlook?.kind === "melhor_disponivel" ? "alert" : "turf";
+  const chemLabel = chem ? (chem.fora_de_posicao ? "fora de posição — sem entrosamento" : `entrosamento ${chem.pontos}/3`) : "sem entrosamento calculado";
+  const ratingLabel = card.position_gg_rating ? `GG ${formatGGRating(card.position_gg_rating)}` : `GG ${formatGGRating(player.gg_rating)}`;
+  const toneLabel = isWeakest ? "menor GG na vaga" : outlook?.kind === "melhor_disponivel" ? "upgrade disponível no banco" : "acima da média do XI";
+  const label = `${player.common_name || player.name}, ${card.position}, ${ratingLabel}, ${toneLabel}, ${chemLabel}`;
+
+  const content = (
+    <>
+      <div className="chit-head">
+        <span className="chit-pos">{card.position}</span>
+        <span className="chit-ovr">{player.rating}</span>
+      </div>
+      <strong className="chit-name">{player.common_name || player.name}</strong>
+      <div className="chit-foot">
+        <span className={`chit-rating tone-${tone}`}><GGRating current={player.gg_rating} currentPosition={player.gg_rating_pos} positional={card.position_gg_rating} positionalPosition={card.position} variant="pitch" /></span>
+        <span className="chit-chem" aria-hidden="true">
+          {[0, 1, 2].map((i) => (
+            <span key={i} className={chem && !chem.fora_de_posicao && i < chem.pontos ? "filled" : ""} />
+          ))}
+        </span>
+      </div>
+    </>
+  );
+  return (
+    <div className={`pitch-chit tone-${tone}`}>
+      {card.card_slug ? (
+        <Link to={`/time/${card.card_slug}`} className="chit-link" aria-label={label}>
+          {content}
+        </Link>
+      ) : (
+        <div className="chit-link" title={label}>
+          {content}
+        </div>
+      )}
+    </div>
+  );
 }

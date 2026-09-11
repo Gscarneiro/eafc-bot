@@ -214,8 +214,9 @@ func poolSBC(club domain.Club, market []domain.Player, opt PlanoSBCOpcoes) []SBC
 		if p.ClubItemID == "" {
 			continue
 		} // identidade fisica incompleta nunca pode ser descartada.
-		locked := opt.Bloqueados[p.ClubItemID] || p.InSquad || len(p.EvosApplied) > 0
-		out = append(out, SBCItem{ID: p.ClubItemID, Jogador: p.Player, Quimica: p.Chemistry, Protegido: locked, Elegivel: !locked, Razao: reasonSBC(locked, p.InSquad, len(p.EvosApplied) > 0)})
+		protectedByPlan := club.IsProtected(p)
+		locked := opt.Bloqueados[p.ClubItemID] || protectedByPlan || p.InSquad || len(p.EvosApplied) > 0
+		out = append(out, SBCItem{ID: p.ClubItemID, Jogador: p.Player, Quimica: p.Chemistry, Protegido: locked, Elegivel: !locked, Razao: reasonSBC(locked, p.InSquad, len(p.EvosApplied) > 0, protectedByPlan)})
 	}
 	for _, p := range market {
 		if p.Price.Tradeable() {
@@ -247,9 +248,12 @@ func poolSBC(club domain.Club, market []domain.Player, opt PlanoSBCOpcoes) []SBC
 	return filtered
 }
 
-func reasonSBC(locked, squad, evo bool) string {
+func reasonSBC(locked, squad, evo, protectedByPlan bool) string {
 	if squad {
 		return "titular protegido"
+	}
+	if protectedByPlan {
+		return "reserva protegida no plano de referência"
 	}
 	if evo {
 		return "evolucao preservada"

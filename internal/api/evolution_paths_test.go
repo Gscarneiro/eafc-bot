@@ -11,6 +11,19 @@ import (
 	"github.com/gscarneiro/eafc-bot/internal/store"
 )
 
+type avaliadorPathPorFuncaoTeste struct{}
+
+func (avaliadorPathPorFuncaoTeste) Perfis() []domain.PerfilMeta { return nil }
+
+func (avaliadorPathPorFuncaoTeste) Avaliar(card domain.Player, pos domain.Position, ctx domain.ContextoAvaliacao) domain.AvaliacaoCarta {
+	notas := map[string]map[int64]float64{
+		"zagueiro":  {30: 95, 31: 82, 32: 90},
+		"cobertura": {30: 84, 31: 80, 32: 92},
+	}
+	nota, ok := notas[ctx.Funcao][card.ID]
+	return domain.AvaliacaoCarta{Disponivel: ok, Nota: nota, Contexto: ctx}
+}
+
 func TestBuildEvolutionPlayerAnalysesIncluiOVR88EMantemCobertura(t *testing.T) {
 	confirmada := evolutionTestPlayer(10, "confirmada", 88, domain.ST, 82)
 	semPath := evolutionTestPlayer(11, "sem-path", 89, domain.CM, 83)
@@ -83,6 +96,27 @@ func TestEvolutionPathImpactRespeitaSlotsRepetidosEIdentidadeFisica(t *testing.T
 	semGG := evolutionPathImpact(club, reserva, domain.Player{GGRatingPos: domain.CB})
 	if semGG.Kind != "sem_comparacao" {
 		t.Fatalf("sem GG = %+v, esperava comparação indisponível", semGG)
+	}
+}
+
+func TestEvolutionPathImpactUsaAvaliadorAtivoEFuncaoDaVaga(t *testing.T) {
+	titularForte := evolutionTestPlayer(30, "forte-funcao", 90, domain.CB, 99)
+	titularFraco := evolutionTestPlayer(31, "fraco-funcao", 90, domain.CB, 99)
+	reserva := evolutionTestPlayer(32, "reserva-funcao", 90, domain.CB, 99)
+	club := domain.Club{Players: []domain.ClubPlayer{titularForte, titularFraco, reserva}, Squad: domain.Squad{Starters: []domain.SquadSlot{
+		{Index: 2, Position: domain.CB, PlayerID: titularForte.ID},
+		{Index: 3, Position: domain.CB, PlayerID: titularFraco.ID},
+	}}}
+	final := reserva.Player
+	impact := evolutionPathImpactWithEvaluator(club, reserva, final, avaliadorPathPorFuncaoTeste{}, domain.ContextoAvaliacao{Fonte: domain.FonteBot}, map[int]domain.ContextoAvaliacao{
+		2: {Fonte: domain.FonteBot, Funcao: "zagueiro"},
+		3: {Fonte: domain.FonteBot, Funcao: "cobertura"},
+	})
+	if impact.Kind != "entra_no_xi" || impact.SlotIndex != 3 || impact.Starter == nil || impact.Starter.ID != 31 {
+		t.Fatalf("impacto = %+v, esperava entrada na vaga 3 no lugar do titular 31", impact)
+	}
+	if impact.Gain != 12 || impact.FinalEvaluation.Contexto.Funcao != "cobertura" {
+		t.Fatalf("ganho/contexto = %.1f/%q, esperava +12 na função cobertura", impact.Gain, impact.FinalEvaluation.Contexto.Funcao)
 	}
 }
 

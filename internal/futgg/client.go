@@ -110,7 +110,9 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(time.Duration(d).String())
 }
 
-// DefaultConfig traz os caminhos conhecidos do fut.gg no ciclo FC 26.
+// DefaultConfig traz os caminhos conhecidos do fut.gg. Rotas que carregam o
+// ciclo usam {cycle}; mudar FC 26 para FC 27 é configuração, não alteração de
+// código.
 // Os endpoints marcados como TODO precisam ser confirmados com o
 // comando `eafcbot discover`, que grava a resposta crua para inspeção.
 func DefaultConfig() Config {
@@ -160,7 +162,7 @@ func DefaultConfig() Config {
 			// dele). Cada caminho é a carta passo a passo, do estado atual
 			// ao final — inclusive o GG Rating final, que a carta sozinha
 			// não tem enquanto não evoluiu de verdade. Ver evopaths.go.
-			"evolution_paths": "/api/fut/evolutions/v2/26/paths/v2/{id}/",
+			"evolution_paths": "/api/fut/evolutions/v2/{cycle}/paths/v2/{id}/",
 		},
 		UserAgent:      defaultUA,
 		RequestsPerSec: 3,
@@ -282,6 +284,12 @@ func New(cfg Config) *Client {
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = defaultUA
 	}
+	// Configurações gravadas antes do placeholder carregavam exatamente este
+	// default do FC 26. Migrar só esse valor conhecido evita que virar cycle=27
+	// continue consultando paths antigos; uma rota customizada é preservada.
+	if cfg.Endpoints["evolution_paths"] == "/api/fut/evolutions/v2/26/paths/v2/{id}/" {
+		cfg.Endpoints["evolution_paths"] = "/api/fut/evolutions/v2/{cycle}/paths/v2/{id}/"
+	}
 	return &Client{
 		cfg: cfg,
 		http: &http.Client{
@@ -326,6 +334,7 @@ func (c *Client) URL(endpoint string, args map[string]string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("endpoint %q não configurado", endpoint)
 	}
+	path = strings.ReplaceAll(path, "{cycle}", c.cfg.Cycle)
 	for k, v := range args {
 		path = strings.ReplaceAll(path, "{"+k+"}", v)
 	}

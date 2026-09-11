@@ -56,3 +56,18 @@ func TestRolesFalhaEmSilencioSemEndpoint(t *testing.T) {
 		t.Error("Roles() devia devolver mapas vazios, não nil, mesmo sem endpoint")
 	}
 }
+
+func TestPreencherFamiliaridadesFuncoesPreservaNivelMaisAlto(t *testing.T) {
+	p := domain.Player{RolesPlus: []int{10}, RolesPlusPlus: []int{20}}
+	roles := RolesTable{
+		Plus:     map[int]Role{10: {Name: "Holding", Position: domain.CDM}},
+		PlusPlus: map[int]Role{20: {Name: "Holding", Position: domain.CDM}},
+	}
+	PreencherFamiliaridadesFuncoes(&p, roles)
+	if len(p.FamiliaridadesFuncao) != 1 {
+		t.Fatalf("familiaridades = %+v", p.FamiliaridadesFuncao)
+	}
+	if got := p.FamiliaridadesFuncao[0]; got.Nome != "Holding" || got.Nivel != "plus_plus" || got.Posicao != domain.CDM {
+		t.Fatalf("familiaridade = %+v", got)
+	}
+}

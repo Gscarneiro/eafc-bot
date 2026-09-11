@@ -164,6 +164,15 @@ type PlayStyleDefinition struct {
 	URL             string `json:"url,omitempty"`
 }
 
+// FamiliaridadeFuncao Ã© a proficiÃªncia publicada pelo jogo para uma funÃ§Ã£o
+// tÃ¡tica. Ela Ã© resolvida a partir do catÃ¡logo do FUT.GG na coleta, para que
+// o motor nÃ£o tente adivinhar o significado dos IDs crus de RolesPlus.
+type FamiliaridadeFuncao struct {
+	Nome    string   `json:"nome"`
+	Posicao Position `json:"posicao"`
+	Nivel   string   `json:"nivel"` // plus ou plus_plus
+}
+
 // NormalizeFoot aceita os códigos que aparecem em snapshots antigos e os
 // rótulos textuais enviados pelo fut.gg, preservando valores desconhecidos.
 func NormalizeFoot(value string) string {
@@ -230,6 +239,7 @@ type Player struct {
 	WeightKg           *int                `json:"weight_kg,omitempty"`
 	RealFace           *bool               `json:"real_face,omitempty"`
 	AccelerateType     string              `json:"accelerate_type,omitempty"`
+	BodyType           string              `json:"body_type,omitempty"`
 
 	// GGRating é a nota que o próprio fut.gg calcula pra carta — não o
 	// overall da EA, um número deles, ~0-99, achado NA MELHOR posição do
@@ -251,6 +261,10 @@ type Player struct {
 	// GGRatings guarda a nota do fut.gg em cada posição elegível. A nota
 	// escalar acima continua para compatibilidade com snapshots antigos.
 	GGRatings map[Position]float64 `json:"gg_ratings,omitempty"`
+	// ExternalRatings armazena avaliações posicionais importadas com sua
+	// própria métrica, escala e evidência. Elas não substituem nem ajustam o
+	// GG Rating: a seleção explícita do avaliador decide qual delas usar.
+	ExternalRatings map[FonteAvaliacao]NotaExterna `json:"external_ratings,omitempty"`
 
 	// ImageURL é a arte da carta, pronta pra usar num <img> — o fut.gg já
 	// devolve a URL final, redimensionada pelo CDN deles.
@@ -272,6 +286,10 @@ type Player struct {
 	// que GGRating não vem com nome de posição pronto.
 	RolesPlus     []int `json:"roles_plus,omitempty"`
 	RolesPlusPlus []int `json:"roles_plus_plus,omitempty"`
+	// FamiliaridadesFuncao Ã© a versÃ£o legÃ­vel dos IDs acima. Nil significa
+	// que o catÃ¡logo ainda nÃ£o foi coletado; uma lista vazia significa que a
+	// fonte verificou a carta e nÃ£o encontrou proficiÃªncia adicional.
+	FamiliaridadesFuncao []FamiliaridadeFuncao `json:"familiaridades_funcao,omitempty"`
 
 	// MomentumPct é quanto o preço caiu da MÉDIA recente da própria carta
 	// (não um dia-a-dia contra ontem) — o fut.gg já calcula isso e
@@ -305,15 +323,29 @@ func (p Player) PlayerKey() string {
 	return "card:" + strconv.FormatInt(p.ID, 10)
 }
 
-// GGRatingAt devolve a nota exata para o lugar físico da escalação.
+// GGRatingVersion invalida planos calculados com outra regra de notas.
+// A versão zero identifica snapshots anteriores à comparação das fontes.
+const GGRatingVersion = 1
+
+// GGRatingAt devolve a maior nota conhecida para o lugar físico da escalação.
 func (p Player) GGRatingAt(pos Position) (float64, bool) {
+	var best float64
 	if v, ok := p.GGRatings[pos]; ok && v > 0 {
-		return v, true
+		best = v
 	}
-	if p.GGRating > 0 && p.GGRatingPos == pos {
-		return p.GGRating, true
+	ratingPos := p.GGRatingPos
+	if ratingPos == "" {
+		// Snapshots antigos não guardavam GGRatingPos. Neles, a nota geral
+		// só é aproveitável na posição declarada da carta; assumir outra
+		// vaga transformaria uma lacuna de dados em uma comparação falsa.
+		ratingPos = p.Position
 	}
-	return 0, false
+	// O metarank é compartilhado por EA ID, mas uma cópia evoluída pode
+	// superá-lo. A nota dessa cópia só vale na posição informada pela fonte.
+	if p.GGRating > best && ratingPos == pos {
+		best = p.GGRating
+	}
+	return best, best > 0
 }
 
 // Display devolve o nome mais curto e reconhecível da carta.
@@ -341,6 +373,29 @@ func (p Player) PlaysAt(pos Position) bool {
 		}
 	}
 	return false
+}
+
+// FamiliaridadeNaFuncao encontra uma proficiÃªncia que pertence Ã  vaga. A
+// normalizaÃ§Ã£o tolera maiÃºsculas e hÃ­fens para o plano salvo nÃ£o depender da
+// grafia apresentada por uma fonte, mas nÃ£o traduz nomes entre idiomas: uma
+// traduÃ§Ã£o sem um catÃ¡logo verificado seria outra inferÃªncia escondida.
+func (p Player) FamiliaridadeNaFuncao(pos Position, funcao string) (FamiliaridadeFuncao, bool) {
+	want := normalizarNomeFuncao(funcao)
+	if want == "" {
+		return FamiliaridadeFuncao{}, false
+	}
+	for _, role := range p.FamiliaridadesFuncao {
+		if role.Posicao == pos && normalizarNomeFuncao(role.Nome) == want {
+			return role, true
+		}
+	}
+	return FamiliaridadeFuncao{}, false
+}
+
+func normalizarNomeFuncao(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.NewReplacer("-", " ", "_", " ").Replace(value)
+	return strings.Join(strings.Fields(value), " ")
 }
 
 // HasPlayStyle diz se o jogador tem o PlayStyle. plusOnly exige a versão +.

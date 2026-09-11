@@ -1,16 +1,31 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchCollection, fetchTime } from "../api";
+import { appendFeedback, fetchCollection, fetchTime } from "../api";
 import { asyncGate } from "../components/asyncGate";
 import Chip from "../components/Chip";
-import GGRating from "../components/GGRating";
+import GGRating, { formatGGRating } from "../components/GGRating";
 import PageHeader from "../components/PageHeader";
 import Pitch, { canDrawPitch } from "../components/Pitch";
+import TrendChart from "../components/TrendChart";
 import type { Filter } from "../odata";
 import { useData } from "../useData";
 import { useCollection } from "../useCollection";
-import type { ChemistryPlayer, ClubPlayer, Position, RosterCard, StarterCard } from "../types";
+import { formatCoins, formatDate, formatSigned } from "../format";
+import type {
+  ChemistryPlayer,
+  ChemistryResult,
+  ClubPlayer,
+  LeituraDoBot,
+  Position,
+  PositionMapRow,
+  ReservasCollection,
+  RosterCard,
+  SlotOutlook,
+  StarterCard,
+  TopMove,
+} from "../types";
 import "../shared.css";
+import "./Time.css";
 
 const VIEW_KEY = "eafc-bot:time-view";
 
@@ -18,6 +33,9 @@ const VIEW_KEY = "eafc-bot:time-view";
 // divergir da posição natural da carta, ver domain.SquadSlot) e o banco.
 // O titular padrão é o campo desenhado na formação de verdade; a tabela
 // continua disponível pelo toggle — melhor pra varrer números em série.
+// À direita do campo ficam três leituras derivadas do MESMO snapshot:
+// jogada de hoje, mapa de posições e química — nenhuma delas busca dado
+// próprio, todas vêm de /api/time.
 export default function Time() {
   const [, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -52,6 +70,12 @@ export default function Time() {
   const suggested = data.optimization?.moves?.length ? starters.map((s) => data.optimization.moves.find((m) => m.index === s.index)?.suggested ?? s) : starters;
   const displayedStarters = lineup === "sugerida" ? suggested : starters;
   const bench = benchCollection.rows;
+  const reservas = benchCollection.raw as ReservasCollection | null;
+  const priceSeries = reservas?.["@eafc.price_series"] ?? {};
+  const priceStatus = reservas?.["@eafc.price_history_status"] ?? {};
+  const positionMap = data.position_map ?? [];
+  const slotOutlook = data.slot_outlook ?? [];
+  const weakestIndex = positionMap.length > 0 ? positionMap.reduce((min, row) => (row.rating < min.rating ? row : min), positionMap[0]!).index : undefined;
   const pitchOK = canDrawPitch(data.formation || "", starters.length);
   const showPitch = pitchOK && view === "campo";
   const applyBenchFilters = (nextPosition: string, nextTradeable: typeof tradeable) => {
@@ -65,11 +89,11 @@ export default function Time() {
   };
 
   return (
-    <div className="wrap">
+    <div className="wrap time-page">
       <PageHeader
-        eyebrow={`formação ${data.formation || "—"}`}
+        eyebrow="Elenco / Squad"
         title="Meu time"
-        meta={`${starters.length} titulares · ${bench.length} reservas`}
+        meta={`formação ${data.formation || "—"} · ${starters.length} titulares · ${benchCollection.count} reservas`}
         actions={
           <div className="toggle">
             <button className={view === "campo" ? "active" : ""} onClick={() => pitchOK && setView("campo")} disabled={!pitchOK} title={!pitchOK ? "A formação ainda não tem 11 slots reconhecidos para desenhar o campo" : undefined}>
@@ -83,30 +107,50 @@ export default function Time() {
         }
       />
 
-      <section>
-        <h2>Titulares</h2>
-        {data.chemistry && data.chemistry.fora_de_posicao > 0 && (
-          <div className="banner alert">
-            {data.chemistry.fora_de_posicao} titular{data.chemistry.fora_de_posicao > 1 ? "es" : ""} fora de posição — zera o entrosamento dele e tira o vínculo dos outros também (única forma de perder química hoje).
+      {data.chemistry && data.chemistry.fora_de_posicao > 0 && (
+        <div className="banner alert">
+          {data.chemistry.fora_de_posicao} titular{data.chemistry.fora_de_posicao > 1 ? "es" : ""} fora de posição — zera o entrosamento dele e tira o vínculo dos outros também (única forma de perder química hoje).
+        </div>
+      )}
+
+      <div className="time-grid">
+        <div className="panel time-pitch-panel">
+          <div className="panel-head">
+            <span>Titulares <span className="panel-head-sub">/ Starting XI</span></span>
           </div>
-        )}
-        {showPitch ? (
-          <Pitch formation={data.formation} starters={displayedStarters} />
-        ) : (
-          <RosterTable rows={displayedStarters.map((s) => ({ player: s.player, cardSlug: s.card_slug, position: s.position, positionalGGRating: s.position_gg_rating, chemistry: s.chemistry }))} showChemistry />
-        )}
-        {data.optimization?.status === "improved" && (
-          <div className="banner">
-            <strong>Melhor encaixe: +{data.optimization.gain.toFixed(1)} GG posicional</strong>
-            {data.optimization.chemistry_note && <><br />{data.optimization.chemistry_note}</>}
-          </div>
-        )}
-      </section>
+          {showPitch ? (
+            <Pitch formation={data.formation} starters={displayedStarters} outlook={slotOutlook} weakestIndex={weakestIndex} />
+          ) : (
+            <div className="panel-body">
+              <RosterTable rows={displayedStarters.map((s) => ({ player: s.player, cardSlug: s.card_slug, position: s.position, positionalGGRating: s.position_gg_rating, chemistry: s.chemistry }))} showChemistry />
+            </div>
+          )}
+          {showPitch && (
+            <div className="pitch-legend">
+              <span><i className="tone-turf" /> acima da média do XI</span>
+              <span><i className="tone-alert" /> upgrade disponível</span>
+              <span><i className="tone-cost" /> menor GG na vaga</span>
+            </div>
+          )}
+          {data.optimization?.status === "improved" && (
+            <div className="panel-body top-border">
+              <strong>Melhor encaixe: +{data.optimization.gain.toFixed(1)} GG posicional</strong>
+              {data.optimization.chemistry_note && <><br />{data.optimization.chemistry_note}</>}
+            </div>
+          )}
+        </div>
+
+        <div className="time-side">
+          <TopMoveCard move={data.top_move} />
+          <PositionMapCard rows={positionMap} regua={data.regua} outlook={slotOutlook} />
+          <ChemistryCard chem={data.chemistry} starters={starters} />
+        </div>
+      </div>
 
       {(benchCollection.count > 0 || search || position || tradeable !== "all") && (
         <section>
           <div className="section-title-row">
-            <div><h2>Reservas</h2><p className="section-note">Cartas 88+ do clube, ordenadas por GG atual.</p></div>
+            <div><h2>Reservas</h2><p className="section-note">Todo o clube fora do XI, ordenado por GG atual.</p></div>
             <span className="count-label">{benchCollection.count} encontradas</span>
           </div>
           <div className="roster-filters" aria-label="Filtrar reservas">
@@ -114,10 +158,249 @@ export default function Time() {
             <label><span>Posição</span><select value={position} onChange={(e) => { const value = e.target.value; setPosition(value); applyBenchFilters(value, tradeable); }}><option value="">Todas</option>{["GK", "RB", "CB", "LB", "RWB", "LWB", "CDM", "CM", "CAM", "RM", "LM", "RW", "LW", "CF", "ST"].map((p) => <option key={p}>{p}</option>)}</select></label>
             <label><span>Status</span><select value={tradeable} onChange={(e) => { const value = e.target.value as typeof tradeable; setTradeable(value); applyBenchFilters(position, value); }}><option value="all">Todas</option><option value="tradeable">Negociáveis</option><option value="untradeable">Inegociáveis</option></select></label>
           </div>
-          <RosterTable rows={bench.map((b) => ({ player: b.player, cardSlug: b.card_slug }))} />
+          <BenchTable rows={bench} priceSeries={priceSeries} priceStatus={priceStatus} />
           <Pagination page={benchCollection.page} pages={benchCollection.pages} onPage={benchCollection.setPage} />
         </section>
       )}
+    </div>
+  );
+}
+
+function TopMoveCard({ move }: { move?: TopMove }) {
+  const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const descartar = async () => {
+    if (!move || sending || sent) return;
+    setSending(true);
+    try {
+      await appendFeedback({ action_id: move.action_id, status: "descartada" });
+      setSent(true);
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <div className="panel top-move-panel">
+      <div className="panel-head">
+        <span>Jogada de hoje <span className="panel-head-sub">/ Top move</span></span>
+        {move?.kind === "upgrade" && move.efficiency ? <span className="panel-head-meta">eficiência {move.efficiency.toFixed(2)}</span> : null}
+      </div>
+      <div className="panel-body">
+        {!move ? (
+          <p className="hint">Nenhum upgrade de mercado nem evolução passou do ganho mínimo hoje.</p>
+        ) : (
+          <>
+            <div className="top-move-headline">{move.headline}</div>
+            <div className="top-move-stats">
+              <div><span>Ganho</span><strong className="up">{formatSigned(move.gain)}</strong></div>
+              {move.kind === "upgrade" ? (
+                <>
+                  <div><span>Líquido</span><strong className="coin">{formatCoins(move.net_cost)}</strong></div>
+                  {move.profit ? (
+                    <div><span>Sobra</span><strong className="up">{formatCoins(move.profit)}</strong></div>
+                  ) : (
+                    <div><span>Compra</span><strong>{formatCoins(move.gross_cost ?? 0)}</strong></div>
+                  )}
+                </>
+              ) : (
+                <div><span>Custo</span><strong className="coin">{move.net_cost > 0 ? formatCoins(move.net_cost) : "grátis"}</strong></div>
+              )}
+            </div>
+            {move.rationale?.[0] && <p className="top-move-rationale">{move.rationale[0]}</p>}
+            <div className="top-move-actions">
+              <Link className="btn primary" to={move.link}>{move.kind === "upgrade" ? "abrir no mercado" : "ver evolução"}</Link>
+              {sent ? <span className="hint">descartado</span> : <button className="btn ghost" type="button" onClick={descartar} disabled={sending}>descartar</button>}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// pct mapeia GG Rating (tipicamente 70-99 no XI) numa barra 0-100% — uma
+// faixa razoável pra dar contraste visual entre titulares, não uma escala
+// oficial de nenhum lugar.
+function pct(rating: number): number {
+  return Math.max(2, Math.min(100, ((rating - 70) / (99 - 70)) * 100));
+}
+
+function outlookLabel(o?: SlotOutlook): { text: string; tone: "up" | "" } {
+  if (!o) return { text: "—", tone: "" };
+  switch (o.kind) {
+    case "melhor_disponivel":
+      return { text: formatSigned(o.delta ?? 0), tone: "up" };
+    case "sem_cotacao":
+      return { text: "s/ cotação", tone: "" };
+    case "teto":
+      return { text: "teto", tone: "" };
+    default:
+      return { text: "—", tone: "" };
+  }
+}
+
+function PositionMapCard({ rows, regua, outlook }: { rows: PositionMapRow[]; regua: number; outlook: SlotOutlook[] }) {
+  const byIndex = new Map(outlook.map((o) => [o.index, o]));
+  const rulerPct = regua > 0 ? pct(regua) : 0;
+  return (
+    <div className="panel position-map-panel">
+      <div className="panel-head">
+        <span>Mapa de posições <span className="panel-head-sub">/ vs média do XI</span></span>
+        <span className="panel-head-meta">média {regua > 0 ? regua.toFixed(1) : "—"}</span>
+      </div>
+      <div className="panel-body position-map-rows">
+        {rows.length === 0 && <p className="hint">Sem GG Rating suficiente pra montar o mapa.</p>}
+        {rows.map((row) => {
+          const label = outlookLabel(byIndex.get(row.index));
+          return (
+            <div className="position-map-row" key={row.index}>
+              <span className="position-map-pos">{row.position}</span>
+              <span className="position-map-bar">
+                <span className="position-map-fill" style={{ width: `${pct(row.rating)}%` }} />
+                {regua > 0 && <span className="position-map-ruler" style={{ left: `${rulerPct}%` }} />}
+              </span>
+              <span className="position-map-value">{row.rating.toFixed(1)}</span>
+              <span className={`position-map-outlook ${label.tone}`}>{label.text}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function topGroup(starters: StarterCard[], field: "club" | "league" | "nation"): { name: string; count: number } | null {
+  const counts = new Map<string, number>();
+  for (const s of starters) {
+    const value = s.player[field];
+    if (!value) continue;
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  let best: { name: string; count: number } | null = null;
+  for (const [name, count] of counts) {
+    if (!best || count > best.count) best = { name, count };
+  }
+  return best;
+}
+
+function chemistryNoteText(chem: ChemistryResult): string {
+  if (chem.fora_de_posicao > 0) {
+    return `${chem.fora_de_posicao} titular${chem.fora_de_posicao > 1 ? "es" : ""} fora de posição — zera o entrosamento dele.`;
+  }
+  if (chem.verificacao.status === "diverge") {
+    return `O modelo não confere com o jogo (calculado ${chem.verificacao.calculado}, o jogo reporta ${chem.verificacao.observado}) — rode \`eafcbot quimica -calibrar\`.`;
+  }
+  if (chem.nao_modelado?.length) {
+    return `${chem.nao_modelado.length} carta(s) fora do modelo de química (Icon/Hero) — não entram na conta.`;
+  }
+  return "Ninguém fora de posição — a única forma de perder entrosamento no modelo padrão.";
+}
+
+function ChemistryCard({ chem, starters }: { chem?: ChemistryResult; starters: StarterCard[] }) {
+  const club = topGroup(starters, "club");
+  const league = topGroup(starters, "league");
+  const nation = topGroup(starters, "nation");
+  const jogadoresByIndex = new Map((chem?.jogadores ?? []).map((j) => [j.index, j]));
+  return (
+    <div className="panel chemistry-panel">
+      <div className="panel-head">
+        <span>Química <span className="panel-head-sub">/ Chemistry</span></span>
+        {chem && <span className="panel-head-meta">{chem.total} / {chem.maximo}</span>}
+      </div>
+      <div className="panel-body">
+        {!chem ? (
+          <p className="hint">Escalação não sincronizada — sem entrosamento calculado.</p>
+        ) : (
+          <>
+            <div className="chem-segments">
+              {starters.slice().sort((a, b) => a.index - b.index).map((s) => {
+                const j = jogadoresByIndex.get(s.index);
+                const label = `${s.player.common_name || s.player.name}: ${j ? (j.fora_de_posicao ? "fora de posição" : `${j.pontos}/3`) : "sem dado"}`;
+                return <span key={s.index} className={j?.fora_de_posicao ? "out" : "ok"} title={label} />;
+              })}
+            </div>
+            <div className="chem-groups">
+              <div><span>Clube</span><strong>{club ? `${club.name} ×${club.count}` : "—"}</strong></div>
+              <div><span>Liga</span><strong>{league ? `${league.name} ×${league.count}` : "—"}</strong></div>
+              <div><span>Nação</span><strong>{nation ? `${nation.name} ×${nation.count}` : "—"}</strong></div>
+            </div>
+            <p className="chem-note">{chemistryNoteText(chem)}</p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function leituraText(l?: LeituraDoBot): string {
+  if (!l || !l.kind) return "—";
+  switch (l.kind) {
+    case "evoluir":
+      return `Evolução leva a ${(l.final_gg_rating ?? 0).toFixed(1)} GG por ${formatCoins(l.coins_cost ?? 0)}`;
+    case "vender_caindo":
+      return `Caindo ${Math.abs(l.change_pct_30d ?? 0).toFixed(0)}% em 30d e sem vaga no XI — vender agora`;
+    case "vender":
+      return "Sem vaga no XI e sem potencial de evolução — vender";
+    case "promover":
+      if (l.promocao) return `Escalar na ${l.promocao.position}, no lugar de ${l.promocao.starter_name} (${l.promocao.candidate_rating.toFixed(1)} vs ${l.promocao.starter_rating.toFixed(1)} GG na vaga)`;
+      return "Promoção apontada, mas faltam notas por vaga para confirmar a troca";
+    case "fodder":
+      return l.sbc_name ? `Fodder de SBC: cobre "${l.sbc_name}"` : "Fodder de SBC sem custo de oportunidade";
+    case "nao_vendavel":
+      return l.sbc_name ? `Untradeable — cobre "${l.sbc_name}"` : "Untradeable — serve como fodder sem custo de oportunidade";
+    case "aguardar_verificacao":
+      return "Evolução ainda não verificada nesta coleta";
+    default:
+      return "—";
+  }
+}
+
+function BenchTable({ rows, priceSeries, priceStatus }: { rows: RosterCard[]; priceSeries: Record<string, { coins: number; observed_at: string }[]>; priceStatus: Record<string, string> }) {
+  return (
+    <div className="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Pos</th>
+            <th>Carta</th>
+            <th className="num">OVR</th>
+            <th className="num">GG</th>
+            <th>Vaga sugerida</th>
+            <th className="num">Preço</th>
+            <th>30d</th>
+            <th>Leitura do bot</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const p = row.player;
+			const promocao = row.leitura?.promocao;
+            const series = (priceSeries[p.id] ?? []).map((pt) => ({ label: formatDate(pt.observed_at), value: pt.coins }));
+            const status = priceStatus[p.id];
+            return (
+              <tr key={p.club_item_id || p.id}>
+                <td>{p.position}{p.out_of_pos ? " *" : ""}</td>
+                <td className="namecell">
+                  {row.card_slug ? <Link to={`/time/${row.card_slug}`}>{p.common_name || p.name}</Link> : <span title="Abaixo do overall mínimo analisado carta a carta">{p.common_name || p.name}</span>}
+                  {p.untradeable && <Chip tone="flat"> untradeable</Chip>}
+                </td>
+                <td className="num">{p.rating}</td>
+                <td className="num">{formatGGRating(p.gg_rating)}</td>
+                <td className="promotion-cell">
+                  {promocao ? <>
+                    <strong>{promocao.position} → {promocao.starter_name}</strong>
+                    <span>{promocao.candidate_rating.toFixed(1)} vs {promocao.starter_rating.toFixed(1)} <b className="up">{formatSigned(promocao.gain)}</b> GG na vaga</span>
+                  </> : "—"}
+                </td>
+                <td className="num coin">{p.price?.coins ? formatCoins(p.price.coins) : "—"}</td>
+                <td>{series.length >= 2 ? <TrendChart data={series} compact height={16} /> : <span className="chart-empty-inline" title={status}>—</span>}</td>
+                <td className="leitura-cell">{leituraText(row.leitura)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {rows.length === 0 && <div className="empty">Nenhuma carta aqui.</div>}
     </div>
   );
 }
@@ -146,7 +429,6 @@ function RosterTable({ rows, showChemistry = false }: { rows: Row[]; showChemist
       <table>
         <thead>
           <tr>
-            <th></th>
             <th>Posição</th>
             <th>Carta</th>
             <th className="num">Overall</th>
@@ -157,7 +439,6 @@ function RosterTable({ rows, showChemistry = false }: { rows: Row[]; showChemist
         <tbody>
           {rows.map(({ player: p, cardSlug, position, positionalGGRating, chemistry }, index) => (
             <tr key={p.club_item_id || `${p.id}-${index}`}>
-              <td>{p.image_url && <img className="thumb" src={p.image_url} alt="" loading="lazy" />}</td>
               <td>
                 {position ?? p.position}
                 {p.out_of_pos ? " *" : ""}

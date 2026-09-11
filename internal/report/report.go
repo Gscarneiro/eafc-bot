@@ -103,6 +103,8 @@ type Input struct {
 	TrendWindow time.Duration
 	Started     time.Time
 	MaxRows     int
+	Evaluator   analyze.Avaliador
+	Contexto    domain.ContextoAvaliacao
 
 	// CardReports é a análise carta-a-carta (atual x potencial) do
 	// elenco — mesma fonte de cards.CardReport.Best que
@@ -131,6 +133,9 @@ func Build(in Input) Data {
 	}
 	snap := in.Snapshot
 	club := snap.Club
+	if in.Evaluator != nil {
+		club = analyze.ClubeNaRegua(club, in.Evaluator, in.Contexto)
+	}
 
 	_, raisable := club.Budget()
 
@@ -163,8 +168,8 @@ func Build(in Input) Data {
 	if model.Nome == "" {
 		model = chemistry.ModeloPadrao()
 	}
-	d.SquadPlan = analyze.OptimizeSquadWithOptions(club, analyze.SquadOptions{ChemistryModel: model})
-	d.SquadSwaps = analyze.FindSquadSwaps(club)
+	d.SquadPlan = analyze.OptimizeSquadWithOptions(club, analyze.SquadOptions{Evaluator: in.Evaluator, Contexto: in.Contexto, ChemistryModel: model})
+	d.SquadSwaps = analyze.FindSquadSwapsWithEvaluator(club, in.Evaluator, in.Contexto)
 	d.MainSquad = MainSquad(club)
 	d.SBCs, d.Objectives = RankChallenges(snap.SBCs, snap.Objectives)
 	d.Market = MarketRows(club, in.Upgrades, in.Trends)
@@ -191,48 +196,40 @@ func Build(in Input) Data {
 	return d
 }
 
-// SquadSummary calcula a "Nota do time" e o "elo mais fraco" que abrem o
-// briefing. Os dois usam o GG Rating do fut.gg quando o XI inteiro tem essa
-// nota (ver analyze.WeakestLinks) — é o número que já se conhece do site,
-// preso entre 0 e ~99, em vez do Score() deste pacote, que soma bônus de
-// PlayStyle sem teto e pode passar de 99. Score() só volta a decidir quando
-// a fonte não é o GG Club (csv, chrome) e por isso não traz GG Rating.
+// SquadSummary calcula a "Nota do time" e o "elo mais fraco" na mesma régua
+// ativa e na posição de cada vaga. Cartas sem nota comparável ficam fora da
+// média e não provocam troca silenciosa para outro avaliador.
 func SquadSummary(club domain.Club) (avg float64, weakSlot domain.Position, weakName string, weakGGRating float64) {
-	weak := analyze.WeakestLinks(club, 1)
+	return SquadSummaryWithEvaluator(club, nil, domain.ContextoAvaliacao{}, nil)
+}
 
-	var ggSum float64
-	var ggN int
-	var scoreSum float64
-	var scoreN int
-	for _, squadSlot := range club.Squad.Starters {
-		p, ok := club.PlayerByID(squadSlot.PlayerID)
-		if !ok {
-			continue
-		}
-		scoreSum += analyze.EvaluateBotScore(p.Player, squadSlot.Position, analyze.DefaultBotScoreProfile).Total
-		scoreN++
-		if p.GGRating > 0 {
-			ggSum += p.GGRating
-			ggN++
+// SquadSummaryWithEvaluator usa exatamente a régua e o contexto desenhados
+// no campo. O nome histórico WeakestGGRating do contrato continua existindo,
+// mas o valor representa a fonte ativa declarada no envelope da API.
+func SquadSummaryWithEvaluator(club domain.Club, evaluator analyze.Avaliador, contexto domain.ContextoAvaliacao, contextosPorVaga map[int]domain.ContextoAvaliacao) (avg float64, weakSlot domain.Position, weakName string, weakRating float64) {
+	evaluations := analyze.EvaluateSquadSlots(club, evaluator, contexto, contextosPorVaga)
+	weak := analyze.WeakestLinksFromEvaluations(evaluations, 1)
+
+	var sum float64
+	var count int
+	for _, item := range evaluations {
+		if item.Evaluation.Disponivel {
+			sum += item.Evaluation.Nota
+			count++
 		}
 	}
-	switch {
-	case ggN > 0:
-		avg = ggSum / float64(ggN)
-	case scoreN > 0:
-		// A fonte não trouxe GG Rating (não é o GG Club, é csv/chrome/etc):
-		// cai pro Score() próprio em vez de mostrar zero.
-		avg = scoreSum / float64(scoreN)
+	if count > 0 {
+		avg = sum / float64(count)
 	}
 
 	if len(weak) > 0 {
 		weakSlot = weak[0].Slot
 		weakName = weak[0].Player.Display()
-		weakGGRating = weak[0].Player.GGRating
+		weakRating = weak[0].Score
 	} else {
 		weakSlot, weakName = "—", "elenco não sincronizado"
 	}
-	return avg, weakSlot, weakName, weakGGRating
+	return avg, weakSlot, weakName, weakRating
 }
 
 // MainSquad monta o XI na ordem que o fut.gg usa (positionIdx 0..10).
@@ -242,12 +239,47 @@ func SquadSummary(club domain.Club) (avg float64, weakSlot domain.Position, weak
 func MainSquad(club domain.Club) []SquadCard {
 	out := make([]SquadCard, 0, len(club.Squad.Starters))
 	for _, slot := range club.Squad.Starters {
-		if p, ok := club.PlayerByID(slot.PlayerID); ok {
+		if p, ok := club.PlayerForSlot(slot); ok {
 			out = append(out, SquadCard{Index: slot.Index, Position: slot.Position, Player: p})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Index < out[j].Index })
 	return out
+}
+
+// PositionMapRow é uma linha do "Mapa de posições" (Meu time): o GG Rating
+// do titular NA POSIÇÃO DO SLOT (GGRatingAt, não o GGRating cru da carta,
+// que pode ser calculado para outra posição — ver o comentário de
+// domain.Player.GGRatingAt) e o slot físico que ele ocupa.
+type PositionMapRow struct {
+	Index    int
+	Position domain.Position
+	Player   domain.ClubPlayer
+	Rating   float64
+}
+
+// PositionMap devolve as linhas do mapa de posições e a média da mesma
+// grandeza: a nota ativa na posição de cada vaga.
+func PositionMap(club domain.Club) (rows []PositionMapRow, average float64) {
+	return PositionMapWithEvaluator(club, nil, domain.ContextoAvaliacao{}, nil)
+}
+
+// PositionMapWithEvaluator mantém mapa, média e elo fraco na mesma fonte.
+func PositionMapWithEvaluator(club domain.Club, evaluator analyze.Avaliador, contexto domain.ContextoAvaliacao, contextosPorVaga map[int]domain.ContextoAvaliacao) (rows []PositionMapRow, average float64) {
+	rows = make([]PositionMapRow, 0, len(club.Squad.Starters))
+	var sum float64
+	for _, item := range analyze.EvaluateSquadSlots(club, evaluator, contexto, contextosPorVaga) {
+		if !item.Evaluation.Disponivel {
+			continue
+		}
+		rows = append(rows, PositionMapRow{Index: item.Index, Position: item.Position, Player: item.Player, Rating: item.Evaluation.Nota})
+		sum += item.Evaluation.Nota
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Index < rows[j].Index })
+	if len(rows) > 0 {
+		average = sum / float64(len(rows))
+	}
+	return rows, average
 }
 
 // RankChallenges põe na frente o que expira logo e o que paga melhor.

@@ -81,6 +81,20 @@ func (c *Client) Collect(ctx context.Context, gamerTag string, marketFilter Play
 			}
 			mu.Lock()
 			snap.Club = club
+			// club.SourceCycle só vem preenchido quando diverge do ciclo
+			// configurado (ver majorityGame). Isto NÃO é erro — o clube
+			// continua sendo salvo normalmente — só deixa de ser silencioso,
+			// porque um clube do ciclo errado carimbado como se fosse do
+			// ciclo certo é exatamente o tipo de palpite disfarçado que o
+			// projeto evita (ver "na dúvida, não afirma" no CLAUDE.md).
+			if club.SourceCycle != "" && club.SourceCycle != c.cfg.Cycle {
+				snap.Errors = append(snap.Errors, fmt.Sprintf(
+					"clube veio do ciclo %s mas o bot está configurado para %s — "+
+						"o fut.gg ainda não sincronizou seu clube do ciclo %s. "+
+						"Sincronize em fut.gg/gg-club e rode de novo, ou volte "+
+						"futgg.cycle para %q em .eafc-bot/config.json",
+					club.SourceCycle, c.cfg.Cycle, c.cfg.Cycle, club.SourceCycle))
+			}
 			mu.Unlock()
 			return nil
 		})
@@ -527,6 +541,15 @@ func (c *Client) Club(ctx context.Context, gamerTag string) (domain.Club, error)
 		}
 	}
 
+	// club.Cycle acima é sempre o ciclo CONFIGURADO. SourceCycle guarda o que
+	// a maioria das cartas do payload realmente reportou — testado ao vivo em
+	// 13/09/2026, um dia em que /api/gg-club/{gamertag}/players/ ainda
+	// devolvia só cartas game:"26" mesmo com o mercado do FC 27 já publicado.
+	// Collect() decide o que fazer com a divergência; aqui só se mede.
+	if src := majorityGame(roster); src != "" {
+		club.SourceCycle = src
+	}
+
 	// A escalação vem de uma rota PRÓPRIA (/active-squad/), separada da
 	// listagem de elenco: o /players/ não traz escalação nenhuma, é só
 	// cartas. Falha aqui não pode derrubar o clube inteiro — as 647 cartas
@@ -543,6 +566,32 @@ func (c *Client) Club(ctx context.Context, gamerTag string) (domain.Club, error)
 		club.Squad = domain.Squad{SyncedAt: club.SyncedAt}
 	}
 	return club, nil
+}
+
+// majorityGame lê o campo "game" de cada carta do elenco (dentro de
+// playerDef/player/item/card, o mesmo envelope que mapClubPlayer desembrulha)
+// e devolve o valor mais comum. Poucas cartas fora do padrão — uma evolução
+// em andamento, por exemplo — não derrubam o resultado: é maioria, não
+// unanimidade. Devolve "" quando o roster está vazio ou nenhuma carta expõe
+// "game".
+func majorityGame(roster []node) string {
+	counts := map[string]int{}
+	for _, n := range roster {
+		inner := n
+		if sub := n.sub("playerDef", "player", "item", "card"); len(sub) > 0 {
+			inner = sub
+		}
+		if g := inner.str("game"); g != "" {
+			counts[g]++
+		}
+	}
+	best, bestN := "", 0
+	for g, n := range counts {
+		if n > bestN {
+			best, bestN = g, n
+		}
+	}
+	return best
 }
 
 // ActiveSquad lê o XI titular sincronizado no GG Club.
@@ -863,10 +912,14 @@ func mapSBCChallenge(n node, platform string) domain.SBCChallenge {
 	return ch
 }
 
-// maxClubPages é um teto de segurança: 40 páginas de 30 são 1200 cartas,
-// mais que qualquer clube real, e impede que um "next" que nunca acaba vire
-// um laço infinito contra o site.
-const maxClubPages = 40
+// maxClubPages é um teto de segurança contra um "next" que nunca acaba virar
+// um laço infinito contra o site — a paginação em si já para sozinha quando a
+// resposta some "next"/"nextPage" (ver o loop acima). 40 páginas (1200
+// cartas) já se mostrou baixo demais: o clube de teste deste projeto tinha
+// 1717 cartas em 13/09/2026 e vinha sendo truncado em silêncio, o exato bug
+// que o comentário da paginação acima descreve. 100 páginas (3000 cartas) dão
+// folga sem abrir mão do teto.
+const maxClubPages = 100
 
 // withPage acrescenta ?page=N. A primeira página vai sem parâmetro nenhum,
 // para um endpoint de clube que não pagine continuar funcionando igual.

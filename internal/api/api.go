@@ -408,6 +408,18 @@ func (s *Server) load(w http.ResponseWriter, r *http.Request) (store.Snapshot, b
 	// Snapshots anteriores Ã  familiaridades_funcao ainda carregam os IDs crus
 	// e o catÃ¡logo. Reidratar somente a cÃ³pia de resposta evita mudar a
 	// fotografia e permite que plano, mercado e editor usem o mesmo contexto.
+	//
+	// snap vem de loadSnapshot, que sob CacheTTL devolve o MESMO snapshot
+	// cacheado para toda requisicao na janela - copiar o struct so copia o
+	// cabecalho dos slices, nao o array por tras deles. Sem clonar
+	// Players/Market aqui, duas requisicoes concorrentes (ex.: o editor
+	// reavaliando um rascunho enquanto outra tela recarrega) mutam
+	// Player.FamiliaridadesFuncao do MESMO array compartilhado - da race e
+	// pode derrubar o sort.Slice de PreencherFamiliaridadesFuncoes com index
+	// out of range, porque uma goroutine reatribui o slice enquanto a outra
+	// ainda ordena pelos indices antigos.
+	snap.Club.Players = append([]domain.ClubPlayer(nil), snap.Club.Players...)
+	snap.Market = append([]domain.Player(nil), snap.Market...)
 	futgg.PreencherFamiliaridadesDoClube(&snap.Club, snap.RoleCatalog)
 	futgg.PreencherFamiliaridadesDoMercado(snap.Market, snap.RoleCatalog)
 	if coins := s.manualCoins(); coins != nil {

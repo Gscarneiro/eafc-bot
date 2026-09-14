@@ -56,7 +56,9 @@ type Options struct {
 	Concurrency int
 	// ArgValues preenche placeholders para sondar rotas parametrizadas.
 	// A do clube é a que importa: "/roster/sync/{id}/" só responde com um
-	// gamertag de verdade, e o clube é o dado central do bot.
+	// gamertag de verdade, e o clube é o dado central do bot. "cycle" é a
+	// outra que quase toda rota de dado usa hoje (players, evolutions, sbcs,
+	// objectives) — sem ela essas rotas nunca eram confirmadas de verdade.
 	ArgValues map[string]string
 	// RespectRobots decide se as rotas bloqueadas pelo robots.txt são
 	// puladas. Padrão true; quem desliga assume a escolha.
@@ -244,7 +246,11 @@ func fillVariants(u string, args map[string]string) []variant {
 	}
 	var out []variant
 	seen := map[string]bool{}
-	for _, key := range []string{"gamertag", "id", "slug"} {
+	// "cycle" entrou junto com o suporte a parâmetro :nome (ver
+	// colonParamNames em crawl.go): sem ele, uma rota como
+	// "/api/fut/players/v2/{cycle}/" nunca era sondada de verdade — faltava
+	// o valor para preencher o único placeholder que ela tem.
+	for _, key := range []string{"gamertag", "id", "slug", "cycle"} {
 		v, ok := args[key]
 		if !ok || v == "" {
 			continue

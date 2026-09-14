@@ -24,7 +24,7 @@ func TestRefreshMarketSignalsGravaMomentumECustoDeSBC(t *testing.T) {
 		case strings.HasPrefix(r.URL.Path, "/api/fut/players/v2/momentum/"):
 			w.Write([]byte(`{"data":[{"id":1,"overall":90,"position":"ST","momentumPercentage":18.5}],
 				"next":null,"currentPage":1,"total":1}`))
-		case r.URL.Path == "/api/fut/sbc/":
+		case r.URL.Path == "/api/fut/sbc/26/":
 			sbcHits++
 			w.Write([]byte(`{"data":[{"slug":"weekend-sbc","name":"Weekend SBC",
 				"challenges":[{"name":"83-Rated Squad","cheapestSolutionPrice":20000}]}]}`))
@@ -38,7 +38,7 @@ func TestRefreshMarketSignalsGravaMomentumECustoDeSBC(t *testing.T) {
 	cfg.FutGG.BaseURL = srv.URL
 	cfg.FutGG.Endpoints = map[string]string{
 		"momentum": "/api/fut/players/v2/momentum/{hours}/",
-		"sbcs":     "/api/fut/sbc/",
+		"sbcs":     "/api/fut/sbc/{cycle}/",
 	}
 	cfg.Serve.MomentumWindowHours = 24
 	cfg.FutGG.RequestsPerSec = 200 // servidor local de teste, sem motivo pra ser educado
@@ -77,7 +77,7 @@ func TestRefreshMarketSignalsMomentumFalhandoNaoImpedeSBC(t *testing.T) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/api/fut/players/v2/momentum/"):
 			http.NotFound(w, r)
-		case r.URL.Path == "/api/fut/sbc/":
+		case r.URL.Path == "/api/fut/sbc/26/":
 			sbcHits++
 			w.Write([]byte(`{"data":[{"slug":"weekend-sbc","name":"Weekend SBC",
 				"challenges":[{"name":"83-Rated Squad","cheapestSolutionPrice":20000}]}]}`))
@@ -91,7 +91,7 @@ func TestRefreshMarketSignalsMomentumFalhandoNaoImpedeSBC(t *testing.T) {
 	cfg.FutGG.BaseURL = srv.URL
 	cfg.FutGG.Endpoints = map[string]string{
 		"momentum": "/api/fut/players/v2/momentum/{hours}/",
-		"sbcs":     "/api/fut/sbc/",
+		"sbcs":     "/api/fut/sbc/{cycle}/",
 	}
 	cfg.FutGG.RequestsPerSec = 200 // servidor local de teste, sem motivo pra ser educado
 

@@ -7,7 +7,7 @@ import PageHeader from "../components/PageHeader";
 import Pitch, { canDrawPitch } from "../components/Pitch";
 import { evaluationSourceLabel, formatSigned } from "../format";
 import { useData } from "../useData";
-import type { SquadPlanStarterView, StarterCard as StarterCardData } from "../types";
+import type { SquadPlanScenario, SquadPlanStarterView, StarterCard as StarterCardData } from "../types";
 import "../shared.css";
 import "./PlanoElenco.css";
 
@@ -47,6 +47,22 @@ export default function PlanoElenco() {
         eyebrow={`formação ${data.formation || "—"}`}
         title="Planejador de elenco"
         meta="cenários que trocam nota por entrosamento — o planejador nunca escolhe uma compra"
+        actions={
+          scenario ? (
+            <div className="plano-elenco-meta">
+              {scenario.chemistry ? (
+                <Chip tone={scenario.chemistry.verificacao.status === "diverge" ? "alert" : "turf"}>
+                  química {scenario.chemistry.total}/{scenario.chemistry.maximo}
+                </Chip>
+              ) : (
+                <Chip tone="flat">química indisponível</Chip>
+              )}
+              <span className="plano-elenco-stats">
+                força total {scenario.total_rating.toFixed(1)} · média {scenario.average_rating.toFixed(1)} {scoreLabel} posicional
+              </span>
+            </div>
+          ) : undefined
+        }
       />
 
       {needs.length > 0 && (
@@ -72,69 +88,65 @@ export default function PlanoElenco() {
         </div>
       )}
 
+      {scenario?.chemistry?.verificacao.status === "diverge" && (
+        <div className="banner alert">
+          modelo calcula {scenario.chemistry.verificacao.calculado}, o jogo reporta {scenario.chemistry.verificacao.observado} — não confie neste número
+        </div>
+      )}
+
       {insufficient ? (
         <EmptyState
           message={data.reason || "Elenco insuficiente para montar um plano."}
 		  hint="O planejador precisa da escalação titular sincronizada e da cobertura da fonte ativa em cada vaga."
         />
       ) : (
-        <>
-          <div className="plano-elenco-tabs" role="tablist" aria-label="Cenários do planejador">
-            {scenarios.map((sc, i) => (
-              <button
-                key={i}
-                type="button"
-                role="tab"
-                aria-selected={i === activeIndex}
-                className={`plano-elenco-tab${i === activeIndex ? " active" : ""}`}
-                onClick={() => setScenarioIndex(i)}
-              >
-                <span className="plano-elenco-tab-label">{sc.label || `cenário ${i + 1}`}</span>
-				<span className="plano-elenco-tab-value">{sc.average_rating.toFixed(1)} {scoreLabel} posicional</span>
-              </button>
-            ))}
+        <div className="plano-elenco-grid">
+          <div className="panel plano-elenco-pitch-panel">
+            <div className="panel-head">
+              <span>Titulares <span className="panel-head-sub">· cenário {scenario?.label || `cenário ${activeIndex + 1}`}</span></span>
+              <span className="panel-head-meta">{data.formation} · {scenario?.starters?.length ?? 0} vagas reconhecidas</span>
+            </div>
+            {scenario && canDrawPitch(data.formation || "", scenario.starters?.length ?? 0) ? (
+              <Pitch formation={data.formation} starters={toStarterCards(scenario.starters ?? [])} />
+            ) : (
+              <div className="panel-body"><div className="empty">Formação sem 11 slots reconhecidos — sem campo visual para este cenário.</div></div>
+            )}
           </div>
 
-          {scenario && (
-            <>
-              <div className="plano-elenco-meta">
-                {scenario.chemistry ? (
-                  <Chip tone={scenario.chemistry.verificacao.status === "diverge" ? "alert" : "turf"}>
-                    química {scenario.chemistry.total}/{scenario.chemistry.maximo}
-                  </Chip>
-                ) : (
-                  <Chip tone="flat">química indisponível</Chip>
-                )}
-                <span className="plano-elenco-stats">
-				  força total {scenario.total_rating.toFixed(1)} · média {scenario.average_rating.toFixed(1)} {scoreLabel} posicional
-                </span>
-                {scenario.chemistry?.verificacao.status === "diverge" && (
-                  <span className="plano-elenco-note">
-                    modelo calcula {scenario.chemistry.verificacao.calculado}, o jogo reporta{" "}
-                    {scenario.chemistry.verificacao.observado} — não confie neste número
-                  </span>
-                )}
+          <div className="plano-elenco-side">
+            <div className="panel">
+              <div className="panel-head"><span>A troca</span><span className="panel-head-meta">nota × química</span></div>
+              <div className="panel-body">
+                <ScenarioTradeChart scenarios={scenarios} activeIndex={activeIndex} />
               </div>
+              <div className="tab-strip flush" role="tablist" aria-label="Cenários do planejador">
+                {scenarios.map((sc, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    role="tab"
+                    aria-selected={i === activeIndex}
+                    className={`tab-strip-cell${i === activeIndex ? " active" : ""}`}
+                    onClick={() => setScenarioIndex(i)}
+                  >
+                    <span className="tab-strip-label">{sc.label || `cenário ${i + 1}`}</span>
+                    <span className="tab-strip-value">{sc.average_rating.toFixed(1)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
-              <section>
-                <h2>Titulares</h2>
-                {canDrawPitch(data.formation || "", scenario.starters?.length ?? 0) ? (
-                  <Pitch formation={data.formation} starters={toStarterCards(scenario.starters ?? [])} />
-                ) : (
-                  <div className="empty">Formação sem 11 slots reconhecidos — sem campo visual para este cenário.</div>
-                )}
-              </section>
-
-              <section>
-                <div className="section-title-row">
-                  <h2>Movimentos em relação ao XI atual</h2>
-                  <span className="count-label">{scenario.moves?.length ?? 0} trocas</span>
-                </div>
-                {(scenario.moves?.length ?? 0) === 0 ? (
+            <div className="panel plano-elenco-moves-panel">
+              <div className="panel-head">
+                <span>Movimentos vs. XI atual</span>
+                <span className="panel-head-meta">{scenario?.moves?.length ?? 0} trocas</span>
+              </div>
+              <div className="panel-body">
+                {(scenario?.moves?.length ?? 0) === 0 ? (
                   <div className="empty">Nenhuma troca — este cenário já é o XI atual.</div>
                 ) : (
                   <div className="card-list">
-                    {(scenario.moves ?? []).map((m, i) => (
+                    {(scenario?.moves ?? []).map((m, i) => (
                       <div className="list-row" key={m.current.player.club_item_id || m.suggested.player.club_item_id || `${m.position}-${i}`}>
                         <div>
                           <div className="title">
@@ -142,22 +154,70 @@ export default function PlanoElenco() {
                             {m.suggested.player.common_name || m.suggested.player.name}
                           </div>
                           <p className="desc">{m.position}</p>
-						  <div className="plano-elenco-move-ratings">
-							<span>{scoreLabel} {m.current_rating.toFixed(1)}</span>
-							<span aria-hidden="true">→</span>
-							<span>{scoreLabel} {m.suggested_rating.toFixed(1)}</span>
-						  </div>
+                          <div className="plano-elenco-move-ratings">
+                            <span>{scoreLabel} {m.current_rating.toFixed(1)}</span>
+                            <span aria-hidden="true">→</span>
+                            <span>{scoreLabel} {m.suggested_rating.toFixed(1)}</span>
+                          </div>
                         </div>
-						<p className="meta">{formatSigned(m.gain)} {scoreLabel} posicional</p>
+                        <p className="meta">{formatSigned(m.gain)} {scoreLabel} posicional</p>
                       </div>
                     ))}
                   </div>
                 )}
-              </section>
-            </>
-          )}
-        </>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
+  );
+}
+
+// ScenarioTradeChart plota nota média × química total de cada cenário — a
+// mesma fronteira que os cartões de cima já descrevem em texto, aqui como
+// curva. Só entram cenários com química calculada (scenario.chemistry
+// definido); com menos de 2 pontos não há curva pra desenhar.
+function ScenarioTradeChart({ scenarios, activeIndex }: { scenarios: SquadPlanScenario[]; activeIndex: number }) {
+  const points = scenarios
+    .map((sc, i) => ({ i, rating: sc.average_rating, chem: sc.chemistry?.total }))
+    .filter((p): p is { i: number; rating: number; chem: number } => p.chem !== undefined);
+  if (points.length < 2) {
+    return <p className="hint">Química insuficiente nos cenários para desenhar a curva nota × química.</p>;
+  }
+  const width = 376;
+  const height = 136;
+  const padL = 34;
+  const padR = 8;
+  const padT = 10;
+  const padB = 26;
+  const chems = points.map((p) => p.chem);
+  const ratings = points.map((p) => p.rating);
+  const chemMin = Math.min(...chems);
+  const chemMax = Math.max(...chems);
+  const ratingMin = Math.min(...ratings);
+  const ratingMax = Math.max(...ratings);
+  const chemSpan = chemMax - chemMin || 1;
+  const ratingSpan = ratingMax - ratingMin || 1;
+  const x = (chem: number) => padL + ((chem - chemMin) / chemSpan) * (width - padL - padR);
+  const y = (rating: number) => padT + (1 - (rating - ratingMin) / ratingSpan) * (height - padT - padB);
+  const coords = points.map((p) => ({ ...p, x: x(p.chem), y: y(p.rating) }));
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="scenario-chart" role="img" aria-label="nota média por química entre os cenários do planejador">
+      <line x1={padL} y1={padT} x2={padL} y2={height - padB} className="scenario-chart-axis" />
+      <line x1={padL} y1={height - padB} x2={width - padR} y2={height - padB} className="scenario-chart-axis" />
+      <polyline points={coords.map((p) => `${p.x},${p.y}`).join(" ")} className="scenario-chart-line" />
+      {coords.map((p) => (
+        <g key={p.i}>
+          <circle cx={p.x} cy={p.y} r={p.i === activeIndex ? 5 : 4} className={`scenario-chart-dot${p.i === activeIndex ? " active" : ""}`} />
+          <text x={p.x} y={p.y - 10} textAnchor="middle" className={`scenario-chart-label${p.i === activeIndex ? " active" : ""}`}>{p.rating.toFixed(1)}</text>
+          <text x={p.x} y={height - padB + 13} textAnchor="middle" className="scenario-chart-axis-label">{p.chem}</text>
+        </g>
+      ))}
+      <text x={padL - 6} y={padT + 4} textAnchor="end" className="scenario-chart-axis-label">{ratingMax.toFixed(0)}</text>
+      <text x={padL - 6} y={height - padB + 3} textAnchor="end" className="scenario-chart-axis-label">{ratingMin.toFixed(0)}</text>
+      <text x={(padL + width - padR) / 2} y={height - 2} textAnchor="middle" className="scenario-chart-axis-title">química do XI</text>
+    </svg>
   );
 }

@@ -59,6 +59,42 @@ var pathLit = regexp.MustCompile(
 // `/players/${e}/` vira `/players/{id}/`.
 var tmplVar = regexp.MustCompile(`\$\{[^}]*\}`)
 
+// colonParam acha parâmetro de rota no estilo `:nome`, a outra sintaxe que o
+// roteador do fut.gg usa ao lado de `${...}` — confirmado ao vivo em
+// 13/09/2026 minerando o bundle de produção: `players/v2/:gameYear/`,
+// `sbc/:gameYear`, `gg-club/:username/players`. Sem isto essas rotas nunca
+// ganhavam `{` nenhum, NeedsArg ficava falso, e a sondagem tentava o
+// caminho LITERAL com o dois-pontos dentro — que só dá 404.
+//
+// Exige a barra logo antes do dois-pontos de propósito: é o que distingue
+// ".../:gameYear/" de uma porta de host, "api.fut.gg:8443/...", onde o
+// dois-pontos nunca vem colado numa barra.
+var colonParam = regexp.MustCompile(`/:([A-Za-z_$][A-Za-z0-9_$]*)`)
+
+// colonParamNames traduz o nome que o roteador do site deu ao parâmetro para
+// o placeholder que o resto do bot já sabe preencher: client.Client.URL trata
+// {cycle} à parte antes de qualquer outro args[...], e discover.fillVariants
+// só tenta os valores que conhece (gamertag, id, slug, cycle — ver
+// argValues/fillVariants em discover.go). Um nome fora dessa tabela cai em
+// "id", o mesmo destino genérico que ${...} já tinha.
+var colonParamNames = map[string]string{
+	"gameyear": "cycle",
+	"gameslug": "cycle",
+	"username": "gamertag",
+}
+
+// normalizeColonParams troca todo :nome de parâmetro pelo {placeholder}
+// correspondente.
+func normalizeColonParams(p string) string {
+	return colonParam.ReplaceAllStringFunc(p, func(m string) string {
+		name := strings.ToLower(colonParam.FindStringSubmatch(m)[1])
+		if mapped, ok := colonParamNames[name]; ok {
+			return "/{" + mapped + "}"
+		}
+		return "/{id}"
+	})
+}
+
 // domainWords são as palavras que sinalizam uma rota de dados que nos
 // interessa. Uma rota sem nenhuma delas raramente vale a sondagem.
 var domainWords = []string{
@@ -315,9 +351,12 @@ func priority(u string) int {
 	return score
 }
 
-// normalize troca interpolação de template por {id} e limpa a query.
+// normalize troca interpolação de template por {id} (ou {cycle}/{gamertag}
+// quando o parâmetro :nome for reconhecível — ver colonParamNames) e limpa a
+// query.
 func normalize(p string) string {
 	p = tmplVar.ReplaceAllString(p, "{id}")
+	p = normalizeColonParams(p)
 	if i := strings.IndexByte(p, '?'); i >= 0 {
 		p = p[:i]
 	}

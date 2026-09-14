@@ -55,7 +55,10 @@ func cmdAutoconfig(ctx context.Context, args []string) error {
 	client := futgg.New(fcfg)
 
 	opt := discover.DefaultOptions()
-	opt.ArgValues = map[string]string{"gamertag": cfg.GamerTag}
+	// "cycle" preenche rotas como "/api/fut/players/v2/{cycle}/" na segunda
+	// passada de sondagem (ver fillVariants) — sem ele, uma rota
+	// particionada por ciclo nunca tinha como ser confirmada de verdade.
+	opt.ArgValues = map[string]string{"gamertag": cfg.GamerTag, "cycle": cfg.FutGG.Cycle}
 	opt.MaxProbes = *maxProbes
 	opt.Mine.MaxScripts = *maxScripts
 	opt.RespectRobots = !ignore

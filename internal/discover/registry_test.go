@@ -94,6 +94,53 @@ func TestBundleSemRegistroNaoProduzRota(t *testing.T) {
 	}
 }
 
+// bundleParametroDoisPontos reproduz a sintaxe que o bundle de produção do
+// fut.gg usa de verdade em 13/09/2026 — confirmado minerando
+// assets.fut.gg/ts/assets/index-*.js — para rota particionada por ciclo e
+// para a rota de clube: `players/v2/:gameYear/`, `sbc/:gameYear` e
+// `gg-club/:username/players`. bundleReal, acima, usa o formato antigo
+// (literal "26"); este é o formato que o robô encontra hoje.
+const bundleParametroDoisPontos = `
+function tc(e){let t=e.path;t.startsWith(~/~)&&(t=t.slice(1)),t.endsWith(~/~)&&(t=t.slice(0,-1)),t=~/api/${e.isNotFutEndpoint?~~:~fut/~}${t}/~;return{...e,path:t}}
+var a=tc({path:~players/v2/:gameYear/~});
+var b=tc({path:~sbc/:gameYear~});
+var c=tc({path:~gg-club/:username/players~});
+var d=tc({path:~players/:slug/evolutions/:pathHash/assets~});
+`
+
+// TestMineAceitaCaminhoRelativoComParametroDeDoisPontos prova que a mineração
+// mais a normalização (o par mineRegistry -> normalize que collectRegistry
+// encadeia) reconhece o parâmetro :nome do roteador do site, não só o
+// ${...} do template literal. Antes desta mudança, uma rota como
+// "players/v2/:gameYear/" nunca ganhava "{" nenhum: NeedsArg ficava falso,
+// e a sondagem tentava o caminho literal com o dois-pontos dentro, que só
+// dá 404 — a rota do mercado (e sbcs, e clube) nunca era reconfirmada.
+func TestMineAceitaCaminhoRelativoComParametroDeDoisPontos(t *testing.T) {
+	raw, _ := mineRegistry(js(bundleParametroDoisPontos))
+	got := map[string]bool{}
+	for _, p := range raw {
+		got[normalize(p)] = true
+	}
+
+	for _, want := range []string{
+		"/api/fut/players/v2/{cycle}/",
+		"/api/fut/sbc/{cycle}/",
+		"/api/fut/gg-club/{gamertag}/players/",
+	} {
+		if !got[want] {
+			t.Errorf("%s não apareceu depois de normalizar (achou: %v)", want, got)
+		}
+	}
+
+	// Dois parâmetros na mesma rota viram dois {id} genéricos (nomes fora da
+	// tabela de colonParamNames) — CORRETO continuar caindo no descarte de
+	// "mais de um placeholder" que fillVariants já aplicava para ${...}.
+	multi := "/api/fut/players/{id}/evolutions/{id}/assets/"
+	if !got[multi] {
+		t.Errorf("rota com dois parâmetros não normalizou como esperado (achou: %v)", got)
+	}
+}
+
 // As rotas do registro não podem ser cortadas pelo teto de sondagem: são a
 // única fonte em que o site declara o que é endpoint, e cortá-las para caber
 // num limite pensado para literais soltos era o que devolvia descoberta

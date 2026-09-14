@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1298,4 +1299,51 @@ func TestGauntletPotentialsSemCaminhoConfirmadoDevolveVazio(t *testing.T) {
 	if out := gauntletPotentials(report, domain.ST); len(out) != 0 {
 		t.Fatalf("esperava vazio quando nenhum caminho bate a posição do slot, veio %+v", out)
 	}
+}
+
+// TestLoadComCacheNaoCompartilhaArrayDeJogadoresEntreRequisicoesConcorrentes
+// reproduz o panic de produção: com CacheTTL > 0, loadSnapshot devolve o
+// MESMO store.Snapshot cacheado para toda requisição na janela, e copiar o
+// struct só copia o cabeçalho dos slices — não o array por trás. Sem clonar
+// Club.Players/Market em load, duas requisições concorrentes mutam
+// Player.FamiliaridadesFuncao do mesmo array: uma reatribui o slice
+// (PreencherFamiliaridadesFuncoes) enquanto o sort.Slice da outra ainda
+// ordena pelos índices antigos, e estoura index out of range. Roda com
+// `go test -race` para pegar o data race mesmo quando nenhuma goroutine
+// chega a panicar nesta execução específica.
+func TestLoadComCacheNaoCompartilhaArrayDeJogadoresEntreRequisicoesConcorrentes(t *testing.T) {
+	positions := []domain.Position{domain.GK, domain.RB, domain.CB, domain.LB, domain.CDM, domain.CM, domain.CAM, domain.RM, domain.LM, domain.RW, domain.LW, domain.ST}
+	catalog := futgg.RolesTable{Plus: map[int]futgg.Role{}, PlusPlus: map[int]futgg.Role{}}
+	var roleIDs []int
+	for i := range 20 {
+		catalog.Plus[i+1] = futgg.Role{Name: fmt.Sprintf("Role%02d", i), Position: positions[i%len(positions)]}
+		roleIDs = append(roleIDs, i+1)
+	}
+
+	players := make([]domain.ClubPlayer, 40)
+	for i := range players {
+		players[i] = domain.ClubPlayer{Player: domain.Player{ID: int64(i + 1), Name: fmt.Sprintf("Jogador%02d", i), Position: domain.CM, RolesPlus: roleIDs}}
+	}
+
+	s, _ := newTestServerWithSnapshot(t, store.Snapshot{
+		GeneratedAt: time.Now(),
+		Cycle:       "26",
+		Club:        domain.Club{Players: players},
+		RoleCatalog: catalog,
+	})
+	s.CacheTTL = 10 * time.Second
+
+	var wg sync.WaitGroup
+	for range 200 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 5 {
+				w := httptest.NewRecorder()
+				r := httptest.NewRequest(http.MethodGet, "/api/time", nil)
+				s.load(w, r)
+			}
+		}()
+	}
+	wg.Wait()
 }

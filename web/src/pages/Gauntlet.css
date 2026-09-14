@@ -1,70 +1,25 @@
-/* A tela do Gauntlet reusa primitivas de shared.css (.banner, .chip,
-   .expand-icon, .chain, .card-list, .list-row, .rank-link) — só o que é
-   exclusivo do modo (trilha de rodadas, linha de titular com potencial,
-   grade de reservas) mora aqui. */
+/* A tela do Gauntlet reusa primitivas de shared.css (.banner, .chip, .panel,
+   .tab-strip, .expand-icon, .chain, .card-list, .list-row, .rank-link) — só o
+   que é exclusivo do modo (grade de 2 colunas, linha de titular com
+   potencial, grade de reservas) mora aqui. */
 
 .gauntlet-rules {
-  margin-bottom: var(--space-5);
+  margin: 0;
 }
 
-.gauntlet-objectives {
-  margin-bottom: var(--space-6);
-}
+.gauntlet-grid { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 12px; align-items: start; margin-top: var(--space-5); }
+.gauntlet-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.gauntlet-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.gauntlet-pitch-panel { display: flex; flex-direction: column; }
+.gauntlet-chem-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; border-top: 1px solid var(--rule); }
+@media (max-width: 900px) { .gauntlet-grid { grid-template-columns: 1fr; } }
 
-.gauntlet-round-tabs {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 0 0 var(--space-4);
-}
-.gauntlet-round-tab {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 108px;
-  padding: 8px 14px;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--radius-md);
-  background: var(--panel);
-  color: var(--ink-2);
-  cursor: pointer;
-  text-align: left;
-  transition: border-color var(--duration) var(--ease), background-color var(--duration) var(--ease);
-}
-.gauntlet-round-tab:hover {
-  border-color: var(--turf);
-}
-.gauntlet-round-tab.active {
-  border-color: var(--turf);
-  background: var(--turf-bg);
-  color: var(--turf);
-}
-.gauntlet-round-tab-label {
-  font: 600 11px var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.gauntlet-round-tab-value {
-  font: 700 15px var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.gauntlet-round-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-4);
-}
-.gauntlet-round-stats {
-  color: var(--ink-2);
-  font: 12.5px var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
 .gauntlet-round-note {
   color: var(--alert);
   font-size: var(--text-xs);
 }
+.gauntlet-warning-panel .panel-head { border-bottom-color: var(--alert); }
+.gauntlet-warning-panel ul { margin: 0; padding-left: 18px; color: var(--alert); font-size: 13px; }
 
 .gauntlet-starter-list {
   display: flex;
@@ -211,14 +166,6 @@
 }
 
 @media (max-width: 620px) {
-  .gauntlet-round-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding-bottom: 4px;
-  }
-  .gauntlet-round-tab {
-    flex: 0 0 auto;
-  }
   .gauntlet-starter-main {
     grid-template-columns: 32px minmax(0, 1fr) 32px;
   }

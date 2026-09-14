@@ -120,6 +120,47 @@
 .panel-head-meta { color: var(--ink-3); font: 600 9.5px var(--font-mono); text-transform: none; letter-spacing: 0; white-space: nowrap; }
 .panel-body { padding: 12px; }
 
+/* .tab-strip é a barra de abas cheia (cenários do Planejador, rodadas do
+   Gauntlet, categorias de carta do Editor) — células de largura igual coladas
+   num fio de 1px, sem o visual de pílula do .toggle. As três telas mostravam
+   a mesma barra com nome de classe próprio; unificada aqui pelo mesmo motivo
+   que gerou o .panel acima. */
+.tab-strip {
+  display: flex;
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  margin: 0 0 var(--space-4);
+}
+.tab-strip-cell {
+  flex: 1;
+  min-width: 108px;
+  padding: 8px 12px;
+  border: 0;
+  border-top: 2px solid transparent;
+  background: var(--raised);
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: border-color var(--duration) var(--ease), background-color var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+.tab-strip-cell:hover { color: var(--ink); }
+.tab-strip-cell.active { border-top-color: var(--turf); background: var(--turf-bg); color: var(--turf); }
+.tab-strip-cell:focus-visible { outline: 2px solid var(--turf); outline-offset: -2px; }
+.tab-strip-label { font: 700 9px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.tab-strip-value { font: 700 15px var(--font-mono); font-variant-numeric: tabular-nums; }
+/* .flush é a variante usada quando a barra já vive dentro de um .panel (a
+   borda externa dobraria com a do painel) — some a moldura própria e ganha
+   só o fio de cima, encostada na borda do painel. */
+.tab-strip.flush { border: 0; border-top: 1px solid var(--rule); margin: 0; }
+@media (max-width: 620px) {
+  .tab-strip { overflow-x: auto; }
+  .tab-strip-cell { flex: 0 0 auto; }
+}
+
 /* Utilitários de cor — mesma regra de theme.css: --gain/--cost só pra
    delta, --coin só pra dinheiro parado. Usados soltos (não só dentro de
    .chip/.stat-tile) nas tabelas densas do redesenho. */

@@ -51,122 +51,136 @@ export default function Gauntlet() {
         title="Gauntlet"
         meta={`coletado em ${formatDateTime(data.generated_at)}`}
       />
-      <div className="banner gauntlet-rules">{data.rules}</div>
-      {(data.warnings?.length ?? 0) > 0 && (
-        <div className="banner alert gauntlet-warnings">
-          <ul>
-            {(data.warnings ?? []).map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {objectives.length > 0 && (
-        <section className="gauntlet-objectives">
-          <h2>Objetivos do Gauntlet</h2>
-          <div className="card-list">
-            {objectives.map((o) => (
-              <div className="list-row" key={o.id}>
-                <div>
-                  <div className="title">{o.name}</div>
-                  {(o.tasks?.length ?? 0) > 0 && <p className="desc">{(o.tasks ?? []).join(" · ")}</p>}
-                </div>
-                <p className="meta">
-                  {o.group}
-                  {!isZeroTime(o.expires_at) ? ` · expira ${formatDateTime(o.expires_at)}` : ""}
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       {insufficient ? (
-        <EmptyState
-          message={data.reason || "Elenco insuficiente para montar o Gauntlet."}
-		  hint="O Gauntlet precisa de 72 cartas cobertas pela fonte ativa (44 titulares + 28 reservas) e da escalação titular sincronizada."
-        />
+        <>
+          <div className="banner gauntlet-rules">{data.rules}</div>
+          <EmptyState
+            message={data.reason || "Elenco insuficiente para montar o Gauntlet."}
+            hint="O Gauntlet precisa de 72 cartas cobertas pela fonte ativa (44 titulares + 28 reservas) e da escalação titular sincronizada."
+          />
+        </>
       ) : (
         <>
-          <div className="gauntlet-round-tabs" role="tablist" aria-label="Rodadas do Gauntlet">
+          <div className="tab-strip" role="tablist" aria-label="Rodadas do Gauntlet">
             {rounds.map((r, i) => (
               <button
                 key={r.round}
                 type="button"
                 role="tab"
                 aria-selected={i === activeIndex}
-                className={`gauntlet-round-tab${i === activeIndex ? " active" : ""}`}
+                className={`tab-strip-cell${i === activeIndex ? " active" : ""}`}
                 onClick={() => {
                   setRoundIndex(i);
                   setOpenStarter(null);
                 }}
               >
-                <span className="gauntlet-round-tab-label">Rodada {r.round}</span>
-				<span className="gauntlet-round-tab-value">{r.average_rating.toFixed(1)} {scoreLabel} posicional</span>
+                <span className="tab-strip-label">Rodada {r.round}</span>
+                <span className="tab-strip-value">{r.average_rating.toFixed(1)} {scoreLabel} posicional</span>
               </button>
             ))}
           </div>
 
           {round && (
-            <>
-              <div className="gauntlet-round-meta">
-                {round.chemistry ? (
-                  <Chip tone={round.chemistry.verificacao.status === "diverge" ? "alert" : "turf"}>
-                    química {round.chemistry.total}/{round.chemistry.maximo}
-                  </Chip>
-                ) : (
-                  <Chip tone="flat">química indisponível</Chip>
-                )}
-                <span className="gauntlet-round-stats">
-				  força total {round.total_rating.toFixed(1)} · média {round.average_rating.toFixed(1)} {scoreLabel} posicional
-                </span>
-                {round.chemistry?.verificacao.status === "diverge" && (
-                  <span className="gauntlet-round-note">
-                    modelo calcula {round.chemistry.verificacao.calculado}, o jogo reporta {round.chemistry.verificacao.observado} — não confie neste número
-                  </span>
-                )}
+            <div className="gauntlet-grid">
+              <div className="gauntlet-main">
+                <div className="panel gauntlet-pitch-panel">
+                  <div className="panel-head">
+                    <span>Titulares <span className="panel-head-sub">· rodada {round.round}</span></span>
+                    <span className="panel-head-meta">força total {round.total_rating.toFixed(1)} · média {round.average_rating.toFixed(1)} {scoreLabel} posicional</span>
+                  </div>
+                  {canDrawPitch(data.formation || "", round.starters?.length ?? 0) ? (
+                    <Pitch formation={data.formation} starters={toStarterCards(round.starters ?? [])} />
+                  ) : (
+                    <div className="panel-body"><div className="empty">Formação sem 11 slots reconhecidos — sem campo visual para esta rodada.</div></div>
+                  )}
+                  <div className="panel-body gauntlet-chem-row">
+                    {round.chemistry ? (
+                      <Chip tone={round.chemistry.verificacao.status === "diverge" ? "alert" : "turf"}>
+                        química {round.chemistry.total}/{round.chemistry.maximo}
+                      </Chip>
+                    ) : (
+                      <Chip tone="flat">química indisponível</Chip>
+                    )}
+                    {round.chemistry?.verificacao.status === "diverge" && (
+                      <span className="gauntlet-round-note">
+                        modelo calcula {round.chemistry.verificacao.calculado}, o jogo reporta {round.chemistry.verificacao.observado} — não confie neste número
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="panel gauntlet-bench-panel">
+                  <div className="panel-head">
+                    <span>Reservas <span className="panel-head-sub">· rodada {round.round}</span></span>
+                    <span className="panel-head-meta">{round.bench?.length ?? 0} cartas · nenhuma reaparece nas outras rodadas</span>
+                  </div>
+                  <div className="panel-body gauntlet-bench-grid">
+                    {(round.bench ?? []).map((b, index) => (
+                      <BenchChit key={b.player.club_item_id || `${b.player.id}-${index}`} card={b} />
+                    ))}
+                  </div>
+                </div>
               </div>
 
-              <section>
-                <h2>Titulares</h2>
-                {canDrawPitch(data.formation || "", round.starters?.length ?? 0) ? (
-                  <Pitch formation={data.formation} starters={toStarterCards(round.starters ?? [])} />
-                ) : (
-                  <div className="empty">Formação sem 11 slots reconhecidos — sem campo visual para esta rodada.</div>
+              <div className="gauntlet-side">
+                <div className="banner gauntlet-rules">{data.rules}</div>
+                {(data.warnings?.length ?? 0) > 0 && (
+                  <div className="panel gauntlet-warning-panel">
+                    <div className="panel-head"><span>Aviso</span></div>
+                    <div className="panel-body">
+                      <ul>
+                        {(data.warnings ?? []).map((w, i) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
                 )}
-              </section>
 
-              <section>
-                <h2>Titulares e potencial de evolução</h2>
-                <p className="section-note">
-				  As rotas mostram a nota publicada pelo FUT.GG; a escalação da rodada usa a fonte ativa acima.
-                </p>
-                <div className="gauntlet-starter-list">
-                  {(round.starters ?? []).map((s, i) => (
-                    <StarterRow
-                      key={`${round.round}-${s.player.club_item_id || s.player.id}-${s.index}`}
-                      starter={s}
-					  scoreLabel={scoreLabel}
-                      open={openStarter === i}
-                      onToggle={() => setOpenStarter(openStarter === i ? null : i)}
-                    />
-                  ))}
-                </div>
-              </section>
+                {objectives.length > 0 && (
+                  <div className="panel">
+                    <div className="panel-head"><span>Objetivos</span><span className="panel-head-meta">Gauntlet</span></div>
+                    <div className="panel-body">
+                      <div className="card-list">
+                        {objectives.map((o) => (
+                          <div className="list-row" key={o.id}>
+                            <div>
+                              <div className="title">{o.name}</div>
+                              {(o.tasks?.length ?? 0) > 0 && <p className="desc">{(o.tasks ?? []).join(" · ")}</p>}
+                            </div>
+                            <p className="meta">
+                              {o.group}
+                              {!isZeroTime(o.expires_at) ? ` · expira ${formatDateTime(o.expires_at)}` : ""}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-              <section>
-                <div className="section-title-row">
-                  <h2>Reservas</h2>
-                  <span className="count-label">{round.bench?.length ?? 0} cartas</span>
+                <div className="panel gauntlet-potential-panel">
+                  <div className="panel-head">
+                    <span>Titulares e potencial de evolução</span>
+                    <span className="panel-head-meta">nota do FUT.GG</span>
+                  </div>
+                  <div className="panel-body">
+                    <p className="hint">As rotas mostram a nota publicada pelo FUT.GG; a escalação da rodada usa a fonte ativa acima.</p>
+                    <div className="gauntlet-starter-list">
+                      {(round.starters ?? []).map((s, i) => (
+                        <StarterRow
+                          key={`${round.round}-${s.player.club_item_id || s.player.id}-${s.index}`}
+                          starter={s}
+                          scoreLabel={scoreLabel}
+                          open={openStarter === i}
+                          onToggle={() => setOpenStarter(openStarter === i ? null : i)}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <div className="gauntlet-bench-grid">
-                  {(round.bench ?? []).map((b, index) => (
-                    <BenchChit key={b.player.club_item_id || `${b.player.id}-${index}`} card={b} />
-                  ))}
-                </div>
-              </section>
-            </>
+              </div>
+            </div>
           )}
         </>
       )}

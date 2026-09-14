@@ -115,18 +115,31 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 // código.
 // Os endpoints marcados como TODO precisam ser confirmados com o
 // comando `eafcbot discover`, que grava a resposta crua para inspeção.
+//
+// players/evolutions/sbcs/objectives/evolution foram reconferidos ao vivo em
+// 13/09/2026, minerando o bundle de produção
+// (assets.fut.gg/ts/assets/index-*.js) e testando contra o ciclo 26 (o único
+// com dado nesse dia — o FC 27 só tinha o catálogo base, sem preço/GG
+// Rating/SBC/objetivo). O payload de /api/fut/players/v2/27/ já respondia 200
+// nesse teste, com schema IDÊNTICO ao do 26 (203 chaves, campo a campo) —
+// então field_maps e o parser em map.go não mudam, só a rota.
+//
+// prices (/api/fut/player-prices/) NÃO está listada abaixo de propósito: ela
+// devolve 403 do Cloudflare em qualquer forma testada (com ou sem {cycle}), e
+// o coletor nunca a chamou — o preço de cada carta já vem no campo "price" da
+// listagem de players. Documentado aqui para a próxima pessoa não tentar
+// "consertar" um 403 que não bloqueia nada.
 func DefaultConfig() Config {
 	return Config{
 		BaseURL: "https://www.fut.gg",
 		Cycle:   "26",
 		Endpoints: map[string]string{
-			"players":    "/api/fut/players/",
+			"players":    "/api/fut/players/v2/{cycle}/",
 			"player":     "/api/fut/players/{id}/",
-			"prices":     "/api/fut/player-prices/",
-			"evolutions": "/api/fut/evolutions/",
-			"evolution":  "/api/fut/evolutions/{slug}/",
-			"objectives": "/api/fut/objectives/",
-			"sbcs":       "/api/fut/sbc/sets/",
+			"evolutions": "/api/fut/evolutions/v2/{cycle}/v3/all/",
+			"evolution":  "/api/fut/evolutions/v2/{cycle}/{slug}/v2/",
+			"objectives": "/api/fut/objectives/{cycle}/groups/",
+			"sbcs":       "/api/fut/sbc/{cycle}/",
 			"news":       "/api/fut/news/",
 			// "Quanto essa carta caiu da própria média recente" — o fut.gg
 			// já calcula isso e recalcula a cada poucos minutos; o bot lê o
@@ -271,6 +284,43 @@ type Stats struct {
 	MarketPriceSkipped int `json:"market_price_skipped"`
 }
 
+// legacyEndpoints mapeia, por endpoint lógico, um valor default ANTIGO
+// (gravado em algum config.json antes de uma virada de rota do fut.gg) para o
+// template com {cycle} que o substituiu. A comparação em New() é por
+// igualdade EXATA de propósito, o mesmo critério que já valia para
+// evolution_paths antes desta tabela existir: só migra o que é
+// reconhecidamente o default de uma versão anterior, então uma rota que o
+// usuário editou na mão nunca é tocada.
+//
+// As entradas de players/evolutions/evolution/sbcs/objectives cobrem tanto o
+// primeiro default do repo (que nunca existiu de verdade no site) quanto o
+// default seguinte, já testado contra o site mas fixo no ciclo 26 — ver o
+// comentário de DefaultConfig sobre a reconferência de 13/09/2026.
+var legacyEndpoints = map[string]map[string]string{
+	"players": {
+		"/api/fut/players/":       "/api/fut/players/v2/{cycle}/",
+		"/api/fut/players/v2/26/": "/api/fut/players/v2/{cycle}/",
+	},
+	"evolutions": {
+		"/api/fut/evolutions/":              "/api/fut/evolutions/v2/{cycle}/v3/all/",
+		"/api/fut/evolutions/v2/26/v3/all/": "/api/fut/evolutions/v2/{cycle}/v3/all/",
+	},
+	"evolution": {
+		"/api/fut/evolutions/{slug}/": "/api/fut/evolutions/v2/{cycle}/{slug}/v2/",
+	},
+	"sbcs": {
+		"/api/fut/sbc/sets/": "/api/fut/sbc/{cycle}/",
+		"/api/fut/sbc/":      "/api/fut/sbc/{cycle}/",
+	},
+	"objectives": {
+		"/api/fut/objectives/":        "/api/fut/objectives/{cycle}/groups/",
+		"/api/fut/objectives/groups/": "/api/fut/objectives/{cycle}/groups/",
+	},
+	"evolution_paths": {
+		"/api/fut/evolutions/v2/26/paths/v2/{id}/": "/api/fut/evolutions/v2/{cycle}/paths/v2/{id}/",
+	},
+}
+
 func New(cfg Config) *Client {
 	if cfg.BaseURL == "" {
 		cfg = DefaultConfig()
@@ -284,11 +334,10 @@ func New(cfg Config) *Client {
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = defaultUA
 	}
-	// Configurações gravadas antes do placeholder carregavam exatamente este
-	// default do FC 26. Migrar só esse valor conhecido evita que virar cycle=27
-	// continue consultando paths antigos; uma rota customizada é preservada.
-	if cfg.Endpoints["evolution_paths"] == "/api/fut/evolutions/v2/26/paths/v2/{id}/" {
-		cfg.Endpoints["evolution_paths"] = "/api/fut/evolutions/v2/{cycle}/paths/v2/{id}/"
+	for logical, migrations := range legacyEndpoints {
+		if novo, ok := migrations[cfg.Endpoints[logical]]; ok {
+			cfg.Endpoints[logical] = novo
+		}
 	}
 	return &Client{
 		cfg: cfg,

@@ -103,6 +103,15 @@ type Club struct {
 	Cycle    string       `json:"cycle"`
 	SyncedAt time.Time    `json:"synced_at"`
 	Source   string       `json:"source"` // "futgg", "csv", "chrome"
+	// SourceCycle é o ciclo que a FONTE realmente reportou para a maioria das
+	// cartas, quando isso difere do que foi pedido. Cycle acima é sempre o
+	// ciclo CONFIGURADO (é por ele que store particiona tudo); SourceCycle
+	// existe porque o elenco público do fut.gg não é particionado por ciclo —
+	// ele devolve o que a EA sincronizou por último, que pode ainda ser do
+	// ciclo anterior se o clube do ciclo novo não existir (ou não tiver sido
+	// sincronizado) ainda. Vazio quando fonte e configuração concordam, ou
+	// quando a fonte não expõe essa informação.
+	SourceCycle string `json:"source_cycle,omitempty"`
 	// ProtectedCards é uma marca transitória de um plano de referência. Não
 	// pertence ao snapshot nem à fonte: só impede que análises desta requisição
 	// ofereçam titular ou reserva do plano como venda/consumo de SBC.

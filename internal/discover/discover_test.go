@@ -279,6 +279,45 @@ func TestNormalizaTemplateLiteral(t *testing.T) {
 	}
 }
 
+// TestNormalizaParametroDeDoisPontos cobre a outra sintaxe de parâmetro que o
+// roteador do fut.gg usa (:nome, ao lado de ${...}) — ver colonParam e
+// colonParamNames em crawl.go.
+func TestNormalizaParametroDeDoisPontos(t *testing.T) {
+	casos := map[string]string{
+		"/api/fut/players/v2/:gameYear/":     "/api/fut/players/v2/{cycle}/",
+		"/api/fut/sbc/:gameSlug":             "/api/fut/sbc/{cycle}",
+		"/api/gg-club/:username/players/":    "/api/gg-club/{gamertag}/players/",
+		"/api/fut/players/:slug/evolutions/": "/api/fut/players/{id}/evolutions/",
+		// Porta de host não pode virar parâmetro: o dois-pontos aqui não
+		// vem colado numa barra.
+		"https://api.fut.gg:8443/players/": "https://api.fut.gg:8443/players/",
+	}
+	for in, want := range casos {
+		if got := normalize(in); got != want {
+			t.Errorf("normalize(%q) = %q, esperava %q", in, got, want)
+		}
+	}
+}
+
+// TestFillVariantsPreencheComCiclo prova que uma rota com {cycle} — o que
+// normalizeColonParams produz para :gameYear/:gameSlug — é sondável na
+// segunda passada. Sem "cycle" na lista de chaves de fillVariants, o valor
+// existia em args (argValues já copia opt.ArgValues inteiro) mas nunca era
+// tentado, e a rota nunca saía do estado NeedsArg=true sem confirmação.
+func TestFillVariantsPreencheComCiclo(t *testing.T) {
+	got := fillVariants("/api/fut/players/v2/{cycle}/", map[string]string{"cycle": "27"})
+	if len(got) != 1 {
+		t.Fatalf("devolveu %d variantes, esperava 1 (achou: %v)", len(got), got)
+	}
+	if got[0].url != "/api/fut/players/v2/27/" || got[0].key != "cycle" {
+		t.Errorf("variante = %+v, esperava url=.../27/ key=cycle", got[0])
+	}
+	// restoreOne devolve o placeholder certo depois da sondagem confirmar.
+	if back := restoreOne(got[0].url, got[0]); back != "/api/fut/players/v2/{cycle}/" {
+		t.Errorf("restoreOne = %q, esperava o {cycle} de volta", back)
+	}
+}
+
 func kinds(res *Result) []string {
 	var out []string
 	for k := range res.Best {

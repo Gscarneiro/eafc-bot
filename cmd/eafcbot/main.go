@@ -310,6 +310,18 @@ func runJob(ctx context.Context, cfg config.Config, st store.Store, outPath stri
 			if poolSet.Name == "" {
 				poolSet.Name, poolSet.Category, poolSet.Thresholds = set.Name, set.Category, set.Thresholds
 			}
+			if poolSet.CategoryID == 0 {
+				poolSet.CategoryID = set.CategoryID
+			}
+			if poolSet.BadgeURL == "" {
+				poolSet.BadgeURL, poolSet.TeamID = set.BadgeURL, set.TeamID
+			}
+			if len(poolSet.Rewards) == 0 {
+				poolSet.Rewards = set.Rewards
+			}
+			if poolSet.URL == "" {
+				poolSet.URL = set.URL
+			}
 			snap.GalleryPools[set.ID] = futgg.GalleryPoolResult{Set: poolSet, Cards: poolCards}
 		}
 	}
@@ -789,6 +801,7 @@ func atualizarGaleria(ctx context.Context, st store.Store, snap *futgg.Snapshot,
 			c.OriginalPlayerID = prev.OriginalPlayerID
 			c.NationID, c.ClubID, c.LeagueID, c.RarityID = prev.NationID, prev.ClubID, prev.LeagueID, prev.RarityID
 			c.Positions = append([]string(nil), prev.Positions...)
+			c.WeakFoot, c.SkillMoves = prev.WeakFoot, prev.SkillMoves
 			c.Holographic = prev.Holographic
 		}
 		byID[cardKey(c)] = c
@@ -814,6 +827,18 @@ func atualizarGaleria(ctx context.Context, st store.Store, snap *futgg.Snapshot,
 			}
 			if pool.Set.Category == "" {
 				pool.Set.Category = catalogSet.Category
+			}
+			if pool.Set.CategoryID == 0 {
+				pool.Set.CategoryID = catalogSet.CategoryID
+			}
+			if pool.Set.BadgeURL == "" {
+				pool.Set.BadgeURL, pool.Set.TeamID = catalogSet.BadgeURL, catalogSet.TeamID
+			}
+			if len(pool.Set.Rewards) == 0 {
+				pool.Set.Rewards = catalogSet.Rewards
+			}
+			if pool.Set.URL == "" {
+				pool.Set.URL = catalogSet.URL
 			}
 			if pool.Set.RequiredCards == 0 {
 				pool.Set.RequiredCards = catalogSet.RequiredCards
@@ -851,6 +876,12 @@ func atualizarGaleria(ctx context.Context, st store.Store, snap *futgg.Snapshot,
 						if len(pc.Positions) > 0 {
 							cards[j].Positions = append([]string(nil), pc.Positions...)
 						}
+						if pc.WeakFoot > 0 {
+							cards[j].WeakFoot = pc.WeakFoot
+						}
+						if pc.SkillMoves > 0 {
+							cards[j].SkillMoves = pc.SkillMoves
+						}
 						cards[j].Holographic = cards[j].Holographic || pc.Holographic
 					}
 				}
@@ -874,7 +905,8 @@ func atualizarGaleria(ctx context.Context, st store.Store, snap *futgg.Snapshot,
 			}
 		}
 	}
-	recs := galeria.Evaluate(galeria.Input{Sets: sets, Cards: cards, Completions: completions, Now: now})
+	overrides, _ := gs.ListGalleryOverrides(ctx, cycle, club, platform)
+	recs := galeria.Evaluate(galeria.Input{Sets: sets, Cards: cards, Overrides: overrides, Completions: completions, Now: now})
 	for i := range recs {
 		if c, ok := completions[recs[i].Set.ID]; ok {
 			recs[i].Completion = &c

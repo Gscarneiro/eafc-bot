@@ -1222,10 +1222,11 @@ export interface ResumoResponse {
 export interface TickerRow { name: string; role: string; trend: PriceTrend }
 
 export type GalleryGrade = "" | "D" | "C" | "B" | "A" | "S";
+export interface GalleryReward { id?: string; type?: string; label?: string; value?: number; count?: number; image_url?: string; }
 export interface GalleryPick { card_id: number; name: string; item_score: number; bonus?: number; reason?: string; }
-export interface GalleryTagBreakdown { name: string; operator?: string; attribute?: string; matched_ids?: number[]; matched_count: number; matched_score: number; bonus_percent: number; bonus_points: number; next_min_items?: number; next_bonus_percent?: number; pending?: boolean; reason?: string; }
-export interface GalleryEvaluation { set_id: string; status: string; required: number; filled: number; score: number; base_score: number; bonus_score: number; tags?: GalleryTagBreakdown[]; grade: GalleryGrade; next_grade?: GalleryGrade; next_threshold?: number; picks?: GalleryPick[]; missing?: string[]; warnings?: string[]; coverage?: string; states?: number; input_hash?: string; computed_at: string; }
-export interface GallerySet { id: string; name: string; category?: string; required_cards: number; thresholds?: Record<string, number>; rewards?: Record<string, string[]>; pool_size?: number; pool_truncated?: boolean; }
+export interface GalleryTagBreakdown { name: string; operator?: string; attribute?: string; matched_ids?: number[]; matched_cards?: GalleryPick[]; matched_count: number; matched_score: number; bonus_percent: number; bonus_points: number; next_min_items?: number; next_bonus_percent?: number; pending?: boolean; reason?: string; }
+export interface GalleryEvaluation { set_id: string; status: string; required: number; filled: number; score: number; base_score: number; bonus_score: number; tags?: GalleryTagBreakdown[]; grade: GalleryGrade; next_grade?: GalleryGrade; next_threshold?: number; picks?: GalleryPick[]; missing?: string[]; warnings?: string[]; coverage?: string; states?: number; max_proven?: boolean; input_hash?: string; computed_at: string; }
+export interface GallerySet { id: string; name: string; category?: string; category_id?: number; badge_url?: string; team_id?: number; required_cards: number; thresholds?: Record<string, number>; rewards?: Record<string, GalleryReward[]>; pool_size?: number; pool_truncated?: boolean; }
 export interface GalleryCompletion { set_id: string; grade: GalleryGrade; score?: number; completed_at: string; notes?: string; }
 export interface GalleryRecord { set: GallerySet; evaluation: GalleryEvaluation; completion?: GalleryCompletion; }
 export interface GalleryPage { value: GalleryRecord[]; "@odata.count": number; "@eafc.skip": number; "@eafc.top": number; opportunities: number; "@eafc.facets"?: Record<string, number>; }

@@ -54,12 +54,69 @@ func (s *Server) galleryRows(r *http.Request, gs store.GaleriaStore, cycle, club
 		byID[c.SetID] = c
 	}
 	for i := range rows {
+		// Conclus\u00f5es s\u00e3o a fonte de verdade. Limpar o payload antigo \u00e9
+		// necess\u00e1rio quando uma conclus\u00e3o foi removida desde a avalia\u00e7\u00e3o.
+		rows[i].Completion = nil
+		if rows[i].Set.CategoryID == 0 {
+			rows[i].Set.CategoryID = galleryCategoryID(rows[i].Set.Category)
+		}
 		if c, ok := byID[rows[i].Set.ID]; ok {
 			cc := c
 			rows[i].Completion = &cc
 		}
 	}
 	return rows, nil
+}
+
+// reavaliarGaleriaLocal reaproveita apenas o cat\u00e1logo e a cole\u00e7\u00e3o j\u00e1
+// persistidos. Assim os handlers refletem uma corre\u00e7\u00e3o ou conclus\u00e3o na
+// hora, sem tornar uma escrita HTTP dependente do FUT.GG.
+func (s *Server) reavaliarGaleriaLocal(r *http.Request, gs store.GaleriaStore, cycle, club, platform string) error {
+	rows, err := s.galleryRows(r, gs, cycle, club, platform)
+	if err != nil {
+		return err
+	}
+	cards, err := gs.ListGalleryCards(r.Context(), cycle, club, platform)
+	if err != nil {
+		return err
+	}
+	overrides, err := gs.ListGalleryOverrides(r.Context(), cycle, club, platform)
+	if err != nil {
+		return err
+	}
+	sets := make([]galeria.Set, 0, len(rows))
+	completions := make(map[string]galeria.Completion)
+	for _, row := range rows {
+		sets = append(sets, row.Set)
+		if row.Completion != nil {
+			completions[row.Set.ID] = *row.Completion
+		}
+	}
+	records := galeria.Evaluate(galeria.Input{Sets: sets, Cards: cards, Overrides: overrides, Completions: completions, Now: time.Now()})
+	return gs.SaveGallery(r.Context(), cycle, club, platform, records)
+}
+
+// Registros gravados antes de o catálogo guardar o id da categoria ainda
+// precisam aparecer na ordem do jogo até a próxima sincronização.
+func galleryCategoryID(name string) int {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "laliga ea sports / liga f moeve":
+		return 1
+	case "ligue 1 mcdonald's / arkema pl":
+		return 2
+	case "serie a enilive":
+		return 3
+	case "bundesliga / frauen-bundesliga":
+		return 4
+	case "premier league / barclays wsl":
+		return 5
+	case "leagues":
+		return 6
+	case "rarities":
+		return 7
+	default:
+		return 0
+	}
 }
 
 func (s *Server) handleGaleria(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +168,17 @@ func (s *Server) handleGaleria(w http.ResponseWriter, r *http.Request) {
 	sort.SliceStable(filtered, func(i, j int) bool {
 		if filtered[i].Notify() != filtered[j].Notify() {
 			return filtered[i].Notify()
+		}
+		if filtered[i].Set.CategoryID != filtered[j].Set.CategoryID {
+			// O catálogo do FUT.GG usa o id da categoria como ordem de navegação;
+			// mantê-lo aqui faz a API entregar as mesmas seções que o jogo.
+			if filtered[i].Set.CategoryID == 0 {
+				return false
+			}
+			if filtered[j].Set.CategoryID == 0 {
+				return true
+			}
+			return filtered[i].Set.CategoryID < filtered[j].Set.CategoryID
 		}
 		return filtered[i].Set.Name < filtered[j].Set.Name
 	})
@@ -237,14 +305,9 @@ func (s *Server) handleGaleriaConclusao(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	rows, err := s.galleryRows(r, gs, cycle, club, platform)
-	if err == nil {
-		for i := range rows {
-			if rows[i].Set.ID == id {
-				rows[i].Completion = &completion
-			}
-		}
-		_ = gs.SaveGallery(r.Context(), cycle, club, platform, rows)
+	if err := s.reavaliarGaleriaLocal(r, gs, cycle, club, platform); err != nil {
+		http.Error(w, "reavaliando FUT Gallery: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 	writeJSON(w, completion)
 }
@@ -258,14 +321,9 @@ func (s *Server) handleGaleriaConclusaoDelete(w http.ResponseWriter, r *http.Req
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	rows, err := s.galleryRows(r, gs, cycle, club, platform)
-	if err == nil {
-		for i := range rows {
-			if rows[i].Set.ID == r.PathValue("id") {
-				rows[i].Completion = nil
-			}
-		}
-		_ = gs.SaveGallery(r.Context(), cycle, club, platform, rows)
+	if err := s.reavaliarGaleriaLocal(r, gs, cycle, club, platform); err != nil {
+		http.Error(w, "reavaliando FUT Gallery: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -319,25 +377,9 @@ func (s *Server) handleGaleriaColecaoUpdate(w http.ResponseWriter, r *http.Reque
 	// A correção local deve refletir imediatamente nos avisos, sem esperar a
 	// próxima coleta. Recalcular só com dados persistidos mantém esta rota sem
 	// acesso à rede.
-	if rows, e1 := s.galleryRows(r, gs, cycle, club, platform); e1 == nil {
-		if cards, e2 := gs.ListGalleryCards(r.Context(), cycle, club, platform); e2 == nil {
-			overrides, _ := gs.ListGalleryOverrides(r.Context(), cycle, club, platform)
-			sets := make([]galeria.Set, 0, len(rows))
-			completions := map[string]galeria.Completion{}
-			for _, row := range rows {
-				sets = append(sets, row.Set)
-				if row.Completion != nil {
-					completions[row.Set.ID] = *row.Completion
-				}
-			}
-			recalculated := galeria.Evaluate(galeria.Input{Sets: sets, Cards: cards, Overrides: overrides, Completions: completions, Now: time.Now()})
-			for i := range recalculated {
-				if c, ok := completions[recalculated[i].Set.ID]; ok {
-					recalculated[i].Completion = &c
-				}
-			}
-			_ = gs.SaveGallery(r.Context(), cycle, club, platform, recalculated)
-		}
+	if err := s.reavaliarGaleriaLocal(r, gs, cycle, club, platform); err != nil {
+		http.Error(w, "reavaliando FUT Gallery: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 	writeJSON(w, in)
 }
@@ -355,6 +397,10 @@ func (s *Server) handleGaleriaColecaoDelete(w http.ResponseWriter, r *http.Reque
 	cycle, club, platform := s.galleryContext(r)
 	if err := gs.DeleteGalleryOverride(r.Context(), cycle, club, platform, id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.reavaliarGaleriaLocal(r, gs, cycle, club, platform); err != nil {
+		http.Error(w, "reavaliando FUT Gallery: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

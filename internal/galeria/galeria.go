@@ -6,6 +6,7 @@ package galeria
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -89,12 +90,15 @@ type Card struct {
 
 // TagRule e a forma normalizada das regras publicadas pelo FUT.GG.
 type TagRule struct {
-	Name      string   `json:"name"`
-	Attribute string   `json:"attribute,omitempty"`
-	Operator  string   `json:"operator,omitempty"`
-	Values    []string `json:"values,omitempty"`
-	Tiers     []Tier   `json:"tiers,omitempty"`
-	BonusType string   `json:"bonus_type,omitempty"`
+	ID            string   `json:"id,omitempty"`
+	Name          string   `json:"name"`
+	Target        string   `json:"target,omitempty"`
+	Attribute     string   `json:"attribute,omitempty"`
+	Operator      string   `json:"operator,omitempty"`
+	Values        []string `json:"values,omitempty"`
+	Tiers         []Tier   `json:"tiers,omitempty"`
+	BonusType     string   `json:"bonus_type,omitempty"`
+	ThresholdType string   `json:"threshold_type,omitempty"`
 }
 type Tier struct {
 	MinItems     int `json:"min_items"`
@@ -105,6 +109,7 @@ type TagBreakdown struct {
 	Operator         string  `json:"operator,omitempty"`
 	Attribute        string  `json:"attribute,omitempty"`
 	MatchedIDs       []int64 `json:"matched_ids,omitempty"`
+	MatchedCards     []Pick  `json:"matched_cards,omitempty"`
 	MatchedCount     int     `json:"matched_count"`
 	MatchedScore     int     `json:"matched_score"`
 	BonusPercent     int     `json:"bonus_percent"`
@@ -118,15 +123,48 @@ type Set struct {
 	ID            string             `json:"id"`
 	Name          string             `json:"name"`
 	Category      string             `json:"category,omitempty"`
+	CategoryID    int                `json:"category_id,omitempty"`
+	BadgeURL      string             `json:"badge_url,omitempty"`
+	TeamID        int64              `json:"team_id,omitempty"`
 	URL           string             `json:"url,omitempty"`
 	RequiredCards int                `json:"required_cards"`
 	Thresholds    map[Grade]int      `json:"thresholds"`
-	Rewards       map[Grade][]string `json:"rewards,omitempty"`
+	Rewards       map[Grade][]Reward `json:"rewards,omitempty"`
 	Rules         []TagRule          `json:"rules,omitempty"`
 	PoolSize      int                `json:"pool_size,omitempty"`
 	PoolTruncated bool               `json:"pool_truncated,omitempty"`
 	UpdatedAt     time.Time          `json:"updated_at,omitempty"`
 	EligibleIDs   []int64            `json:"eligible_ids,omitempty"`
+}
+
+// Reward preserva a recompensa publicada, inclusive quantidade e imagem. A
+// Gallery registra a nota informada pela pessoa, mas n\u00e3o presume que o item
+// tenha sido resgatado dentro do jogo.
+type Reward struct {
+	ID       string `json:"id,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Label    string `json:"label,omitempty"`
+	Value    int    `json:"value,omitempty"`
+	Count    int    `json:"count,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
+}
+
+// UnmarshalJSON aceita o formato antigo, que guardava somente o rótulo da
+// recompensa. Isso preserva o catálogo já salvo até a próxima sincronização
+// enriquecer os mesmos registros com o contrato completo.
+func (r *Reward) UnmarshalJSON(data []byte) error {
+	var label string
+	if err := json.Unmarshal(data, &label); err == nil {
+		r.Label = label
+		return nil
+	}
+	type rawReward Reward
+	var raw rawReward
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*r = Reward(raw)
+	return nil
 }
 
 type Completion struct {
@@ -182,6 +220,7 @@ type Evaluation struct {
 	Warnings      []string         `json:"warnings,omitempty"`
 	Coverage      string           `json:"coverage,omitempty"`
 	States        int              `json:"states,omitempty"`
+	MaxProven     bool             `json:"max_proven,omitempty"`
 	ComputedAt    time.Time        `json:"computed_at"`
 	InputHash     string           `json:"input_hash,omitempty"`
 }
@@ -294,6 +333,11 @@ func attr(c Card, a string) string {
 }
 func attrMatches(c Card, attribute string, values []string) bool {
 	attribute = strings.ToUpper(attribute)
+	if attribute == "FIRST_OWNED" {
+		// O cat\u00e1logo usa values:["1"], mas o dado \u00e9 booleano. Apenas a
+		// confirma\u00e7\u00e3o expl\u00edcita concede o b\u00f4nus.
+		return c.FirstOwner != nil && *c.FirstOwner
+	}
 	if attribute == "POSSIBLE_POSITIONS" {
 		positions := c.Positions
 		if len(positions) == 0 && c.Position != "" {
@@ -339,6 +383,42 @@ func matches(c Card, rule TagRule) bool {
 	}
 	return attrMatches(c, rule.Attribute, rule.Values)
 }
+
+func groupKey(c Card, attribute string) string {
+	key := attr(c, attribute)
+	if key == "0" {
+		return ""
+	}
+	return key
+}
+
+func scoreCards(cards []Card) int {
+	total := 0
+	for _, c := range cards {
+		total += c.ItemScore
+	}
+	return total
+}
+
+func bestCard(cards []Card) Card {
+	best := cards[0]
+	for _, c := range cards[1:] {
+		if c.ItemScore > best.ItemScore || (c.ItemScore == best.ItemScore && c.ID < best.ID) {
+			best = c
+		}
+	}
+	return best
+}
+
+func sortedGroupKeys(groups map[string][]Card) []string {
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func bonus(picks []Card, rules []TagRule) (int, []TagBreakdown, []string, bool) {
 	total := 0
 	breakdown := make([]TagBreakdown, 0, len(rules))
@@ -350,43 +430,48 @@ func bonus(picks []Card, rules []TagRule) (int, []TagBreakdown, []string, bool) 
 			breakdown = append(breakdown, TagBreakdown{Name: r.Name, Operator: r.Operator, Attribute: r.Attribute, Pending: true, Reason: "tipo de bônus não suportado"})
 			continue
 		}
-		count := 0
-		sum := 0
+		matched := make([]Card, 0, len(picks))
 		groups := map[string][]Card{}
+		isGrouping := strings.EqualFold(r.Operator, "COUNT_DIFF") || strings.EqualFold(r.Operator, "MAX_COUNT_ALL_SAME")
 		for _, c := range picks {
+			if c.Loan != nil && *c.Loan {
+				continue
+			}
+			if isGrouping {
+				// Nas regras agrupadas values:["0"] \u00e9 apenas um marcador do
+				// contrato, n\u00e3o um filtro para liga, clube ou na\u00e7\u00e3o.
+				if key := groupKey(c, r.Attribute); key != "" {
+					groups[key] = append(groups[key], c)
+				}
+				continue
+			}
 			if matches(c, r) {
-				count++
-				sum += c.ItemScore
-				groups[attr(c, r.Attribute)] = append(groups[attr(c, r.Attribute)], c)
+				matched = append(matched, c)
 			}
 		}
+		count := len(matched)
+		sum := scoreCards(matched)
 		switch strings.ToUpper(r.Operator) {
 		case "COUNT", "COUNT_ANY", "MIN_COUNT":
 		case "COUNT_DIFF":
-			count, sum = 0, 0
-			for _, group := range groups {
-				count++
-				best := 0
-				for _, c := range group {
-					if c.ItemScore > best {
-						best = c.ItemScore
-					}
-				}
-				sum += best
+			matched = matched[:0]
+			for _, key := range sortedGroupKeys(groups) {
+				matched = append(matched, bestCard(groups[key]))
 			}
+			count, sum = len(matched), scoreCards(matched)
 		case "MAX_COUNT_ALL_SAME":
-			count, sum = 0, 0
+			matched = matched[:0]
 			bestBonus, bestCount := -1, 0
-			for _, group := range groups {
-				groupSum := 0
-				for _, c := range group {
-					groupSum += c.ItemScore
-				}
+			for _, key := range sortedGroupKeys(groups) {
+				group := groups[key]
+				groupSum := scoreCards(group)
 				candidate := floorBonus(tierFor(len(group), r.Tiers), groupSum)
 				if candidate > bestBonus || (candidate == bestBonus && len(group) > bestCount) {
-					bestBonus, bestCount, count, sum = candidate, len(group), len(group), groupSum
+					bestBonus, bestCount = candidate, len(group)
+					matched = append(matched[:0], group...)
 				}
 			}
+			count, sum = len(matched), scoreCards(matched)
 		case "":
 			// Registros antigos gravados antes de o catálogo expor `type`
 			// eram regras simples de contagem. Mantê-los como COUNT preserva
@@ -398,10 +483,9 @@ func bonus(picks []Card, rules []TagRule) (int, []TagBreakdown, []string, bool) 
 		}
 		tier := tierFor(count, r.Tiers)
 		bd := TagBreakdown{Name: r.Name, Operator: r.Operator, Attribute: r.Attribute, MatchedCount: count, MatchedScore: sum, BonusPercent: tier}
-		for _, c := range picks {
-			if matches(c, r) {
-				bd.MatchedIDs = append(bd.MatchedIDs, c.ID)
-			}
+		for _, c := range matched {
+			bd.MatchedIDs = append(bd.MatchedIDs, c.ID)
+			bd.MatchedCards = append(bd.MatchedCards, Pick{CardID: c.ID, Name: c.Name, ItemScore: c.ItemScore})
 		}
 		for _, t := range r.Tiers {
 			if t.MinItems > count && (bd.NextMinItems == 0 || t.MinItems < bd.NextMinItems) {
@@ -413,11 +497,7 @@ func bonus(picks []Card, rules []TagRule) (int, []TagBreakdown, []string, bool) 
 			// O builder público aplica floor(max(percentual*soma-1,0)/100).
 			// O -1 é observável em scores exatamente divisíveis por 100 e
 			// evita prometer ao usuário a regra textual arredondada do FAQ.
-			b := tier*sum - 1
-			if b < 0 {
-				b = 0
-			}
-			b /= 100
+			b := floorBonus(tier, sum)
 			bd.BonusPoints = b
 			total += b
 			notes = append(notes, fmt.Sprintf("%s: %d itens +%d%% (%d)", r.Name, count, tier, b))
@@ -430,7 +510,7 @@ func bonus(picks []Card, rules []TagRule) (int, []TagBreakdown, []string, bool) 
 func tierFor(count int, tiers []Tier) int {
 	best := 0
 	for _, t := range tiers {
-		if count >= t.MinItems && t.BonusPercent > best {
+		if count >= t.MinItems {
 			best = t.BonusPercent
 		}
 	}
@@ -440,11 +520,11 @@ func floorBonus(percent, subtotal int) int {
 	if percent <= 0 || subtotal <= 0 {
 		return 0
 	}
-	n := percent*subtotal - 1
+	n := int64(percent)*int64(subtotal) - 1
 	if n < 0 {
 		n = 0
 	}
-	return n / 100
+	return int(n / 100)
 }
 
 // Evaluate encontra uma combinacao valida por busca exaustiva limitada. O
@@ -494,14 +574,9 @@ func Evaluate(in Input) []Record {
 		score := baseScore + bonusScore
 		grade := gradeFor(score, set.Thresholds)
 		next, threshold := nextGrade(score, set.Thresholds)
-		status := StatusAvailable
-		if set.PoolTruncated {
-			status = StatusIncomplete
-		}
-		if pending || limited {
-			status = StatusIncomplete
-		}
-		ev := Evaluation{SetID: set.ID, Status: status, Required: set.RequiredCards, Filled: set.RequiredCards, Score: score, BaseScore: baseScore, BonusScore: bonusScore, Tags: tags, Grade: grade, NextGrade: next, NextThreshold: threshold, States: states, Coverage: coverage(set), ComputedAt: now, InputHash: evaluationHash(set, candidates, in.Completions[set.ID])}
+		// Uma combina\u00e7\u00e3o formada apenas por cartas confirmadas continua v\u00e1lida
+		// mesmo quando n\u00e3o \u00e9 poss\u00edvel provar o m\u00e1ximo global do pool.
+		ev := Evaluation{SetID: set.ID, Status: StatusAvailable, Required: set.RequiredCards, Filled: set.RequiredCards, Score: score, BaseScore: baseScore, BonusScore: bonusScore, Tags: tags, Grade: grade, NextGrade: next, NextThreshold: threshold, States: states, MaxProven: !set.PoolTruncated && !pending && !limited, Coverage: coverage(set), ComputedAt: now, InputHash: evaluationHash(set, candidates, in.Completions[set.ID])}
 		if pending {
 			ev.Warnings = append(ev.Warnings, "há regras de bônus sem dados ou operador suportado")
 		}
@@ -568,8 +643,11 @@ func cardsForSet(cards []Card, s Set) []Card {
 	return out
 }
 func search(c []Card, s Set, max int) ([]Card, int, bool) {
-	best := []Card(nil)
+	best := initialCombination(c, s.RequiredCards)
 	bestVal := -1
+	if len(best) == s.RequiredCards {
+		bestVal = bestScore(best, s)
+	}
 	states := 0
 	limited := false
 	var walk func(int, []Card)
@@ -583,9 +661,6 @@ func search(c []Card, s Set, max int) ([]Card, int, bool) {
 		if len(c)-start < remaining {
 			return
 		}
-		if bestVal >= 0 && upperBound(c[start:], remaining, p, s.Rules) <= bestVal {
-			return
-		}
 		if len(p) == s.RequiredCards {
 			v := bestScore(p, s)
 			if v > bestVal {
@@ -594,12 +669,48 @@ func search(c []Card, s Set, max int) ([]Card, int, bool) {
 			}
 			return
 		}
+		if bestVal >= 0 && upperBound(c[start:], remaining, p, s.Rules) <= bestVal {
+			return
+		}
 		for i := start; i < len(c); i++ {
+			if containsIdentity(p, c[i]) {
+				continue
+			}
 			walk(i+1, append(p, c[i]))
 		}
 	}
 	walk(0, nil)
 	return best, states, limited
+}
+
+func cardIdentity(c Card) string {
+	if c.ClubItemID != "" {
+		return "club:" + c.ClubItemID
+	}
+	return fmt.Sprintf("card:%d", c.ID)
+}
+
+func containsIdentity(picks []Card, candidate Card) bool {
+	identity := cardIdentity(candidate)
+	for _, pick := range picks {
+		if cardIdentity(pick) == identity {
+			return true
+		}
+	}
+	return false
+}
+
+func initialCombination(cards []Card, required int) []Card {
+	result := make([]Card, 0, required)
+	for _, card := range cards {
+		if !containsIdentity(result, card) {
+			result = append(result, card)
+		}
+		if len(result) == required {
+			return result
+		}
+	}
+	return nil
 }
 
 // upperBound é deliberadamente conservador: soma as maiores cartas restantes
@@ -619,7 +730,7 @@ func upperBound(remaining []Card, slots int, picked []Card, rules []TagRule) int
 	for i := 0; i < slots && i < len(scores); i++ {
 		base += scores[i]
 	}
-	all := 0
+	all := base
 	for _, c := range remaining {
 		all += c.ItemScore
 	}

@@ -30,6 +30,20 @@ Cada tag aplica sua porcentagem somente ao subtotal das cartas correspondentes. 
 
 Fontes adicionais: [contrato público FC27](https://www.fut.gg/api/fut/gallery/fc27/) e [bundle que contém `tagBonus`, `groupKey` e `matchItem`](https://assets.fut.gg/ts/assets/index-CBpMWNCS.js).
 
+## Implementação dos multiplicadores e recompensas
+
+As regras de agrupamento do contrato publicam `values:["0"]` como marcador.
+Esse valor não filtra clubes, ligas ou nações: o motor agrupa todas as cartas
+confirmadas pelo atributo da regra. A regra `FIRST_OWNED` também tem
+`values:["1"]`, mas esse campo representa uma confirmação booleana; somente o
+estado verdadeiro concede o bônus. Empréstimos sempre ficam fora de todas as
+tags.
+
+Cada recompensa é persistida com identificador, tipo, rótulo, quantidade,
+valor e imagem quando o catálogo os fornece. A tela apresenta a recompensa
+associada à letra registrada e as faixas alcançáveis pela previsão, sem
+afirmar que um item foi resgatado no jogo.
+
 ## Limitações
 
-O perfil público do GG Club não fornece um histórico Gallery completo nem comprova primeiro dono para todos os itens. A implementação acumula cartas observadas nos snapshots e aceita correções manuais. Pools truncados, regras desconhecidas e combinações limitadas pelo orçamento de busca são marcados como incompletos; o bot não afirma impossibilidade ou máximo global nesses casos.
+O perfil público do GG Club não fornece um histórico Gallery completo nem comprova primeiro dono para todos os itens. A implementação acumula cartas observadas nos snapshots e aceita correções manuais. Pools truncados, regras desconhecidas e combinações limitadas pelo orçamento de busca mantêm cobertura parcial; o bot não afirma impossibilidade ou máximo global nesses casos.

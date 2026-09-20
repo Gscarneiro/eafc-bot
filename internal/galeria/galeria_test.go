@@ -1,9 +1,20 @@
 package galeria
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
+
+func TestRewardLegadoEmTextoContinuaLegivel(t *testing.T) {
+	var set Set
+	if err := json.Unmarshal([]byte(`{"rewards":{"D":["Badge"]}}`), &set); err != nil {
+		t.Fatal(err)
+	}
+	if got := set.Rewards[GradeD][0].Label; got != "Badge" {
+		t.Fatalf("rótulo legado = %q", got)
+	}
+}
 
 func TestEvaluateIgnoraEmprestimoEAlcancaNota(t *testing.T) {
 	loan := true
@@ -23,7 +34,7 @@ func TestEvaluateNaoNotificaDepoisDeSRegistrado(t *testing.T) {
 }
 
 func TestEvaluateAplicaBonusPorTagSobreItensCorrespondentes(t *testing.T) {
-	tag := TagRule{Name: "First Owner", Attribute: "FIRST_OWNED", Tiers: []Tier{{MinItems: 2, BonusPercent: 100}}}
+	tag := TagRule{Name: "First Owner", Attribute: "FIRST_OWNED", Operator: "COUNT", Values: []string{"1"}, Tiers: []Tier{{MinItems: 2, BonusPercent: 100}}}
 	owner := true
 	set := Set{ID: "tag", RequiredCards: 2, Rules: []TagRule{tag}, Thresholds: map[Grade]int{GradeD: 1, GradeC: 10, GradeB: 20, GradeA: 30, GradeS: 40}}
 	got := Evaluate(Input{Sets: []Set{set}, Cards: []Card{{ID: 1, ItemScore: 20, FirstOwner: &owner}, {ID: 2, ItemScore: 20, FirstOwner: &owner}}, Now: time.Now()})
@@ -32,17 +43,30 @@ func TestEvaluateAplicaBonusPorTagSobreItensCorrespondentes(t *testing.T) {
 	}
 }
 
+func TestEvaluatePrimeiroDonoDesconhecidoNaoRecebeBonus(t *testing.T) {
+	owner := false
+	set := Set{ID: "owner", RequiredCards: 2, Rules: []TagRule{{Name: "First Owner", Attribute: "FIRST_OWNED", Operator: "COUNT", Values: []string{"1"}, Tiers: []Tier{{MinItems: 2, BonusPercent: 100}}}}, Thresholds: map[Grade]int{GradeD: 1, GradeC: 10, GradeB: 20, GradeA: 30, GradeS: 40}}
+	got := Evaluate(Input{Sets: []Set{set}, Cards: []Card{{ID: 1, ItemScore: 20}, {ID: 2, ItemScore: 20, FirstOwner: &owner}}, Now: time.Now()})[0]
+	if got.Evaluation.BonusScore != 0 || got.Evaluation.Tags[0].MatchedCount != 0 {
+		t.Fatalf("primeiro dono desconhecido/falso recebeu b\u00f4nus: %#v", got.Evaluation.Tags[0])
+	}
+}
+
 func TestEvaluateCountDiffUsaMaiorCartaPorGrupo(t *testing.T) {
-	tag := TagRule{Attribute: "CLUB", Operator: "COUNT_DIFF", Tiers: []Tier{{MinItems: 2, BonusPercent: 100}}}
+	tag := TagRule{Attribute: "CLUB", Operator: "COUNT_DIFF", Values: []string{"0"}, Tiers: []Tier{{MinItems: 2, BonusPercent: 100}}}
 	set := Set{ID: "diff", RequiredCards: 3, Rules: []TagRule{tag}, Thresholds: map[Grade]int{GradeD: 1, GradeC: 20, GradeB: 40, GradeA: 60, GradeS: 80}}
 	got := Evaluate(Input{Sets: []Set{set}, Cards: []Card{{ID: 1, Club: "A", ItemScore: 20}, {ID: 2, Club: "A", ItemScore: 50}, {ID: 3, Club: "B", ItemScore: 20}}, Now: time.Now()})
 	if got[0].Evaluation.Score != 159 {
 		t.Fatalf("COUNT_DIFF = %d; esperava 159", got[0].Evaluation.Score)
 	}
+	ids := got[0].Evaluation.Tags[0].MatchedIDs
+	if len(ids) != 2 || ids[0] != 2 || ids[1] != 3 {
+		t.Fatalf("cartas do COUNT_DIFF = %v; esperava representantes [2 3]", ids)
+	}
 }
 
 func TestEvaluateMaxCountEscolheGrupoPeloBonus(t *testing.T) {
-	rule := TagRule{Name: "mesmo clube", Attribute: "CLUB", Operator: "MAX_COUNT_ALL_SAME", Tiers: []Tier{{MinItems: 2, BonusPercent: 10}, {MinItems: 3, BonusPercent: 20}}}
+	rule := TagRule{Name: "mesmo clube", Attribute: "CLUB", Operator: "MAX_COUNT_ALL_SAME", Values: []string{"0"}, Tiers: []Tier{{MinItems: 2, BonusPercent: 10}, {MinItems: 3, BonusPercent: 20}}}
 	set := Set{ID: "same", RequiredCards: 3, Rules: []TagRule{rule}, Thresholds: map[Grade]int{GradeD: 1, GradeC: 1, GradeB: 1, GradeA: 1, GradeS: 1}}
 	cards := []Card{{ID: 1, ClubID: 1, ItemScore: 10}, {ID: 2, ClubID: 1, ItemScore: 10}, {ID: 3, ClubID: 2, ItemScore: 100}, {ID: 4, ClubID: 2, ItemScore: 100}}
 	got := Evaluate(Input{Sets: []Set{set}, Cards: cards, Now: time.Now()})[0]

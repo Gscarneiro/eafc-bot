@@ -51,10 +51,11 @@ func (c *Client) GalleryCatalog(ctx context.Context) ([]galeria.Set, error) {
 				continue
 			}
 			categoryName := stringValue(cm, "name", "slug")
+			categoryID := intValue(cm, "id", "categoryId", "category_id")
 			sets, _ := cm["sets"].([]any)
 			for _, item := range sets {
 				if sm, ok := item.(map[string]any); ok {
-					s := mapGallerySet(sm, stringValue(sm, "id", "setId"), categoryName)
+					s := mapGallerySet(sm, stringValue(sm, "id", "setId"), categoryName, categoryID)
 					s.Rules = append([]galeria.TagRule(nil), globalRules...)
 					out = append(out, s)
 				}
@@ -93,8 +94,8 @@ func intValue(x map[string]any, keys ...string) int {
 	}
 	return 0
 }
-func mapGallerySet(x map[string]any, id, category string) galeria.Set {
-	s := galeria.Set{ID: id, Name: stringValue(x, "name", "title", "label"), Category: category, RequiredCards: intValue(x, "requiredCards", "required_cards", "slots", "itemCount"), PoolSize: intValue(x, "poolSize", "pool_size"), PoolTruncated: boolValue(x, "isTruncated", "pool_truncated"), UpdatedAt: time.Now(), Thresholds: map[galeria.Grade]int{}, Rewards: map[galeria.Grade][]string{}}
+func mapGallerySet(x map[string]any, id, category string, categoryID int) galeria.Set {
+	s := galeria.Set{ID: id, Name: stringValue(x, "name", "title", "label"), Category: category, CategoryID: categoryID, RequiredCards: intValue(x, "requiredCards", "required_cards", "slots", "itemCount"), PoolSize: intValue(x, "poolSize", "pool_size"), PoolTruncated: boolValue(x, "isTruncated", "pool_truncated"), UpdatedAt: time.Now(), Thresholds: map[galeria.Grade]int{}, Rewards: map[galeria.Grade][]galeria.Reward{}}
 	if u := stringValue(x, "url", "path", "slug"); u != "" {
 		s.URL = u
 	}
@@ -112,9 +113,15 @@ func mapGallerySet(x map[string]any, id, category string) galeria.Set {
 					if rewards, ok := m["rewards"].([]any); ok {
 						for _, rv := range rewards {
 							if rm, ok := rv.(map[string]any); ok {
-								label := stringValue(rm, "label", "type")
-								if label != "" {
-									s.Rewards[grade] = append(s.Rewards[grade], label)
+								imagePath := stringValue(rm, "imagePath", "image_path", "imageUrl", "image_url")
+								label := stringValue(rm, "label", "name", "type")
+								reward := galeria.Reward{ID: stringValue(rm, "id", "rewardId", "reward_id"), Type: stringValue(rm, "type", "itemType", "item_type"), Label: label, Value: intValue(rm, "value", "amount"), Count: intValue(rm, "count", "quantity"), ImageURL: galleryAssetURL(imagePath)}
+								if reward.Label != "" || reward.Type != "" || reward.ImageURL != "" {
+									s.Rewards[grade] = append(s.Rewards[grade], reward)
+								}
+								if s.BadgeURL == "" && (strings.Contains(strings.ToLower(label), "badge") || strings.Contains(strings.ToLower(imagePath), "gg-club-badge")) {
+									s.BadgeURL = galleryAssetURL(imagePath)
+									s.TeamID = int64(intValue(rm, "teamEaId", "team_ea_id"))
 								}
 							}
 						}
@@ -125,8 +132,19 @@ func mapGallerySet(x map[string]any, id, category string) galeria.Set {
 	}
 	return s
 }
+
+func galleryAssetURL(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path
+	}
+	return cdnImageBase + strings.TrimPrefix(path, "/")
+}
 func mapGalleryTag(x map[string]any) galeria.TagRule {
-	r := galeria.TagRule{Name: stringValue(x, "name", "id"), BonusType: stringValue(x, "bonusType", "bonus_type")}
+	r := galeria.TagRule{ID: stringValue(x, "id"), Name: stringValue(x, "name", "id"), BonusType: stringValue(x, "bonusType", "bonus_type"), ThresholdType: stringValue(x, "thresholdType", "threshold_type")}
 	if tiers, ok := x["tiers"].([]any); ok {
 		for _, v := range tiers {
 			if m, ok := v.(map[string]any); ok {
@@ -137,6 +155,7 @@ func mapGalleryTag(x map[string]any) galeria.TagRule {
 	if rules, ok := x["rules"].([]any); ok && len(rules) > 0 {
 		if m, ok := rules[0].(map[string]any); ok {
 			r.Operator = stringValue(m, "type", "operator")
+			r.Target = stringValue(m, "target")
 			r.Attribute = stringValue(m, "attribute")
 			if vs, ok := m["values"].([]any); ok {
 				for _, v := range vs {

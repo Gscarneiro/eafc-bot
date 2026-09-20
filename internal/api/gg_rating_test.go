@@ -26,8 +26,8 @@ func snapshotComPlanosDeNotasAntigas() store.Snapshot {
 	}
 	snap.GauntletPlan = analyze.BuildGauntletPlan(snap.Club)
 	snap.SquadPlan = analyze.OptimizeSquad(snap.Club)
-	snap.GauntletPlan.RatingVersion = 0
-	snap.SquadPlan.RatingVersion = 0
+	snap.GauntletPlan.RatingVersion = 1
+	snap.SquadPlan.RatingVersion = 1
 	// A cópia tem nota maior, mas o plano salvo foi calculado só com o metarank.
 	snap.Club.Players[1].GGRatings = map[domain.Position]float64{domain.GK: 61}
 	snap.Club.Players[1].GGRating = 99.74
@@ -100,8 +100,48 @@ func TestPlanejadorEntregaNotaCorrigidaParaOCampo(t *testing.T) {
 		t.Fatal("nenhum cenário calculado")
 	}
 	for _, sc := range got.Scenarios {
-		if sc.Starters[0].Player.ID != snap.Club.Players[1].ID || sc.Starters[0].Rating != 99.74 {
+		if sc.Starters[0].Player.ID != snap.Club.Players[1].ID || sc.Starters[0].Rating == nil || *sc.Starters[0].Rating != 99.74 {
 			t.Fatalf("titular incorreto: %+v", sc.Starters[0])
 		}
+	}
+}
+
+func TestMeuTimeEReservasIgnoramMetarankDeSnapshotAntigo(t *testing.T) {
+	titular := domain.ClubPlayer{Player: domain.Player{
+		ID: 267234, Name: "Kerolin Nicoli", Rating: 85, Position: domain.ST,
+		GGRating: 84, GGRatingPos: domain.RM, GGRatings: map[domain.Position]float64{domain.ST: 82.79},
+	}}
+	reserva := domain.ClubPlayer{Player: domain.Player{
+		ID: 211110, Name: "Paulo Dybala", Rating: 85, Position: domain.CAM, AltPositions: []domain.Position{domain.ST},
+		GGRating: 83.95, GGRatingPos: domain.CAM, GGRatings: map[domain.Position]float64{domain.ST: 86.28},
+	}}
+	snap := fixtureSnapshot()
+	snap.Club.Players = []domain.ClubPlayer{titular, reserva}
+	snap.Club.Squad.Starters = []domain.SquadSlot{{Index: 10, Position: domain.ST, PlayerID: titular.ID}}
+	snap.SquadSwaps = []analyze.SquadSwap{{Index: 10, Slot: domain.ST, Current: titular, Candidate: reserva,
+		CurrentRating: 82.79, CandidateRating: 86.28, GGRatingGap: 3.49}}
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	for _, endpoint := range []string{"/api/time", "/api/elenco/reservas"} {
+		t.Run(endpoint, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, endpoint, nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+			}
+			var banco []RosterCard
+			if endpoint == "/api/time" {
+				banco = decodeJSON[TimeResponse](t, w).Bench
+			} else {
+				banco = decodeJSON[struct {
+					Value []RosterCard `json:"value"`
+				}](t, w).Value
+			}
+			if len(banco) != 1 || banco[0].Player.ID != reserva.ID || banco[0].Player.GGRating != 83.95 {
+				t.Fatalf("banco não preservou Dybala e seu GG Rating publicado: %+v", banco)
+			}
+			if leitura := banco[0].Leitura; leitura != nil && (leitura.Kind == "promover" || leitura.Promocao != nil) {
+				t.Fatalf("promoção antiga de metarank vazou na resposta: %+v", leitura)
+			}
+		})
 	}
 }

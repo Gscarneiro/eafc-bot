@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/gscarneiro/eafc-bot/internal/domain"
+	"github.com/gscarneiro/eafc-bot/internal/galeria"
 )
 
 // Snapshot é tudo que a coleta diária traz do fut.gg de uma vez.
@@ -29,6 +29,8 @@ type Snapshot struct {
 	Capabilities     map[string]Observation       `json:"capabilities"`
 	PlayStyleCatalog []domain.PlayStyleDefinition `json:"play_style_catalog,omitempty"`
 	RoleCatalog      RolesTable                   `json:"role_catalog,omitempty"`
+	GallerySets      []galeria.Set                `json:"gallery_sets,omitempty"`
+	GalleryPools     map[string]GalleryPoolResult `json:"-"`
 }
 
 // formationByID traduz o identificador que o GG Club guarda na tática para
@@ -163,91 +165,28 @@ func (c *Client) Collect(ctx context.Context, gamerTag string, marketFilter Play
 		return nil
 	})
 
+	if _, configured := c.cfg.Endpoints["gallery_catalog"]; configured {
+		run("gallery", func() error {
+			sets, err := c.GalleryCatalog(ctx)
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			snap.GallerySets = sets
+			mu.Unlock()
+			return nil
+		})
+	}
+
 	run("robots", func() error {
 		c.checkRobots(ctx)
 		return nil
 	})
 
 	wg.Wait()
-	if len(snap.Club.Players) > 0 && len(snap.Club.Squad.Starters) > 0 {
-		if err := c.enrichPositionRatings(ctx, &snap.Club); err != nil {
-			snap.Errors = append(snap.Errors, "notas por posição: "+err.Error())
-		}
-	}
 	snap.Stats = c.Stats()
 	snap.Capabilities = c.buildCapabilities(gamerTag, capErrs, snap)
 	return snap, nil
-}
-
-type metarankRow struct {
-	EaID     int64   `json:"eaId"`
-	Position int     `json:"position"`
-	Score    float64 `json:"score"`
-}
-type metarankResponse struct {
-	Data []metarankRow `json:"data"`
-}
-
-func (c *Client) enrichPositionRatings(ctx context.Context, club *domain.Club) error {
-	positions := map[domain.Position]bool{}
-	for _, s := range club.Squad.Starters {
-		positions[s.Position] = true
-	}
-	for pos := range positions {
-		var ids []string
-		for _, p := range club.Players {
-			if p.PlaysAt(pos) {
-				ids = append(ids, strconv.FormatInt(p.ID, 10))
-			}
-		}
-		for start := 0; start < len(ids); start += 50 {
-			end := start + 50
-			if end > len(ids) {
-				end = len(ids)
-			}
-			raw, err := c.URL("metarank", nil)
-			if err != nil {
-				return err
-			}
-			u, _ := url.Parse(raw)
-			q := u.Query()
-			q.Set("ids", strings.Join(ids[start:end], ","))
-			q.Set("positions", strconv.Itoa(positionID(pos)))
-			u.RawQuery = q.Encode()
-			var resp metarankResponse
-			if err := c.GetJSON(ctx, u.String(), &resp); err != nil {
-				return err
-			}
-			for _, r := range resp.Data {
-				if got, ok := domain.PositionFromID(r.Position); !ok || got != pos {
-					continue
-				}
-				// TODAS as linhas com aquele id, sem break: ter duas cópias da
-				// mesma carta no clube é normal no FUT, e parar na primeira
-				// deixava a segunda só com a nota escalar — ela chegava mais
-				// fraca do que é na hora de escalar (analyze.gauntletValue).
-				for i := range club.Players {
-					if club.Players[i].ID != r.EaID {
-						continue
-					}
-					if club.Players[i].GGRatings == nil {
-						club.Players[i].GGRatings = map[domain.Position]float64{}
-					}
-					club.Players[i].GGRatings[pos] = r.Score
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func positionID(p domain.Position) int {
-	for id := 0; id < 30; id++ {
-		if q, ok := domain.PositionFromID(id); ok && q == p {
-			return id
-		}
-	}
-	return -1
 }
 
 // PlayerFilter delimita quais cartas do mercado interessam. Puxar o

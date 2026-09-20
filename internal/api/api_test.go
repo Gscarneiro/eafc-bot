@@ -60,6 +60,29 @@ func fixtureSnapshot() store.Snapshot {
 	}
 }
 
+// Um snapshot pode ter sido salvo com outro modelo de química. Reaproveitar
+// esse resultado depois de trocar o modelo na configuração faz o resumo
+// continuar mostrando 33/33, embora a regra ativa já calcule outro total.
+func TestCurrentChemistryRecalculaQuandoModeloPersistidoDivergeDoConfigurado(t *testing.T) {
+	snap := fixtureSnapshot()
+	observado, err := chemistry.Escolher("fc26_observado")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Quimica = chemistry.Avaliar(observado, snap.Club)
+
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	srv.ChemistryModel = chemistry.ModeloPadrao()
+
+	got := srv.currentChemistry(snap)
+	if got.Modelo != srv.ChemistryModel.Nome {
+		t.Fatalf("modelo = %q; esperava %q", got.Modelo, srv.ChemistryModel.Nome)
+	}
+	if got.Total == snap.Quimica.Total {
+		t.Fatalf("total = %d; esperava recálculo diferente do snapshot antigo (%d)", got.Total, snap.Quimica.Total)
+	}
+}
+
 func fixtureSnapshotComEvolucaoFutGG() store.Snapshot {
 	snap := fixtureSnapshot()
 	evolucao := domain.Evolution{ID: "evo-reserva", Name: "Evolução Reserva"}
@@ -568,7 +591,7 @@ func TestHandleTimeExplicaPromocaoComAVagaEOTitular(t *testing.T) {
 	}, ClubItemID: "titular-cam"}
 	reserva := domain.ClubPlayer{Player: domain.Player{
 		ID: 2, Name: "Florian Wirtz", Position: domain.CAM,
-		GGRating: 99.0, GGRatingPos: domain.ST,
+		GGRating: 99.4, GGRatingPos: domain.CAM,
 		AltPositions: []domain.Position{domain.ST},
 		GGRatings:    map[domain.Position]float64{domain.CAM: 99.4, domain.ST: 99.0},
 	}, ClubItemID: "reserva-cam"}

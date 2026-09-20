@@ -183,11 +183,11 @@ func TestGauntletLockComClubItemIDPrendeACopiaExata(t *testing.T) {
 	// resolve por ClubItemID, não por PlayerKey).
 	copiaA := domain.ClubPlayer{Player: domain.Player{
 		ID: 9600, Position: domain.ST, League: "Liga Teste",
-		GGRatings: map[domain.Position]float64{domain.ST: 90},
+		GGRating: 90, GGRatingPos: domain.ST,
 	}, ClubItemID: "item-a"}
 	copiaB := domain.ClubPlayer{Player: domain.Player{
 		ID: 9600, Position: domain.ST, League: "Liga Teste",
-		GGRatings: map[domain.Position]float64{domain.ST: 90},
+		GGRating: 90, GGRatingPos: domain.ST,
 	}, ClubItemID: "item-b"}
 	club.Players = append(club.Players, copiaA, copiaB)
 
@@ -329,10 +329,9 @@ func TestGauntletFormacaoManualComContagemErradaExplicaOMotivo(t *testing.T) {
 // chemistrySwapRound é a peça central da química ponderada: com peso 0 não
 // troca nada (compatibilidade histórica); com peso suficiente, troca quando
 // o ganho de vínculo compensa a perda de rating. Usa o modelo fc26_vinculos
-// (Base 0) de propósito: ModeloPadrao() satura o teto só com Base
-// (Base==MaxPorJogador), então o vínculo nunca mudaria o placar e a
-// diferença de peso ficaria invisível neste teste — ver o comentário de
-// modeloFC26Vinculos.
+// (Base 0) de propósito para manter o cenário explícito e isolado do modelo
+// histórico `fc26_observado`, que satura o teto só com Base e esconderia a
+// diferença de peso.
 func TestChemistrySwapRoundTrocaSoQuandoPesoCompensaAPerdaDeRating(t *testing.T) {
 	m, err := chemistry.Escolher("fc26_vinculos")
 	if err != nil {
@@ -342,16 +341,16 @@ func TestChemistrySwapRoundTrocaSoQuandoPesoCompensaAPerdaDeRating(t *testing.T)
 	membro := func(id int64) domain.ClubPlayer {
 		return domain.ClubPlayer{Player: domain.Player{
 			ID: id, Position: pos, Club: "ClubeX",
-			GGRatings: map[domain.Position]float64{pos: 80},
+			GGRating: 80, GGRatingPos: pos,
 		}}
 	}
 	fora := domain.ClubPlayer{Player: domain.Player{
 		ID: 4, Position: pos, Club: "Outro",
-		GGRatings: map[domain.Position]float64{pos: 80},
+		GGRating: 80, GGRatingPos: pos,
 	}}
 	candidato := domain.ClubPlayer{Player: domain.Player{
 		ID: 5, Position: pos, Club: "ClubeX",
-		GGRatings: map[domain.Position]float64{pos: 78}, // 2 pontos mais fraco
+		GGRating: 78, GGRatingPos: pos, // 2 pontos mais fraco
 	}}
 
 	newRound := func() (*GauntletSquad, []gauntletCard) {

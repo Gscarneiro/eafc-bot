@@ -11,7 +11,7 @@ import "./shared.css"; // .btn (o botão "coletar" da topbar) mora em shared.css
 
 type IconName =
   | "today" | "agenda" | "squad" | "insights" | "plan" | "gauntlet"
-  | "market" | "mesa" | "capital" | "evolution" | "catalogo" | "salvos"
+  | "market" | "mesa" | "capital" | "evolution" | "catalogo" | "salvos" | "gallery"
   | "settings" | "feedback";
 
 const ICON_PATHS: Record<IconName, string> = {
@@ -26,6 +26,7 @@ const ICON_PATHS: Record<IconName, string> = {
   capital: "M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6",
   evolution: "M12 3v4m0 10v4M5.6 5.6l2.8 2.8m7.2 7.2 2.8 2.8M3 12h4m10 0h4M5.6 18.4l2.8-2.8m7.2-7.2 2.8-2.8M12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z",
   catalogo: "M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z",
+  gallery: "M4 5h16v14H4V5Zm4 4h8m-8 4h5m-5 3h10",
   salvos: "M6 3h12v18l-6-4.5L6 21V3Z",
   settings: "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0-5v2m0 13v2m8.5-8.5h-2m-13 0h-2m13.9-6.4-1.4 1.4M7 17l-1.4 1.4m12.8 0L17 17M7 7 5.6 5.6",
 	feedback: "M5 4h14v11H9l-4 4V4Zm3 4h8m-8 3h5",
@@ -70,8 +71,9 @@ const GRUPOS: NavGroup[] = [
       { to: "/time", label: "Meu time", end: true, icon: "squad" },
       { to: "/time/insights", label: "Insights", icon: "insights" },
       { to: "/time/planos", label: "Planejador", icon: "plan" },
-		{ to: "/time/editor", label: "Editor", icon: "plan" },
+      { to: "/time/editor", label: "Editor", icon: "plan" },
       { to: "/time/gauntlet", label: "Gauntlet", icon: "gauntlet" },
+      { to: "/galeria", label: "FUT Gallery", icon: "gallery", badge: (r) => (r && r.gallery_opportunities > 0 ? { text: String(r.gallery_opportunities), tone: "alert" } : null) },
     ],
   },
   {
@@ -106,7 +108,7 @@ const MOBILE_PRIMARY: NavItem[] = [
 
 function groupForPath(pathname: string): NavGroup | null {
 	if (pathname === "/" || pathname.startsWith("/agenda") || pathname.startsWith("/feedback")) return GRUPOS[0]!;
-  if (pathname.startsWith("/time")) return GRUPOS[1]!;
+  if (pathname.startsWith("/time") || pathname.startsWith("/galeria")) return GRUPOS[1]!;
   if (pathname.startsWith("/mercado") || pathname.startsWith("/capital")) return GRUPOS[2]!;
   if (pathname.startsWith("/evolucoes")) return GRUPOS[3]!;
   return null;

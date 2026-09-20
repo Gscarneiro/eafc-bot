@@ -29,9 +29,9 @@ func clubeObservado(t *testing.T) domain.Club {
 	return club
 }
 
-func TestModeloPadraoReproduzOXIObservadoEm24Ago2026(t *testing.T) {
+func TestModeloHistoricoReproduzOXIObservadoEm24Ago2026(t *testing.T) {
 	club := clubeObservado(t)
-	v := Verificar(ModeloPadrao(), club)
+	v := Verificar(modeloFC26Observado, club)
 
 	if v.Status != StatusConfere {
 		t.Fatalf("status = %q (%s), esperava confere", v.Status, v.Detalhe)
@@ -69,7 +69,7 @@ func TestJogadorMostraVinculoSeparadoDoEfetivo(t *testing.T) {
 	if !ok {
 		t.Fatal("DoClube não montou o XI")
 	}
-	res := Calcular(ModeloPadrao(), xi)
+	res := Calcular(modeloFC26Observado, xi)
 
 	var butland *Jogador
 	for i := range res.Jogadores {
@@ -98,7 +98,7 @@ func TestJogadorMostraVinculoSeparadoDoEfetivo(t *testing.T) {
 // tem que recusar isso.
 func TestCalibrarNaoConfirmaModeloComUmValorDistintoSo(t *testing.T) {
 	club := clubeObservado(t)
-	r := Calibrar(ModeloPadrao(), []domain.Club{club, club, club})
+	r := Calibrar(modeloFC26Observado, []domain.Club{club, club, club})
 
 	if r.Divergem != 0 || r.Conferem != 3 {
 		t.Fatalf("placar = %+v, esperava 3 conferem e 0 divergem", r)
@@ -117,7 +117,7 @@ func TestVerificarSemOraculoNaoEDivergencia(t *testing.T) {
 	club := clubeObservado(t)
 	club.Squad.ChemistrySynced = false
 
-	v := Verificar(ModeloPadrao(), club)
+	v := Verificar(modeloFC26Observado, club)
 	if v.Status != StatusSemOraculo {
 		t.Fatalf("status = %q, esperava sem_oraculo", v.Status)
 	}
@@ -125,7 +125,7 @@ func TestVerificarSemOraculoNaoEDivergencia(t *testing.T) {
 		t.Fatal("sem oráculo não pode ser considerado confiável")
 	}
 
-	r := Calibrar(ModeloPadrao(), []domain.Club{club})
+	r := Calibrar(modeloFC26Observado, []domain.Club{club})
 	if r.SemOraculo != 1 || r.Divergem != 0 || r.Conferem != 0 {
 		t.Fatalf("placar = %+v, esperava contar só em SemOraculo", r)
 	}
@@ -156,7 +156,7 @@ func TestVerificarComparaPorJogadorNaoSoPeloTotal(t *testing.T) {
 	club.Players[0].Chemistry = 2
 	club.Players[1].Chemistry = 4
 
-	v := Verificar(ModeloPadrao(), club)
+	v := Verificar(modeloFC26Observado, club)
 	if v.Calculado != v.Observado {
 		t.Fatalf("pré-condição falhou: o total deveria continuar igual (%d vs %d)", v.Calculado, v.Observado)
 	}

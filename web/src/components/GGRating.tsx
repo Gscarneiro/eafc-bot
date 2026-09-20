@@ -8,6 +8,9 @@ interface GGRatingProps {
   currentPosition?: Position;
   positional?: number | null;
   positionalPosition?: Position;
+  // A nota posicional pode vir da régua ativa do time, não necessariamente
+  // do FUT.GG. A nota "atual" continua sendo sempre o GG bruto da carta.
+  positionalLabel?: string;
   variant?: GGRatingVariant;
 }
 
@@ -28,7 +31,7 @@ export function shouldShowPositionalGGRating(current?: number | null, positional
   return positional > current && formatGGRating(current) !== formatGGRating(positional);
 }
 
-export default function GGRating({ current, currentPosition, positional, positionalPosition, variant = "inline" }: GGRatingProps) {
+export default function GGRating({ current, currentPosition, positional, positionalPosition, positionalLabel, variant = "inline" }: GGRatingProps) {
   // No campo, a cor "elo mais fraco" é decidida pelo GG da vaga física.
   // Mostrar ao lado o GG geral da melhor posição fazia o número contradizer a
   // própria cor do card. Fora do campo, mantemos os dois contextos visíveis.
@@ -37,11 +40,12 @@ export default function GGRating({ current, currentPosition, positional, positio
   const currentText = formatGGRating(visibleRating);
   const showPositional = variant !== "pitch" && shouldShowPositionalGGRating(current, positional);
   const positionalText = formatGGRating(positional);
-  const currentLabel = `${variant === "pitch" && isKnownGGRating(positional) ? "GG na vaga" : "GG atual"} ${currentText}${visiblePosition ? ` · ${visiblePosition}` : ""}`;
-  const positionalLabel = `GG posicional ${positionalText}${positionalPosition ? ` · ${positionalPosition}` : ""}`;
+  const activeLabel = positionalLabel ? `${positionalLabel} na vaga` : "GG na vaga";
+  const currentLabel = `${variant === "pitch" && isKnownGGRating(positional) ? activeLabel : "GG atual"} ${currentText}${visiblePosition ? ` · ${visiblePosition}` : ""}`;
+  const positionalRatingLabel = `${positionalLabel ? activeLabel : "GG posicional"} ${positionalText}${positionalPosition ? ` · ${positionalPosition}` : ""}`;
 
   return (
-    <span className={`gg-rating gg-rating-${variant}`} aria-label={`${currentLabel}${showPositional ? `, ${positionalLabel}` : ""}`}>
+    <span className={`gg-rating gg-rating-${variant}`} aria-label={`${currentLabel}${showPositional ? `, ${positionalRatingLabel}` : ""}`}>
       <span className="gg-rating-current">
         <span className="gg-rating-label">atual</span>
         <strong>{currentText}</strong>

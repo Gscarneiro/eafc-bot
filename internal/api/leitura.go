@@ -39,6 +39,7 @@ type PromocaoDoBanco struct {
 	NotaTitular   float64         `json:"starter_rating"`
 	NotaCandidato float64         `json:"candidate_rating"`
 	Ganho         float64         `json:"gain"`
+	Metrica       string          `json:"metric,omitempty"` // "gg_rating_card"; vazio para outro avaliador
 }
 
 func leituraDoBot(sell analyze.SellCandidate, trend store.PriceTrend, hasTrend bool, matches []analyze.FodderMatch, swap *analyze.SquadSwap) LeituraDoBot {
@@ -51,6 +52,11 @@ func leituraDoBot(sell analyze.SellCandidate, trend store.PriceTrend, hasTrend b
 		}
 		return LeituraDoBot{Kind: "vender"}
 	case "promover":
+		// Uma recomendação legada não volta a promover metarank pela leitura
+		// de um snapshot anterior à retirada dessa referência.
+		if swap != nil && (metricaAvaliacao(swap.CurrentEvaluation) == "metarank" || metricaAvaliacao(swap.CandidateEvaluation) == "metarank") {
+			return LeituraDoBot{}
+		}
 		leitura := LeituraDoBot{Kind: "promover"}
 		if swap != nil {
 			leitura.Promocao = &PromocaoDoBanco{
@@ -60,6 +66,7 @@ func leituraDoBot(sell analyze.SellCandidate, trend store.PriceTrend, hasTrend b
 				NotaTitular:   swap.CurrentRating,
 				NotaCandidato: swap.CandidateRating,
 				Ganho:         swap.GGRatingGap,
+				Metrica:       metricaPromocao(swap),
 			}
 		}
 		return leitura
@@ -75,4 +82,24 @@ func leituraDoBot(sell analyze.SellCandidate, trend store.PriceTrend, hasTrend b
 		return LeituraDoBot{Kind: "fodder", SBCName: matches[0].SBCName}
 	}
 	return LeituraDoBot{}
+}
+
+func metricaPromocao(swap *analyze.SquadSwap) string {
+	atual := metricaAvaliacao(swap.CurrentEvaluation)
+	if atual == "" || atual != metricaAvaliacao(swap.CandidateEvaluation) {
+		return ""
+	}
+	return atual
+}
+
+func metricaAvaliacao(avaliacao domain.AvaliacaoCarta) string {
+	for _, componente := range avaliacao.Componentes {
+		switch componente.Chave {
+		case "gg_rating_carta":
+			return "gg_rating_card"
+		case "metarank_score":
+			return "metarank"
+		}
+	}
+	return ""
 }

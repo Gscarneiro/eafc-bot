@@ -35,6 +35,10 @@ import type {
   UISettings,
   ODataPage,
   WatchlistCollection,
+  GalleryPage,
+  GalleryRecord,
+  GalleryCollection,
+  GalleryCompletion,
 } from "./types";
 import { toSearchParams, type ODataQuery } from "./odata";
 
@@ -64,6 +68,12 @@ export const fetchCollection = <T,>(path: string, query: ODataQuery = {}) => {
 
 export const fetchStatus = () => getJSON<StatusResponse>("/api/status");
 export const fetchResumo = () => getJSON<ResumoResponse>("/api/resumo");
+export const fetchGaleria = (query = "") => getJSON<GalleryPage>(`/api/galeria${query ? `?${query}` : ""}`);
+export const fetchGaleriaDetalhe = (id: string) => getJSON<GalleryRecord>(`/api/galeria/${encodeURIComponent(id)}`);
+export const fetchGaleriaColecao = () => getJSON<GalleryCollection>("/api/galeria/colecao");
+export async function saveGaleriaCardOverride(cardId: number, input: { first_owner?: boolean; loan?: boolean; eligible?: boolean; item_score?: number }) { const res=await fetch(`/api/galeria/colecao/card/${encodeURIComponent(cardId)}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({card_id:cardId,...input})}); if(!res.ok) throw new ApiError(res.status,"Não foi possível corrigir a carta."); return res.json(); }
+export async function saveGaleriaConclusao(id: string, input: Omit<GalleryCompletion, "set_id">): Promise<GalleryCompletion> { const res=await fetch(`/api/galeria/${encodeURIComponent(id)}/conclusao`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)}); if(!res.ok) throw new ApiError(res.status,"Não foi possível salvar a conclusão."); return res.json(); }
+export async function deleteGaleriaConclusao(id: string): Promise<void> { const res=await fetch(`/api/galeria/${encodeURIComponent(id)}/conclusao`,{method:"DELETE"}); if(!res.ok) throw new ApiError(res.status,"Não foi possível remover a conclusão."); }
 export const fetchMarketPlan = () => getJSON<MarketPlanResponse>("/api/planos/mercado");
 export const fetchAgenda = () => getJSON<AgendaResponse>("/api/agenda");
 export const fetchWatchlist = () => getJSON<WatchlistCollection>("/api/watchlist");

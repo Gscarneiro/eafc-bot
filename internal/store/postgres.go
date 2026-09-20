@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gscarneiro/eafc-bot/internal/domain"
+	"github.com/gscarneiro/eafc-bot/internal/galeria"
 )
 
 // PostgresStore usa só database/sql: o driver entra por blank import no
@@ -975,7 +976,147 @@ func (s *PostgresStore) SaveMetaProposal(ctx context.Context, proposal domain.Pr
 	return nil
 }
 
+func (s *PostgresStore) ListGallery(ctx context.Context, cycle, club, platform string) ([]galeria.Record, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM gallery_records WHERE cycle=$1 AND club=$2 AND platform=$3 ORDER BY set_id`, cycle, club, platform)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []galeria.Record{}
+	for rows.Next() {
+		var b []byte
+		if err := rows.Scan(&b); err != nil {
+			return nil, err
+		}
+		var row galeria.Record
+		if err := json.Unmarshal(b, &row); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+func (s *PostgresStore) SaveGallery(ctx context.Context, cycle, club, platform string, records []galeria.Record) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, row := range records {
+		b, e := json.Marshal(row)
+		if e != nil {
+			return e
+		}
+		if _, e = tx.ExecContext(ctx, `INSERT INTO gallery_records(cycle,club,platform,set_id,payload,updated_at) VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT(cycle,club,platform,set_id) DO UPDATE SET payload=EXCLUDED.payload,updated_at=EXCLUDED.updated_at`, cycle, club, platform, row.Set.ID, b); e != nil {
+			return e
+		}
+	}
+	return tx.Commit()
+}
+func (s *PostgresStore) ListGalleryCards(ctx context.Context, cycle, club, platform string) ([]galeria.Card, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM gallery_cards WHERE cycle=$1 AND club=$2 AND platform=$3`, cycle, club, platform)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []galeria.Card{}
+	for rows.Next() {
+		var b []byte
+		if err := rows.Scan(&b); err != nil {
+			return nil, err
+		}
+		var c galeria.Card
+		if err := json.Unmarshal(b, &c); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+func (s *PostgresStore) SaveGalleryCards(ctx context.Context, cycle, club, platform string, cards []galeria.Card) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, c := range cards {
+		b, e := json.Marshal(c)
+		if e != nil {
+			return e
+		}
+		if _, e = tx.ExecContext(ctx, `INSERT INTO gallery_cards(cycle,club,platform,card_id,payload,updated_at) VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT(cycle,club,platform,card_id) DO UPDATE SET payload=EXCLUDED.payload,updated_at=EXCLUDED.updated_at`, cycle, club, platform, c.ID, b); e != nil {
+			return e
+		}
+	}
+	return tx.Commit()
+}
+func (s *PostgresStore) ListGalleryOverrides(ctx context.Context, cycle, club, platform string) ([]galeria.CollectionOverride, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM gallery_overrides WHERE cycle=$1 AND club=$2 AND platform=$3`, cycle, club, platform)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []galeria.CollectionOverride{}
+	for rows.Next() {
+		var b []byte
+		if err := rows.Scan(&b); err != nil {
+			return nil, err
+		}
+		var x galeria.CollectionOverride
+		if err := json.Unmarshal(b, &x); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+func (s *PostgresStore) SaveGalleryOverride(ctx context.Context, cycle, club, platform string, x galeria.CollectionOverride) error {
+	b, err := json.Marshal(x)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO gallery_overrides(cycle,club,platform,card_id,payload,updated_at) VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT(cycle,club,platform,card_id) DO UPDATE SET payload=EXCLUDED.payload,updated_at=EXCLUDED.updated_at`, cycle, club, platform, x.CardID, b)
+	return err
+}
+func (s *PostgresStore) DeleteGalleryOverride(ctx context.Context, cycle, club, platform string, cardID int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM gallery_overrides WHERE cycle=$1 AND club=$2 AND platform=$3 AND card_id=$4`, cycle, club, platform, cardID)
+	return err
+}
+func (s *PostgresStore) SaveGalleryCompletion(ctx context.Context, cycle, club, platform string, c galeria.Completion) error {
+	b, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO gallery_completions(cycle,club,platform,set_id,payload,completed_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(cycle,club,platform,set_id) DO UPDATE SET payload=EXCLUDED.payload,completed_at=EXCLUDED.completed_at`, cycle, club, platform, c.SetID, b, c.CompletedAt)
+	return err
+}
+func (s *PostgresStore) ListGalleryCompletions(ctx context.Context, cycle, club, platform string) ([]galeria.Completion, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM gallery_completions WHERE cycle=$1 AND club=$2 AND platform=$3 ORDER BY set_id`, cycle, club, platform)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []galeria.Completion{}
+	for rows.Next() {
+		var b []byte
+		if err := rows.Scan(&b); err != nil {
+			return nil, err
+		}
+		var c galeria.Completion
+		if err := json.Unmarshal(b, &c); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+func (s *PostgresStore) DeleteGalleryCompletion(ctx context.Context, cycle, club, platform, setID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM gallery_completions WHERE cycle=$1 AND club=$2 AND platform=$3 AND set_id=$4`, cycle, club, platform, setID)
+	return err
+}
+
 var _ Store = (*PostgresStore)(nil)
+var _ GaleriaStore = (*PostgresStore)(nil)
 var _ SavedSquadPlanStore = (*PostgresStore)(nil)
 var _ GameplayFeedbackStore = (*PostgresStore)(nil)
 var _ MetaProposalStore = (*PostgresStore)(nil)

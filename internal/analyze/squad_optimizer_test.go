@@ -32,8 +32,8 @@ func TestCurrentQuimicaSobreviveQuandoSugestaoFalhaPorFaltaDeGGRating(t *testing
 	if plan.CurrentQuimica == nil {
 		t.Fatal("CurrentQuimica veio nil — a química do XI atual não deveria depender da sugestão ter dado certo")
 	}
-	if plan.CurrentQuimica.Total != 6 {
-		t.Fatalf("CurrentQuimica.Total = %d, esperava 6 (2 titulares x 3, modelo padrão preenche por posição)", plan.CurrentQuimica.Total)
+	if plan.CurrentQuimica.Total != 2 {
+		t.Fatalf("CurrentQuimica.Total = %d, esperava 2 (dois titulares compartilham só a nação)", plan.CurrentQuimica.Total)
 	}
 	if plan.Quimica != nil {
 		t.Fatalf("Quimica (da sugestão) deveria ficar nil sem Starters, veio %+v", plan.Quimica)
@@ -65,8 +65,8 @@ func TestOptimizeSquadPreencheQuimicaDaSugestaoQuandoTudoDisponivel(t *testing.T
 	if len(plan.Starters) != 1 || plan.Starters[0].Player.ID != 2 {
 		t.Fatalf("esperava a sugestão trocar para o jogador 2 (melhor GG Rating), starters=%+v", plan.Starters)
 	}
-	if plan.Quimica.Total != 3 {
-		t.Fatalf("Quimica (sugestão) = %d, esperava 3 (1 titular em posição, modelo padrão)", plan.Quimica.Total)
+	if plan.Quimica.Total != 0 {
+		t.Fatalf("Quimica (sugestão) = %d, esperava 0 (um titular sozinho não forma vínculo)", plan.Quimica.Total)
 	}
 }
 

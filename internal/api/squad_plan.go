@@ -39,11 +39,12 @@ type SquadPlanRequestBody struct {
 // SquadPlanStarterView é um titular de cenário pronto pra tela, com o slug
 // da carta já resolvido (mesma convenção de RosterCard/StarterCard).
 type SquadPlanStarterView struct {
-	Index    int               `json:"index"`
-	Position domain.Position   `json:"position"`
-	Player   domain.ClubPlayer `json:"player"`
-	Rating   float64           `json:"rating"`
-	CardSlug string            `json:"card_slug,omitempty"`
+	Index             int               `json:"index"`
+	Position          domain.Position   `json:"position"`
+	Player            domain.ClubPlayer `json:"player"`
+	Rating            *float64          `json:"rating"`
+	RatingUnavailable bool              `json:"rating_unavailable,omitempty"`
+	CardSlug          string            `json:"card_slug,omitempty"`
 }
 
 type SquadPlanMoveView struct {
@@ -64,6 +65,7 @@ type SquadPlanScenarioView struct {
 	Starters        []SquadPlanStarterView `json:"starters"`
 	TotalRating     float64                `json:"total_rating"`
 	AverageRating   float64                `json:"average_rating"`
+	RatedStarters   int                    `json:"rated_starters"`
 	Quimica         *chemistry.Resultado   `json:"chemistry,omitempty"`
 	Moves           []SquadPlanMoveView    `json:"moves"`
 }
@@ -147,7 +149,7 @@ func squadPlanScenarioViews(scenarios []analyze.SquadPlanScenario, lookup cardSl
 	for _, sc := range scenarios {
 		view := SquadPlanScenarioView{
 			Label: sc.Label, ChemistryWeight: sc.ChemistryWeight,
-			TotalRating: sc.TotalRating, AverageRating: sc.AverageRating, Quimica: sc.Quimica,
+			TotalRating: sc.TotalRating, AverageRating: sc.AverageRating, RatedStarters: sc.RatedStarters, Quimica: sc.Quimica,
 		}
 		for _, a := range sc.Starters {
 			view.Starters = append(view.Starters, squadPlanStarterView(a, lookup))
@@ -171,8 +173,10 @@ func squadPlanScenarioViews(scenarios []analyze.SquadPlanScenario, lookup cardSl
 }
 
 func squadPlanStarterView(a analyze.SquadAssignment, lookup cardSlugLookup) SquadPlanStarterView {
-	return SquadPlanStarterView{
-		Index: a.Index, Position: a.Position, Player: a.Player, Rating: a.Rating,
-		CardSlug: lookup.slug(a.Player),
+	view := SquadPlanStarterView{Index: a.Index, Position: a.Position, Player: a.Player,
+		RatingUnavailable: a.RatingUnavailable, CardSlug: lookup.slug(a.Player)}
+	if !a.RatingUnavailable {
+		view.Rating = &a.Rating
 	}
+	return view
 }

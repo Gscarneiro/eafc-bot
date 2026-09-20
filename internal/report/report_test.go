@@ -80,10 +80,8 @@ func TestSquadSummaryEloMaisFracoLevaGGRatingComoReferencia(t *testing.T) {
 }
 
 // PositionMap tem que comparar a mesma grandeza na barra e na régua: uma
-// carta escalada fora da posição em que o fut.gg calculou o GGRating dela
-// (GGRatingPos) tem uma nota MENOR na posição do slot (via GGRatingAt) — se
-// a régua usasse SquadSummary (que tira média do GGRating cru), a média
-// ficaria puxada pra cima por um número que a própria barra não mostra.
+// Só cartas com GG Rating publicado na vaga entram na régua e nas barras.
+// O metarank de um snapshot antigo não confirma nota para uma posição sem GG.
 func TestMapaDePosicoesUsaAMesmaMediaDasBarras(t *testing.T) {
 	foraDePosicao := domain.ClubPlayer{Player: domain.Player{
 		ID: 1, Position: domain.ST, Rating: 85, CommonName: "Fora de posição",
@@ -103,13 +101,13 @@ func TestMapaDePosicoesUsaAMesmaMediaDasBarras(t *testing.T) {
 	}
 
 	rows, avg := PositionMap(club)
-	if len(rows) != 2 {
-		t.Fatalf("PositionMap devolveu %d linhas, esperava 2: %+v", len(rows), rows)
+	if len(rows) != 1 {
+		t.Fatalf("PositionMap devolveu %d linhas, esperava só a vaga com GG Rating confirmado", len(rows))
 	}
-	if rows[0].Rating != 80.0 {
-		t.Errorf("linha do slot 0 (CAM) = %.1f, esperava 80.0 (GGRatingAt(CAM), não o GGRating cru de 90.0)", rows[0].Rating)
+	if rows[0].Index != 1 || rows[0].Rating != 88.0 {
+		t.Errorf("barra = %+v, esperava CDM com GG Rating 88,0", rows[0])
 	}
-	wantAvg := (80.0 + 88.0) / 2
+	wantAvg := 88.0
 	if avg < wantAvg-0.01 || avg > wantAvg+0.01 {
 		t.Errorf("média = %.2f, esperava %.2f — a régua tem que somar a MESMA grandeza que as barras (GGRatingAt por slot), não o GGRating cru que SquadSummary usa", avg, wantAvg)
 	}

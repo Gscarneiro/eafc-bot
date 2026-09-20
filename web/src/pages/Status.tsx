@@ -229,6 +229,7 @@ function HojeDecisao({ data, resumo, agenda, progresso, extrato, scoreHistory, c
       </div>
       <div className="triple-grid">
         <AvisosCard avisos={resumo?.avisos} />
+        <GaleriaMini opportunities={resumo?.gallery_opportunities ?? 0} />
         <EvolucoesPipelineCard items={progresso} />
         <CaixaCard extrato={extrato} />
       </div>
@@ -254,6 +255,7 @@ function HojeTerminal({ data, resumo, agenda, progresso, extrato, watchlist, opo
         </div>
         <div className="terminal-col">
           <AvisosCard avisos={resumo?.avisos} />
+          <GaleriaMini opportunities={resumo?.gallery_opportunities ?? 0} />
           <TarefasCard agenda={agenda} />
           <EvolucoesPipelineCard items={progresso} />
           <CaixaCard extrato={extrato} />
@@ -261,6 +263,10 @@ function HojeTerminal({ data, resumo, agenda, progresso, extrato, watchlist, opo
       </div>
     </>
   );
+}
+
+function GaleriaMini({ opportunities }: { opportunities: number }) {
+  return <div className="panel"><div className="panel-head"><span>FUT Gallery <span className="panel-head-sub">/ oportunidades</span></span><span className="panel-head-meta">{opportunities}</span></div><div className="panel-body"><p className="hint">{opportunities > 0 ? `${opportunities} conjunto${opportunities === 1 ? "" : "s"} pode${opportunities === 1 ? "" : "m"} ser concluído${opportunities === 1 ? "" : "s"} ou melhorar de letra.` : "Nenhuma melhoria de letra pendente."}</p><Link className="btn ghost" to="/galeria">abrir Gallery</Link></div></div>;
 }
 
 function TopMoveHero({ move }: { move?: TopMove }) {
@@ -368,7 +374,7 @@ function AvisosCard({ avisos }: { avisos?: Aviso[] }) {
             <div key={i} className={`aviso-row severity-${a.severity}`}>
               <span className="aviso-bar" />
               <span>
-                <span className="aviso-headline">{a.headline}</span>
+                {a.link ? <Link className="aviso-headline" to={a.link}>{a.headline}</Link> : <span className="aviso-headline">{a.headline}</span>}
                 {a.detail && <span className="aviso-detail">{a.detail}</span>}
               </span>
             </div>

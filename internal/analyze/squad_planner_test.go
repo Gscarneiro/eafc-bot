@@ -61,6 +61,28 @@ func TestBuildSquadPlanStatusOkComElencoValido(t *testing.T) {
 	}
 }
 
+func TestBuildSquadPlanMantemTitularSemNotaDaFonteAtiva(t *testing.T) {
+	club := squadPlanFixtureClub(1)
+	for i := range club.Players {
+		if club.Players[i].Position == domain.RM {
+			club.Players[i].Name = "sem nota em RM"
+			club.Players[i].CommonName = "sem nota em RM"
+			club.Players[i].GGRating = 0
+			club.Players[i].GGRatingPos = ""
+		}
+	}
+
+	plan := BuildSquadPlan(club, DefaultSquadPlanRequest())
+	if plan.Status != "ok" || len(plan.Scenarios) == 0 {
+		t.Fatalf("status = %q, motivo = %q", plan.Status, plan.Reason)
+	}
+	for _, assignment := range plan.Scenarios[0].Starters {
+		if assignment.Position == domain.RM && assignment.Player.Name != "sem nota em RM" {
+			t.Fatalf("RM = %q, esperava preservar o titular sem nota", assignment.Player.Name)
+		}
+	}
+}
+
 // O cenário de peso 0 (maior nota) precisa bater EXATAMENTE com
 // OptimizeSquad — squadMatch é o mesmo motor, extraído sem mudar
 // comportamento nenhum.
@@ -143,11 +165,11 @@ func TestBuildSquadPlanLockComClubItemIDPrendeACopiaExata(t *testing.T) {
 	club := squadPlanFixtureClub(3)
 	copiaA := domain.ClubPlayer{Player: domain.Player{
 		ID: 9600, Position: domain.ST, League: "Liga Teste",
-		GGRatings: map[domain.Position]float64{domain.ST: 95},
+		GGRating: 95, GGRatingPos: domain.ST,
 	}, ClubItemID: "item-a"}
 	copiaB := domain.ClubPlayer{Player: domain.Player{
 		ID: 9600, Position: domain.ST, League: "Liga Teste",
-		GGRatings: map[domain.Position]float64{domain.ST: 95},
+		GGRating: 95, GGRatingPos: domain.ST,
 	}, ClubItemID: "item-b"}
 	club.Players = append(club.Players, copiaA, copiaB)
 
@@ -269,9 +291,8 @@ func TestBuildSquadPlanEscalacaoNaoSincronizadaExplicaOMotivo(t *testing.T) {
 }
 
 // A fronteira nota×química precisa produzir mais de um cenário genuinamente
-// distinto quando existe um trade-off real — mesma armadilha do Gauntlet:
-// ModeloPadrao() satura o teto só com Base e não deixaria nada aparecer (ver
-// o comentário de modeloFC26Vinculos).
+// distinto quando existe um trade-off real. O modelo por vínculos é passado
+// de forma explícita para manter a premissa independente do padrão futuro.
 func TestBuildSquadPlanFronteiraProduzCenariosDistintos(t *testing.T) {
 	club := squadPlanFixtureClub(3)
 	for i := range club.Players {
@@ -287,7 +308,7 @@ func TestBuildSquadPlanFronteiraProduzCenariosDistintos(t *testing.T) {
 	vinculado := func(id int64, pos domain.Position, rating float64) domain.ClubPlayer {
 		return domain.ClubPlayer{Player: domain.Player{
 			ID: id, Position: pos, Club: "Vinculados",
-			GGRatings: map[domain.Position]float64{pos: rating},
+			GGRating: rating, GGRatingPos: pos,
 		}}
 	}
 	club.Players = append(club.Players,
@@ -340,7 +361,7 @@ func TestBuildSquadPlanRespeitaMaxScenarios(t *testing.T) {
 	vinculado := func(id int64, pos domain.Position, rating float64) domain.ClubPlayer {
 		return domain.ClubPlayer{Player: domain.Player{
 			ID: id, Position: pos, Club: "Vinculados",
-			GGRatings: map[domain.Position]float64{pos: rating},
+			GGRating: rating, GGRatingPos: pos,
 		}}
 	}
 	club.Players = append(club.Players,

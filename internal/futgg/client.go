@@ -168,14 +168,15 @@ func DefaultConfig() Config {
 			// O catálogo de funções táticas (Wide Playmaker, Box-To-Box...).
 			// A carta só declara IDs (rolesPlus/rolesPlusPlus); é esta tabela
 			// que traduz o ID em nome e diz a posição. Ver roles.go.
-			"roles":    "/api/fut/roles/",
-			"metarank": "/api/fut/metarank/players/",
+			"roles": "/api/fut/roles/",
 			// Os caminhos de evolução de um JOGADOR (não de uma carta:
 			// {id} é o basePlayerEaId, compartilhado por todas as versões
 			// dele). Cada caminho é a carta passo a passo, do estado atual
 			// ao final — inclusive o GG Rating final, que a carta sozinha
 			// não tem enquanto não evoluiu de verdade. Ver evopaths.go.
 			"evolution_paths": "/api/fut/evolutions/v2/{cycle}/paths/v2/{id}/",
+			"gallery_catalog": "/api/fut/gallery/fc{cycle}/",
+			"gallery_pool":    "/api/fut/gallery/fc{cycle}/sets/{setId}/pool/",
 		},
 		UserAgent:      defaultUA,
 		RequestsPerSec: 3,
@@ -318,6 +319,12 @@ var legacyEndpoints = map[string]map[string]string{
 	},
 	"evolution_paths": {
 		"/api/fut/evolutions/v2/26/paths/v2/{id}/": "/api/fut/evolutions/v2/{cycle}/paths/v2/{id}/",
+	},
+	"gallery_catalog": {
+		"/api/fut/gallery/{cycle}/": "/api/fut/gallery/fc{cycle}/",
+	},
+	"gallery_pool": {
+		"/api/fut/gallery/{cycle}/sets/{setId}/pool/": "/api/fut/gallery/fc{cycle}/sets/{setId}/pool/",
 	},
 }
 

@@ -10,7 +10,7 @@ import TrendChart from "../components/TrendChart";
 import type { Filter } from "../odata";
 import { useData } from "../useData";
 import { useCollection } from "../useCollection";
-import { formatCoins, formatDate, formatSigned } from "../format";
+import { evaluationSourceLabel, formatCoins, formatDate, formatSigned } from "../format";
 import type {
   ChemistryPlayer,
   ChemistryResult,
@@ -75,6 +75,7 @@ export default function Time() {
   const priceStatus = reservas?.["@eafc.price_history_status"] ?? {};
   const positionMap = data.position_map ?? [];
   const slotOutlook = data.slot_outlook ?? [];
+  const sourceLabel = evaluationSourceLabel(data.avaliacao?.fonte);
   const weakestIndex = positionMap.length > 0 ? positionMap.reduce((min, row) => (row.rating < min.rating ? row : min), positionMap[0]!).index : undefined;
   const pitchOK = canDrawPitch(data.formation || "", starters.length);
   const showPitch = pitchOK && view === "campo";
@@ -119,22 +120,22 @@ export default function Time() {
             <span>Titulares <span className="panel-head-sub">/ Starting XI</span></span>
           </div>
           {showPitch ? (
-            <Pitch formation={data.formation} starters={displayedStarters} outlook={slotOutlook} weakestIndex={weakestIndex} />
+            <Pitch formation={data.formation} starters={displayedStarters} sourceLabel={sourceLabel} outlook={slotOutlook} weakestIndex={weakestIndex} />
           ) : (
             <div className="panel-body">
-              <RosterTable rows={displayedStarters.map((s) => ({ player: s.player, cardSlug: s.card_slug, position: s.position, positionalGGRating: s.position_gg_rating, chemistry: s.chemistry }))} showChemistry />
+              <RosterTable rows={displayedStarters.map((s) => ({ player: s.player, cardSlug: s.card_slug, position: s.position, positionalGGRating: s.position_gg_rating, chemistry: s.chemistry }))} sourceLabel={sourceLabel} showChemistry />
             </div>
           )}
           {showPitch && (
             <div className="pitch-legend">
               <span><i className="tone-turf" /> acima da média do XI</span>
               <span><i className="tone-alert" /> upgrade disponível</span>
-              <span><i className="tone-cost" /> menor GG na vaga</span>
+              <span><i className="tone-cost" /> menor {sourceLabel} na vaga</span>
             </div>
           )}
           {data.optimization?.status === "improved" && (
             <div className="panel-body top-border">
-              <strong>Melhor encaixe: +{data.optimization.gain.toFixed(1)} GG posicional</strong>
+              <strong>Melhor encaixe: +{data.optimization.gain.toFixed(1)} {sourceLabel} na vaga</strong>
               {data.optimization.chemistry_note && <><br />{data.optimization.chemistry_note}</>}
             </div>
           )}
@@ -142,7 +143,7 @@ export default function Time() {
 
         <div className="time-side">
           <TopMoveCard move={data.top_move} />
-          <PositionMapCard rows={positionMap} regua={data.regua} outlook={slotOutlook} />
+          <PositionMapCard rows={positionMap} regua={data.regua} outlook={slotOutlook} sourceLabel={sourceLabel} />
           <ChemistryCard chem={data.chemistry} starters={starters} />
         </div>
       </div>
@@ -158,7 +159,7 @@ export default function Time() {
             <label><span>Posição</span><select value={position} onChange={(e) => { const value = e.target.value; setPosition(value); applyBenchFilters(value, tradeable); }}><option value="">Todas</option>{["GK", "RB", "CB", "LB", "RWB", "LWB", "CDM", "CM", "CAM", "RM", "LM", "RW", "LW", "CF", "ST"].map((p) => <option key={p}>{p}</option>)}</select></label>
             <label><span>Status</span><select value={tradeable} onChange={(e) => { const value = e.target.value as typeof tradeable; setTradeable(value); applyBenchFilters(position, value); }}><option value="all">Todas</option><option value="tradeable">Negociáveis</option><option value="untradeable">Inegociáveis</option></select></label>
           </div>
-          <BenchTable rows={bench} priceSeries={priceSeries} priceStatus={priceStatus} />
+          <BenchTable rows={bench} priceSeries={priceSeries} priceStatus={priceStatus} sourceLabel={sourceLabel} />
           <Pagination page={benchCollection.page} pages={benchCollection.pages} onPage={benchCollection.setPage} />
         </section>
       )}
@@ -239,17 +240,17 @@ function outlookLabel(o?: SlotOutlook): { text: string; tone: "up" | "" } {
   }
 }
 
-function PositionMapCard({ rows, regua, outlook }: { rows: PositionMapRow[]; regua: number; outlook: SlotOutlook[] }) {
+function PositionMapCard({ rows, regua, outlook, sourceLabel }: { rows: PositionMapRow[]; regua: number; outlook: SlotOutlook[]; sourceLabel: string }) {
   const byIndex = new Map(outlook.map((o) => [o.index, o]));
   const rulerPct = regua > 0 ? pct(regua) : 0;
   return (
     <div className="panel position-map-panel">
       <div className="panel-head">
         <span>Mapa de posições <span className="panel-head-sub">/ vs média do XI</span></span>
-        <span className="panel-head-meta">média {regua > 0 ? regua.toFixed(1) : "—"}</span>
+        <span className="panel-head-meta">média {sourceLabel} {regua > 0 ? regua.toFixed(1) : "—"}</span>
       </div>
       <div className="panel-body position-map-rows">
-        {rows.length === 0 && <p className="hint">Sem GG Rating suficiente pra montar o mapa.</p>}
+        {rows.length === 0 && <p className="hint">Sem notas suficientes de {sourceLabel} para montar o mapa.</p>}
         {rows.map((row) => {
           const label = outlookLabel(byIndex.get(row.index));
           return (
@@ -293,7 +294,7 @@ function chemistryNoteText(chem: ChemistryResult): string {
   if (chem.nao_modelado?.length) {
     return `${chem.nao_modelado.length} carta(s) fora do modelo de química (Icon/Hero) — não entram na conta.`;
   }
-  return "Ninguém fora de posição — a única forma de perder entrosamento no modelo padrão.";
+  return "Ninguém fora de posição — o entrosamento ainda depende dos vínculos de clube, liga e nação.";
 }
 
 function ChemistryCard({ chem, starters }: { chem?: ChemistryResult; starters: StarterCard[] }) {
@@ -332,7 +333,7 @@ function ChemistryCard({ chem, starters }: { chem?: ChemistryResult; starters: S
   );
 }
 
-function leituraText(l?: LeituraDoBot): string {
+function leituraText(l: LeituraDoBot | undefined, sourceLabel: string): string {
   if (!l || !l.kind) return "—";
   switch (l.kind) {
     case "evoluir":
@@ -342,7 +343,8 @@ function leituraText(l?: LeituraDoBot): string {
     case "vender":
       return "Sem vaga no XI e sem potencial de evolução — vender";
     case "promover":
-      if (l.promocao) return `Escalar na ${l.promocao.position}, no lugar de ${l.promocao.starter_name} (${l.promocao.candidate_rating.toFixed(1)} vs ${l.promocao.starter_rating.toFixed(1)} GG na vaga)`;
+      if (l.promocao?.metric === "metarank") return "Sem GG Rating confirmado para comparar nesta vaga";
+      if (l.promocao) return `Escalar na ${l.promocao.position}, no lugar de ${l.promocao.starter_name} (${l.promocao.candidate_rating.toFixed(1)} vs ${l.promocao.starter_rating.toFixed(1)} ${promotionMetricLabel(l.promocao.metric, sourceLabel)} na vaga)`;
       return "Promoção apontada, mas faltam notas por vaga para confirmar a troca";
     case "fodder":
       return l.sbc_name ? `Fodder de SBC: cobre "${l.sbc_name}"` : "Fodder de SBC sem custo de oportunidade";
@@ -355,7 +357,14 @@ function leituraText(l?: LeituraDoBot): string {
   }
 }
 
-function BenchTable({ rows, priceSeries, priceStatus }: { rows: RosterCard[]; priceSeries: Record<string, { coins: number; observed_at: string }[]>; priceStatus: Record<string, string> }) {
+function promotionMetricLabel(metric: NonNullable<LeituraDoBot["promocao"]>["metric"], sourceLabel: string): string {
+  switch (metric) {
+    case "gg_rating_card": return "GG Rating do FUT.GG";
+    default: return sourceLabel;
+  }
+}
+
+function BenchTable({ rows, priceSeries, priceStatus, sourceLabel }: { rows: RosterCard[]; priceSeries: Record<string, { coins: number; observed_at: string }[]>; priceStatus: Record<string, string>; sourceLabel: string }) {
   return (
     <div className="tablewrap">
       <table>
@@ -374,7 +383,8 @@ function BenchTable({ rows, priceSeries, priceStatus }: { rows: RosterCard[]; pr
         <tbody>
           {rows.map((row) => {
             const p = row.player;
-			const promocao = row.leitura?.promocao;
+			const promocao = row.leitura?.promocao?.metric === "metarank" ? undefined : row.leitura?.promocao;
+			const promotionLabel = promocao ? promotionMetricLabel(promocao.metric, sourceLabel) : sourceLabel;
             const series = (priceSeries[p.id] ?? []).map((pt) => ({ label: formatDate(pt.observed_at), value: pt.coins }));
             const status = priceStatus[p.id];
             return (
@@ -389,12 +399,12 @@ function BenchTable({ rows, priceSeries, priceStatus }: { rows: RosterCard[]; pr
                 <td className="promotion-cell">
                   {promocao ? <>
                     <strong>{promocao.position} → {promocao.starter_name}</strong>
-                    <span>{promocao.candidate_rating.toFixed(1)} vs {promocao.starter_rating.toFixed(1)} <b className="up">{formatSigned(promocao.gain)}</b> GG na vaga</span>
+                    <span>{promocao.candidate_rating.toFixed(1)} vs {promocao.starter_rating.toFixed(1)} <b className="up">{formatSigned(promocao.gain)}</b> {promotionLabel} na vaga</span>
                   </> : "—"}
                 </td>
                 <td className="num coin">{p.price?.coins ? formatCoins(p.price.coins) : "—"}</td>
                 <td>{series.length >= 2 ? <TrendChart data={series} compact height={16} /> : <span className="chart-empty-inline" title={status}>—</span>}</td>
-                <td className="leitura-cell">{leituraText(row.leitura)}</td>
+                <td className="leitura-cell">{leituraText(row.leitura, sourceLabel)}</td>
               </tr>
             );
           })}
@@ -423,7 +433,7 @@ interface Row {
 // passadas (46 cartas do banco carregam chem>0 mesmo fora do XI ativo, num
 // retrato real) — mostrar isso confundiria com o entrosamento calculado do
 // XI de hoje, que só faz sentido pra quem está escalado.
-function RosterTable({ rows, showChemistry = false }: { rows: Row[]; showChemistry?: boolean }) {
+function RosterTable({ rows, sourceLabel, showChemistry = false }: { rows: Row[]; sourceLabel: string; showChemistry?: boolean }) {
   return (
     <div className="tablewrap">
       <table>
@@ -432,7 +442,7 @@ function RosterTable({ rows, showChemistry = false }: { rows: Row[]; showChemist
             <th>Posição</th>
             <th>Carta</th>
             <th className="num">Overall</th>
-            <th className="num">GG atual · posição</th>
+            <th className="num">GG atual · {sourceLabel} na vaga</th>
             {showChemistry && <th>Química</th>}
           </tr>
         </thead>
@@ -452,7 +462,7 @@ function RosterTable({ rows, showChemistry = false }: { rows: Row[]; showChemist
                 {p.untradeable && <Chip tone="flat"> untradeable</Chip>}
               </td>
               <td className="num">{p.rating}</td>
-              <td className="num"><GGRating current={p.gg_rating} currentPosition={p.gg_rating_pos} positional={positionalGGRating} positionalPosition={position} variant="inline" /></td>
+              <td className="num"><GGRating current={p.gg_rating} currentPosition={p.gg_rating_pos} positional={positionalGGRating} positionalPosition={position} positionalLabel={sourceLabel} variant="inline" /></td>
               {showChemistry && (
                 <td>
                   {chemistry ? (

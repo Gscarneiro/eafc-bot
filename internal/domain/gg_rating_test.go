@@ -2,7 +2,7 @@ package domain
 
 import "testing"
 
-func TestGGRatingNaPosicaoEscolheMaiorNotaDaMesmaPosicao(t *testing.T) {
+func TestGGRatingNaPosicaoPriorizaNotaDaCarta(t *testing.T) {
 	for _, caso := range []struct {
 		nome              string
 		atual, posicional float64
@@ -10,12 +10,16 @@ func TestGGRatingNaPosicaoEscolheMaiorNotaDaMesmaPosicao(t *testing.T) {
 		esperado          float64
 		conhecida         bool
 	}{
-		{"clube maior", 99.74, 99.22, CM, CM, 99.74, true},
-		{"posicional maior", 90.28, 99.22, CM, CM, 99.22, true},
+		{"nota da carta maior", 99.74, 99.22, CM, CM, 99.74, true},
+		// O metarank não é a mesma escala do GG Rating que vem na carta.
+		// A carta Squad Foundations de Carl Starfelt, por exemplo, vem com
+		// 79,98 no elenco e 92,4 no metarank para CB. Escolher o maior faria
+		// o bot trocar a régua exibida sem avisar.
+		{"nota da carta prevalece sobre metarank", 79.98, 92.4, CB, CB, 79.98, true},
 		{"notas iguais", 99.22, 99.22, CM, CM, 99.22, true},
-		{"outra posição", 99.41, 98.8, LB, CB, 98.8, true},
+		{"metarank em outra posição não substitui GG Rating", 99.41, 98.8, LB, CB, 0, false},
 		{"somente clube", 99.74, 0, CM, CM, 99.74, true},
-		{"somente posicional", 0, 98.8, "", CB, 98.8, true},
+		{"somente metarank não confirma GG Rating", 0, 98.8, "", CB, 0, false},
 		{"nenhuma fonte", 0, 0, "", CM, 0, false},
 		{"clube sem posição", 99.74, 0, "", CM, 0, false},
 		{"sem nota na outra posição", 99.41, 0, LB, CB, 0, false},
@@ -41,7 +45,7 @@ func TestGGRatingPreservaNotaDeCadaCopia(t *testing.T) {
 	if got, _ := forte.GGRatingAt(CM); got != 99.74 {
 		t.Fatalf("cópia evoluída = %v; esperado 99.74", got)
 	}
-	if got, _ := fraca.GGRatingAt(CM); got != 99.22 {
-		t.Fatalf("cópia original = %v; esperado 99.22", got)
+	if got, _ := fraca.GGRatingAt(CM); got != 90.28 {
+		t.Fatalf("cópia original = %v; esperado 90.28", got)
 	}
 }

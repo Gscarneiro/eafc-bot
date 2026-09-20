@@ -17,8 +17,16 @@ function toStarterCards(starters: SquadPlanStarterView[]): StarterCardData[] {
     card_slug: s.card_slug,
     index: s.index,
     position: s.position,
-    position_gg_rating: s.rating,
+    position_gg_rating: s.rating ?? undefined,
+    position_rating_unavailable: s.rating_unavailable,
   }));
+}
+
+function hintParaPlanoIndisponivel(reason?: string) {
+  if (reason === "escalação titular não sincronizada") {
+    return "Sincronize a escalação titular no fut.gg e rode uma coleta nova.";
+  }
+  return "A fonte ativa não publicou uma nota compatível para a vaga indicada.";
 }
 
 // PlanoElenco é a tela "/time/planos": a fronteira nota×química do elenco —
@@ -38,6 +46,7 @@ export default function PlanoElenco() {
   const needs = data.needs ?? [];
   const activeIndex = Math.min(scenarioIndex, Math.max(scenarios.length - 1, 0));
   const scenario = scenarios[activeIndex];
+  const starterCount = scenario?.starters?.length ?? 0;
   const insufficient = data.status !== "ok" || scenarios.length === 0;
 	const scoreLabel = evaluationSourceLabel(data.avaliacao?.fonte, true);
 
@@ -58,7 +67,11 @@ export default function PlanoElenco() {
                 <Chip tone="flat">química indisponível</Chip>
               )}
               <span className="plano-elenco-stats">
-                força total {scenario.total_rating.toFixed(1)} · média {scenario.average_rating.toFixed(1)} {scoreLabel} posicional
+                {scenario.rated_starters === starterCount ? (
+                  <>força total {scenario.total_rating.toFixed(1)} · média {scenario.average_rating.toFixed(1)} {scoreLabel} posicional</>
+                ) : (
+                  <>força parcial {scenario.total_rating.toFixed(1)} · média {scenario.average_rating.toFixed(1)} {scoreLabel} ({scenario.rated_starters}/{starterCount} avaliadas)</>
+                )}
               </span>
             </div>
           ) : undefined
@@ -97,7 +110,7 @@ export default function PlanoElenco() {
       {insufficient ? (
         <EmptyState
           message={data.reason || "Elenco insuficiente para montar um plano."}
-		  hint="O planejador precisa da escalação titular sincronizada e da cobertura da fonte ativa em cada vaga."
+          hint={hintParaPlanoIndisponivel(data.reason)}
         />
       ) : (
         <div className="plano-elenco-grid">
@@ -130,7 +143,7 @@ export default function PlanoElenco() {
                     onClick={() => setScenarioIndex(i)}
                   >
                     <span className="tab-strip-label">{sc.label || `cenário ${i + 1}`}</span>
-                    <span className="tab-strip-value">{sc.average_rating.toFixed(1)}</span>
+                    <span className="tab-strip-value">{sc.average_rating.toFixed(1)}{sc.rated_starters < (sc.starters?.length ?? 0) ? ` · ${sc.rated_starters}/${sc.starters?.length ?? 0}` : ""}</span>
                   </button>
                 ))}
               </div>

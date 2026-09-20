@@ -535,6 +535,7 @@ export interface LeituraDoBot {
 		starter_rating: number;
 		candidate_rating: number;
 		gain: number;
+		metric?: "gg_rating_card" | "metarank";
 	};
 }
 
@@ -580,6 +581,7 @@ export interface ChemistryResult {
 export interface StarterCard extends RosterCard {
   index: number;
   position_gg_rating?: number;
+  position_rating_unavailable?: boolean;
   position: Position; // slot físico — pode divergir da posição natural da carta
   chemistry?: ChemistryPlayer;
 }
@@ -843,7 +845,8 @@ export interface SquadPlanStarterView {
   index: number;
   position: Position; // slot físico — pode divergir da posição natural da carta
   player: ClubPlayer;
-  rating: number; // GG Rating do fut.gg nessa posição
+  rating: number | null; // nulo quando a fonte não publicou nota para a vaga
+  rating_unavailable?: boolean;
   card_slug?: string;
 }
 
@@ -863,6 +866,7 @@ export interface SquadPlanScenario {
   starters: SquadPlanStarterView[] | null;
   total_rating: number;
   average_rating: number;
+  rated_starters: number;
   chemistry?: ChemistryResult;
   moves: SquadPlanMoveView[] | null;
 }
@@ -1210,11 +1214,23 @@ export interface ResumoResponse {
   analise_entra_no_xi: number;
   catalogo_elegiveis: number;
   salvos: number;
+  gallery_opportunities: number;
   avisos: Aviso[];
   ticker: TickerRow[] | null;
 }
 
 export interface TickerRow { name: string; role: string; trend: PriceTrend }
+
+export type GalleryGrade = "" | "D" | "C" | "B" | "A" | "S";
+export interface GalleryPick { card_id: number; name: string; item_score: number; bonus?: number; reason?: string; }
+export interface GalleryTagBreakdown { name: string; operator?: string; attribute?: string; matched_ids?: number[]; matched_count: number; matched_score: number; bonus_percent: number; bonus_points: number; next_min_items?: number; next_bonus_percent?: number; pending?: boolean; reason?: string; }
+export interface GalleryEvaluation { set_id: string; status: string; required: number; filled: number; score: number; base_score: number; bonus_score: number; tags?: GalleryTagBreakdown[]; grade: GalleryGrade; next_grade?: GalleryGrade; next_threshold?: number; picks?: GalleryPick[]; missing?: string[]; warnings?: string[]; coverage?: string; states?: number; input_hash?: string; computed_at: string; }
+export interface GallerySet { id: string; name: string; category?: string; required_cards: number; thresholds?: Record<string, number>; rewards?: Record<string, string[]>; pool_size?: number; pool_truncated?: boolean; }
+export interface GalleryCompletion { set_id: string; grade: GalleryGrade; score?: number; completed_at: string; notes?: string; }
+export interface GalleryRecord { set: GallerySet; evaluation: GalleryEvaluation; completion?: GalleryCompletion; }
+export interface GalleryPage { value: GalleryRecord[]; "@odata.count": number; "@eafc.skip": number; "@eafc.top": number; opportunities: number; "@eafc.facets"?: Record<string, number>; }
+export interface GalleryCard { id: number; player_id?: number; original_player_id?: number; name: string; version?: string; rating?: number; nation_id?: number; club_id?: number; league_id?: number; rarity_id?: number; positions?: string[]; first_owner?: boolean; loan?: boolean; eligible?: boolean; historical?: boolean; item_score: number; source?: string; }
+export interface GalleryCollection { value: GalleryCard[]; "@odata.count": number; }
 
 export interface UISettings {
   market: {

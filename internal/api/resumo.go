@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -39,9 +40,10 @@ type ResumoResponse struct {
 	// AnaliseEntraNoXI/CatalogoElegiveis/Salvos são os selos de Evoluções no
 	// rail — mesma fonte que as próprias telas usam (evolution_paths.go /
 	// evolution_catalog.go), só resumida a um inteiro.
-	AnaliseEntraNoXI  int `json:"analise_entra_no_xi"`
-	CatalogoElegiveis int `json:"catalogo_elegiveis"`
-	Salvos            int `json:"salvos"`
+	AnaliseEntraNoXI     int `json:"analise_entra_no_xi"`
+	CatalogoElegiveis    int `json:"catalogo_elegiveis"`
+	Salvos               int `json:"salvos"`
+	GalleryOpportunities int `json:"gallery_opportunities"`
 
 	Avisos []Aviso `json:"avisos"`
 
@@ -95,6 +97,17 @@ func (s *Server) handleResumo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	galleryOpportunities := 0
+	if gs, ok := s.Store.(store.GaleriaStore); ok {
+		if rows, err := gs.ListGallery(r.Context(), s.Cycle, snap.Club.GamerTag, snap.Club.Platform); err == nil {
+			for _, row := range rows {
+				if row.Notify() {
+					galleryOpportunities++
+				}
+			}
+		}
+	}
+
 	agenda, err := s.buildAgenda(r.Context(), snap)
 	if err != nil {
 		agenda = analyze.Agenda{}
@@ -105,24 +118,36 @@ func (s *Server) handleResumo(w http.ResponseWriter, r *http.Request) {
 	for i, row := range marketRows {
 		ticker[i] = TickerRow{Name: row.Name, Role: row.Role, Trend: row.Trend}
 	}
+	avisos := buildAvisos(snap, chem, agenda)
+	if gs, ok := s.Store.(store.GaleriaStore); ok {
+		if rows, err := gs.ListGallery(r.Context(), s.Cycle, snap.Club.GamerTag, snap.Club.Platform); err == nil {
+			for _, row := range rows {
+				if !row.Notify() {
+					continue
+				}
+				avisos = append(avisos, Aviso{Kind: "galeria", Severity: "alerta", Headline: fmt.Sprintf("Gallery: %s pode chegar a %s", row.Set.Name, row.Evaluation.Grade), Detail: fmt.Sprintf("%d pontos · %d/%d cartas", row.Evaluation.Score, row.Evaluation.Filled, row.Evaluation.Required), Link: "/galeria/" + row.Set.ID})
+			}
+		}
+	}
 
 	writeJSON(w, ResumoResponse{
-		GeneratedAt:       snap.GeneratedAt,
-		Cycle:             snap.Cycle,
-		Coins:             snap.Club.Coins,
-		CoinsDelta:        coinsDelta,
-		Capital:           capital,
-		SquadScore:        avg,
-		SquadScoreDelta:   scoreDelta,
-		WeakestSlot:       weakSlot,
-		WeakestName:       weakName,
-		WeakestGGRating:   weakGG,
-		Quimica:           chem,
-		TrocasViaveis:     trocas,
-		AnaliseEntraNoXI:  analiseEntraNoXI,
-		CatalogoElegiveis: catalogoElegiveis,
-		Salvos:            salvos,
-		Avisos:            buildAvisos(snap, chem, agenda),
-		Ticker:            ticker,
+		GeneratedAt:          snap.GeneratedAt,
+		Cycle:                snap.Cycle,
+		Coins:                snap.Club.Coins,
+		CoinsDelta:           coinsDelta,
+		Capital:              capital,
+		SquadScore:           avg,
+		SquadScoreDelta:      scoreDelta,
+		WeakestSlot:          weakSlot,
+		WeakestName:          weakName,
+		WeakestGGRating:      weakGG,
+		Quimica:              chem,
+		TrocasViaveis:        trocas,
+		AnaliseEntraNoXI:     analiseEntraNoXI,
+		CatalogoElegiveis:    catalogoElegiveis,
+		Salvos:               salvos,
+		GalleryOpportunities: galleryOpportunities,
+		Avisos:               avisos,
+		Ticker:               ticker,
 	})
 }

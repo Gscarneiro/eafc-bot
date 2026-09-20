@@ -7,8 +7,9 @@ import (
 )
 
 // SquadSwap é uma troca sem custo: um titular sai, entra alguém que você JÁ
-// TEM no elenco, na mesma posição, com GG Rating maior. Não é opinião deste
-// bot — é o número que o próprio fut.gg calculou pra cada carta.
+// TEM no elenco, na mesma posição, com nota maior na régua ativa. A fonte
+// vem no contexto da avaliação; nunca se compara uma nota do bot com uma
+// publicada pelo FUT.GG.
 type SquadSwap struct {
 	// Index é o SLOT FÍSICO (Squad.Starters[i].Index), não a posição lógica
 	// — uma formação repete posição (dois CB), e "CB" sozinho não diz qual
@@ -20,11 +21,13 @@ type SquadSwap struct {
 	Slot      domain.Position   `json:"slot"`
 	Current   domain.ClubPlayer `json:"current"`
 	Candidate domain.ClubPlayer `json:"candidate"`
-	// CurrentRating e CandidateRating são as notas publicadas PARA Slot.
-	// GGRating pode ser a melhor nota da carta em outra posição e por isso
-	// nunca deve ser usada para explicar ou ordenar esta troca.
-	CurrentRating       float64               `json:"current_rating"`
-	CandidateRating     float64               `json:"candidate_rating"`
+	// CurrentRating e CandidateRating são as notas da régua ativa PARA Slot.
+	// O campo GGRating da carta pode ser a melhor nota em outra posição e por
+	// isso nunca deve ser usado para explicar ou ordenar esta troca.
+	CurrentRating   float64 `json:"current_rating"`
+	CandidateRating float64 `json:"candidate_rating"`
+	// GGRatingGap conserva o nome do contrato histórico, mas é sempre a
+	// diferença entre as duas notas da mesma fonte ativa.
 	GGRatingGap         float64               `json:"gg_rating_gap"`
 	CurrentEvaluation   domain.AvaliacaoCarta `json:"current_evaluation,omitempty"`
 	CandidateEvaluation domain.AvaliacaoCarta `json:"candidate_evaluation,omitempty"`
@@ -32,15 +35,13 @@ type SquadSwap struct {
 
 // FindSquadSwaps varre o BANCO — não o mercado — atrás de reforço. Pra cada
 // titular, procura entre os jogadores que sobraram do elenco (quem não está
-// nos 11) o de maior GG Rating que joga na mesma posição, e sugere a troca
-// se ele for melhor que o titular atual.
+// nos 11) o de maior nota na régua ativa que joga na mesma posição, e sugere
+// a troca se ele for melhor que o titular atual.
 //
-// Existe porque comparar GG Rating não é uma conta que este bot inventa:
-// ranquear cartas pelo Score() próprio (roles.go, pesos por função + bônus
-// de PlayStyle) é uma opinião DESTE bot sobre o que importa em campo, e faz
-// sentido pra decidir COMPRA no mercado, onde não existe um número oficial
-// pra comparar. Mas dentro do seu elenco, o fut.gg já publicou uma nota por
-// carta — usar ela é mais direto, e é a nota que você já confere no site.
+// Com FUT.GG ativo, a comparação usa a nota publicada que você confere no
+// site. Com um perfil local ou uma fonte importada ativa, os dois lados usam
+// essa mesma régua. O que nunca vale é reaproveitar Score() de mercado ou
+// converter silenciosamente uma fonte na outra.
 func FindSquadSwaps(club domain.Club) []SquadSwap {
 	return FindSquadSwapsWithOptions(club, SquadSwapOptions{})
 }
@@ -98,6 +99,9 @@ func FindSquadSwapsWithOptions(club domain.Club, options SquadSwapOptions) []Squ
 			if !candidateEvaluation.Disponivel {
 				continue // sem inferir a nota de uma vaga ausente
 			}
+			if !avaliacoesComparaveis(currentEvaluation, candidateEvaluation) {
+				continue // GG Rating da carta e score do metarank não têm escala comum documentada
+			}
 			candidateRating := candidateEvaluation.Nota
 			if gap := candidateRating - currentRating; gap > bestGap {
 				best, bestEvaluation, bestRating, bestGap = cand, candidateEvaluation, candidateRating, gap
@@ -132,13 +136,26 @@ func avaliarNaReguaDoElenco(card domain.Player, pos domain.Position, evaluator A
 	if evaluator != nil {
 		return evaluator.Avaliar(card, pos, ctx)
 	}
-	nota, ok := card.GGRatingAt(pos)
-	if !ok {
-		return domain.AvaliacaoCarta{Contexto: ctx, Motivo: "GG Rating ausente para esta vaga"}
+	return avaliarFutGG(card, pos, ctx)
+}
+
+func avaliacoesComparaveis(atual, candidata domain.AvaliacaoCarta) bool {
+	if atual.Contexto.Fonte != candidata.Contexto.Fonte {
+		return false
 	}
-	ctx.Fonte = domain.FonteFutGG
-	return domain.AvaliacaoCarta{Disponivel: true, Nota: nota, Contexto: ctx,
-		Cobertura:   []string{"nota posicional do FUT.GG"},
-		Componentes: []domain.ComponenteAvaliacao{{Chave: "gg_rating", Rotulo: "GG Rating posicional", Valor: nota}},
+	if atual.Contexto.Fonte != domain.FonteFutGG {
+		return true
 	}
+	origemAtual := origemNotaFutGG(atual)
+	return origemAtual == "gg_rating_carta" && origemAtual == origemNotaFutGG(candidata)
+}
+
+func origemNotaFutGG(avaliacao domain.AvaliacaoCarta) string {
+	for _, componente := range avaliacao.Componentes {
+		switch componente.Chave {
+		case "gg_rating_carta", "metarank_score":
+			return componente.Chave
+		}
+	}
+	return ""
 }

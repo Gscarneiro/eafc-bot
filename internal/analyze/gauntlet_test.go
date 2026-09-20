@@ -150,7 +150,8 @@ func TestBuildGauntletPlanTitularUsaNotaDoSlotFisicoNaoDaPosicaoNatural(t *testi
 	hybrid := domain.ClubPlayer{Player: domain.Player{
 		ID: 9000, Name: "Hibrido", CommonName: "Hibrido",
 		Position: domain.CB, AltPositions: []domain.Position{domain.CDM},
-		GGRatings: map[domain.Position]float64{domain.CB: 50.0, domain.CDM: 99.0},
+		GGRating: 99.0, GGRatingPos: domain.CDM,
+		GGRatings: map[domain.Position]float64{domain.CB: 100.0}, // metarank não autoriza usar a nota em CB
 		League:    "Liga Teste",
 	}}
 	club.Players = append(club.Players, hybrid)

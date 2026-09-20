@@ -28,6 +28,7 @@ import (
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/futgg"
+	"github.com/gscarneiro/eafc-bot/internal/galeria"
 	"github.com/gscarneiro/eafc-bot/internal/ratingsource"
 	"github.com/gscarneiro/eafc-bot/internal/report"
 	"github.com/gscarneiro/eafc-bot/internal/store"
@@ -285,6 +286,33 @@ func runJob(ctx context.Context, cfg config.Config, st store.Store, outPath stri
 	}
 	snap.PlayStyleCatalog = client.PlayStyleCatalog(ctx)
 	snap.RoleCatalog = client.Roles(ctx)
+	if len(snap.GallerySets) > 0 {
+		snap.GalleryPools = make(map[string]futgg.GalleryPoolResult, len(snap.GallerySets))
+		finalized := map[string]bool{}
+		if gs, ok := st.(store.GaleriaStore); ok {
+			if done, completionErr := gs.ListGalleryCompletions(ctx, cfg.FutGG.Cycle, snap.Club.GamerTag, snap.Club.Platform); completionErr == nil {
+				for _, c := range done {
+					if c.Grade == galeria.GradeS {
+						finalized[c.SetID] = true
+					}
+				}
+			}
+		}
+		for _, set := range snap.GallerySets {
+			if finalized[set.ID] {
+				continue
+			}
+			poolSet, poolCards, poolErr := client.GalleryPool(ctx, set.ID)
+			if poolErr != nil {
+				snap.Errors = append(snap.Errors, "gallery "+set.ID+": "+poolErr.Error())
+				continue
+			}
+			if poolSet.Name == "" {
+				poolSet.Name, poolSet.Category, poolSet.Thresholds = set.Name, set.Category, set.Thresholds
+			}
+			snap.GalleryPools[set.ID] = futgg.GalleryPoolResult{Set: poolSet, Cards: poolCards}
+		}
+	}
 	futgg.PreencherFamiliaridadesDoClube(&snap.Club, snap.RoleCatalog)
 	futgg.PreencherFamiliaridadesDoMercado(snap.Market, snap.RoleCatalog)
 	for _, external := range []struct {
@@ -528,6 +556,7 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 			data.Errors = append(data.Errors,
 				"snapshot não gravado: clube veio vazio, mantendo o último snapshot bom")
 		} else {
+			atualizarGaleria(ctx, st, snap, cfg.FutGG.Cycle)
 			diff := store.ClubDiff{}
 			if prev, ok, err := st.PreviousClub(ctx, snap.Club.GamerTag, cfg.FutGG.Cycle); err == nil && ok {
 				diff = store.DiffClubs(prev, snap.Club)
@@ -535,7 +564,7 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 			err := st.SaveSnapshot(ctx, store.Snapshot{
 				GeneratedAt:      data.GeneratedAt,
 				Duration:         time.Since(started),
-				Cycle:            snap.Club.Cycle,
+				Cycle:            cfg.FutGG.Cycle,
 				BotScoreProfile:  string(analyze.DefaultBotScoreProfile),
 				Avaliacao:        contexto,
 				Club:             snap.Club,
@@ -550,6 +579,7 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 				Capabilities:     snap.Capabilities,
 				PlayStyleCatalog: snap.PlayStyleCatalog,
 				RoleCatalog:      snap.RoleCatalog,
+				GallerySets:      snap.GallerySets,
 				Diff:             diff,
 				NewCards:         newCards,
 				FreshNews:        freshNews,
@@ -718,4 +748,137 @@ func clubErrorMessage(errs []string) string {
 		}
 	}
 	return ""
+}
+
+// atualizarGaleria acumula cartas observadas sem apagar as que saíram do
+// elenco. O catálogo pode chegar vazio em uma coleta parcial; nesse caso os
+// registros anteriores continuam válidos e a API mantém o último resultado.
+func atualizarGaleria(ctx context.Context, st store.Store, snap *futgg.Snapshot, configuredCycle string) {
+	gs, ok := st.(store.GaleriaStore)
+	if !ok || snap == nil || len(snap.Club.Players) == 0 {
+		return
+	}
+	cycle, club, platform := configuredCycle, snap.Club.GamerTag, snap.Club.Platform
+	old, _ := gs.ListGalleryCards(ctx, cycle, club, platform)
+	cardKey := func(c galeria.Card) string { return fmt.Sprintf("%d:%s", c.ID, c.ClubItemID) }
+	byID := make(map[string]galeria.Card, len(old))
+	for _, c := range old {
+		c.Historical = true
+		byID[cardKey(c)] = c
+	}
+	now := time.Now()
+	for _, p := range snap.Club.Players {
+		if p.ID == 0 {
+			continue
+		}
+		c := galeria.Card{ID: p.ID, ClubItemID: p.ClubItemID, Name: p.CommonName, Version: p.Version, Rating: p.Rating, Club: p.Club, League: p.League, Nation: p.Nation, Rarity: p.Version, Position: string(p.Position), ItemScore: 0, Source: "futgg", ObservedAt: now}
+		c.PlayerID = p.BasePlayerEaID
+		if c.PlayerID == 0 {
+			c.PlayerID = c.ID
+		}
+		if prev, exists := byID[cardKey(c)]; exists {
+			if c.Name == "" {
+				c.Name = prev.Name
+			}
+			if prev.ItemScore > 0 {
+				c.ItemScore = prev.ItemScore
+			}
+			c.FirstOwner = prev.FirstOwner
+			c.Loan = prev.Loan
+			c.Eligible = prev.Eligible
+			c.OriginalPlayerID = prev.OriginalPlayerID
+			c.NationID, c.ClubID, c.LeagueID, c.RarityID = prev.NationID, prev.ClubID, prev.LeagueID, prev.RarityID
+			c.Positions = append([]string(nil), prev.Positions...)
+			c.Holographic = prev.Holographic
+		}
+		byID[cardKey(c)] = c
+	}
+	cards := make([]galeria.Card, 0, len(byID))
+	for _, c := range byID {
+		cards = append(cards, c)
+	}
+	_ = gs.SaveGalleryCards(ctx, cycle, club, platform, cards)
+	if len(snap.GallerySets) == 0 {
+		return
+	}
+	// O pool público fornece o Item Score e a elegibilidade que a listagem do
+	// clube não contém. Quando o pool é truncado, o avaliador conserva a
+	// incerteza e não usa a ausência como exclusão.
+	sets := make([]galeria.Set, len(snap.GallerySets))
+	copy(sets, snap.GallerySets)
+	for i := range sets {
+		if pool, exists := snap.GalleryPools[sets[i].ID]; exists {
+			catalogSet := sets[i]
+			if pool.Set.Name == "" {
+				pool.Set.Name = catalogSet.Name
+			}
+			if pool.Set.Category == "" {
+				pool.Set.Category = catalogSet.Category
+			}
+			if pool.Set.RequiredCards == 0 {
+				pool.Set.RequiredCards = catalogSet.RequiredCards
+			}
+			if len(pool.Set.Thresholds) == 0 {
+				pool.Set.Thresholds = catalogSet.Thresholds
+			}
+			if len(pool.Set.Rules) == 0 {
+				pool.Set.Rules = catalogSet.Rules
+			}
+			sets[i] = pool.Set
+			for _, pc := range pool.Cards {
+				for j := range cards {
+					if cards[j].ID == pc.ID {
+						if pc.ItemScore > 0 {
+							cards[j].ItemScore = pc.ItemScore
+						}
+						if pc.PlayerID != 0 {
+							cards[j].PlayerID = pc.PlayerID
+						}
+						eligible := true
+						cards[j].Eligible = &eligible
+						if pc.NationID != 0 {
+							cards[j].NationID = pc.NationID
+						}
+						if pc.ClubID != 0 {
+							cards[j].ClubID = pc.ClubID
+						}
+						if pc.LeagueID != 0 {
+							cards[j].LeagueID = pc.LeagueID
+						}
+						if pc.RarityID != 0 {
+							cards[j].RarityID = pc.RarityID
+						}
+						if len(pc.Positions) > 0 {
+							cards[j].Positions = append([]string(nil), pc.Positions...)
+						}
+						cards[j].Holographic = cards[j].Holographic || pc.Holographic
+					}
+				}
+			}
+		}
+	}
+	// Os Item Scores chegam no pool, depois da fotografia do clube; persistir
+	// novamente aqui evita que a próxima avaliação volte ao valor desconhecido.
+	_ = gs.SaveGalleryCards(ctx, cycle, club, platform, cards)
+	oldRows, _ := gs.ListGallery(ctx, cycle, club, platform)
+	completions := map[string]galeria.Completion{}
+	if done, err := gs.ListGalleryCompletions(ctx, cycle, club, platform); err == nil {
+		for _, c := range done {
+			completions[c.SetID] = c
+		}
+	}
+	for _, r := range oldRows {
+		if r.Completion != nil {
+			if _, exists := completions[r.Set.ID]; !exists {
+				completions[r.Set.ID] = *r.Completion
+			}
+		}
+	}
+	recs := galeria.Evaluate(galeria.Input{Sets: sets, Cards: cards, Completions: completions, Now: now})
+	for i := range recs {
+		if c, ok := completions[recs[i].Set.ID]; ok {
+			recs[i].Completion = &c
+		}
+	}
+	_ = gs.SaveGallery(ctx, cycle, club, platform, recs)
 }

@@ -47,8 +47,8 @@ var naoModelado = []string{
 	"técnico (+1 a quem compartilha a nação ou a liga dele) — o bot não coleta técnico do fut.gg",
 }
 
-// modeloFC26Observado é o modelo PADRÃO. Base 3 não é regra publicada em
-// lugar nenhum: é o que reproduz o que o jogo de fato reporta.
+// modeloFC26Observado registra a anomalia observada em 24/08/2026. Base 3
+// não é regra publicada em lugar nenhum: era o que aquele XI reportava.
 //
 // A evidência, verificada e confirmada pelo usuário: no XI de 24/08/2026 os
 // 11 titulares tinham 11 clubes, 8 ligas e 9 nações DISTINTAS — pela tabela
@@ -80,11 +80,11 @@ var modeloFC26Observado = Modelo{
 	NaoModelado:       naoModelado,
 }
 
-// modeloFC26Vinculos é a regra clássica: só o vínculo pontua (Base 0), com os
-// mesmos limiares confirmados na tela do jogo. NÃO é o padrão — ela não
-// descreve o que este jogo reporta hoje. Existe para a diferença ser
-// MENSURÁVEL em vez de virar folclore, e é o modelo que volta a valer se a
-// posição deixar de encher a barra.
+// modeloFC26Vinculos é a regra que o jogo reporta hoje: só o vínculo pontua
+// (Base 0), com os limiares confirmados na tela do jogo. O técnico ainda não
+// é coletado pelo FUT.GG, então o resultado pode faltar até um ponto por
+// carta elegível; isso é preferível a inventar 3 pontos para todo XI e
+// esconder a variação real.
 var modeloFC26Vinculos = Modelo{
 	Nome:              "fc26_vinculos",
 	Fonte:             "tela \"Mais entrosamento\" do app + duas fontes públicas independentes",
@@ -101,11 +101,11 @@ var modeloFC26Vinculos = Modelo{
 
 // Modelos devolve o registro completo, em ordem estável.
 func Modelos() []Modelo {
-	return []Modelo{modeloFC26Observado, modeloFC26Vinculos}
+	return []Modelo{modeloFC26Vinculos, modeloFC26Observado}
 }
 
 // ModeloPadrao é o que o bot usa quando o config não diz outra coisa.
-func ModeloPadrao() Modelo { return modeloFC26Observado }
+func ModeloPadrao() Modelo { return modeloFC26Vinculos }
 
 // Escolher acha o modelo pelo nome. O erro LISTA os nomes válidos — quem
 // errou o nome precisa saber quais existem sem abrir o código (convenção de

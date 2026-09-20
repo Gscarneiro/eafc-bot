@@ -3,6 +3,7 @@ package analyze
 import (
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
@@ -23,8 +24,8 @@ type SquadPlan struct {
 	Alternatives     []SquadAlternatives `json:"alternatives"`
 
 	// CurrentQuimica é o entrosamento do XI que está de pé HOJE (pode ter
-	// alguém fora de posição — é a única forma de perder entrosamento sob o
-	// modelo padrão, ver internal/chemistry). Quimica é o da escalação
+	// alguém fora de posição ou sem vínculos suficientes — ver
+	// internal/chemistry). Quimica é o da escalação
 	// SUGERIDA (Starters), sempre 100% em posição por construção (o fluxo só
 	// cria aresta pra quem PlaysAt o slot) — nil quando não há XI válido
 	// para avaliar (Status == "unavailable").
@@ -52,10 +53,11 @@ func DefaultSquadOptions() SquadOptions {
 }
 
 type SquadAssignment struct {
-	Index    int               `json:"index"`
-	Position domain.Position   `json:"position"`
-	Player   domain.ClubPlayer `json:"player"`
-	Rating   float64           `json:"rating"`
+	Index             int               `json:"index"`
+	Position          domain.Position   `json:"position"`
+	Player            domain.ClubPlayer `json:"player"`
+	Rating            float64           `json:"rating"`
+	RatingUnavailable bool              `json:"rating_unavailable,omitempty"`
 }
 type SquadMove struct {
 	Index           int               `json:"index"`
@@ -94,14 +96,18 @@ func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 	// pré-requisito da SUGESTÃO), para não desaparecer só porque o fluxo de
 	// GG Rating não pôde rodar (ex.: dado sem GGRatingAt preenchido).
 	plan.CurrentQuimica = chemistry.Avaliar(opt.ChemistryModel, club)
+	var motivos []string
 	for _, s := range slots {
 		if p, ok := club.PlayerForSlot(s); !ok {
 			plan.Reason = "titular ausente do retrato do clube"
 			return plan
 		} else if avaliacao := avaliarNaReguaDoElenco(p.Player, s.Position, opt.Evaluator, contextoDaVaga(opt.Contexto, opt.ContextosPorVaga, s)); !avaliacao.Disponivel {
-			plan.Reason = "faltam notas da avaliação ativa por vaga; revise a cobertura da fonte"
-			return plan
+			motivos = append(motivos, motivoAvaliacaoIndisponivel(s, p, avaliacao))
 		}
+	}
+	if len(motivos) > 0 {
+		plan.Reason = strings.Join(motivos, "; ")
+		return plan
 	}
 	players := jogadoresDisponiveisParaOtimizacao(club)
 	chosen, ok := squadMatchWithRatings(players, slots, func(i, j int) (float64, bool) {
@@ -122,7 +128,7 @@ func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 		cur := currentRating.Nota
 		plan.CurrentTotal += cur
 		plan.SuggestedTotal += r
-		plan.Starters = append(plan.Starters, SquadAssignment{s.Index, s.Position, chosen[j], r})
+		plan.Starters = append(plan.Starters, SquadAssignment{Index: s.Index, Position: s.Position, Player: chosen[j], Rating: r})
 		if chosen[j].IdentityKey() != cr.IdentityKey() {
 			plan.Moves = append(plan.Moves, SquadMove{s.Index, s.Position, cr, chosen[j], cur, r, r - cur})
 		}
@@ -150,7 +156,7 @@ func OptimizeSquadWithOptions(club domain.Club, opt SquadOptions) SquadPlan {
 			}
 			avaliacao := avaliarNaReguaDoElenco(p.Player, s.Position, opt.Evaluator, contextoDaVaga(opt.Contexto, opt.ContextosPorVaga, s))
 			if avaliacao.Disponivel {
-				cs = append(cs, SquadAssignment{s.Index, s.Position, p, avaliacao.Nota})
+				cs = append(cs, SquadAssignment{Index: s.Index, Position: s.Position, Player: p, Rating: avaliacao.Nota})
 			}
 		}
 		sort.Slice(cs, func(a, b int) bool {

@@ -104,6 +104,7 @@ type SquadPlanScenario struct {
 	Starters        []SquadAssignment    `json:"starters"`
 	TotalRating     float64              `json:"total_rating"`
 	AverageRating   float64              `json:"average_rating"`
+	RatedStarters   int                  `json:"rated_starters"`
 	Quimica         *chemistry.Resultado `json:"chemistry,omitempty"`
 	Moves           []SquadMove          `json:"moves"`
 }
@@ -151,11 +152,13 @@ func BuildSquadPlan(club domain.Club, req SquadPlanRequest) SquadPlannerPlan {
 		return plan
 	}
 	plan.Formation = formationLabel
+	allSlots := slots
 
-	// A checagem de "titular presente e com nota ativa conhecida" só faz sentido
-	// para a formação OBSERVADA — ela é o que dá a cada slot um "titular
-	// atual" pra comparar (ver squadPlanMoves). Formação manual não tem
-	// titular atual nenhum: todo mundo escolhido é uma "sugestão" nova.
+	// Na formação observada, uma lacuna da fonte não pode bloquear o
+	// planejador inteiro. O titular já escalado permanece travado naquele
+	// lugar, sem uma nota inventada; o matching otimiza apenas as vagas que a
+	// fonte consegue comparar. Formação manual não tem titular atual nenhum.
+	var preservados []SquadAssignment
 	if req.FormationFrom == FormationObservada {
 		for _, s := range slots {
 			p, ok := club.PlayerForSlot(s)
@@ -164,27 +167,29 @@ func BuildSquadPlan(club domain.Club, req SquadPlanRequest) SquadPlannerPlan {
 				return plan
 			}
 			if avaliacao := avaliarNaReguaDoElenco(p.Player, s.Position, req.Evaluator, contextoDaVaga(req.Contexto, req.ContextosPorVaga, s)); !avaliacao.Disponivel {
-				plan.Reason = "faltam notas da avaliação ativa por vaga; revise a cobertura da fonte"
-				return plan
+				preservados = append(preservados, SquadAssignment{Index: s.Index, Position: s.Position, Player: p, RatingUnavailable: true})
+				plan.Warnings = append(plan.Warnings, motivoAvaliacaoIndisponivel(s, p, avaliacao)+" — mantido no plano sem nota")
 			}
 		}
 	}
 
 	players := squadPlanPoolExcluding(jogadoresDisponiveisParaOtimizacao(club), req.Excluded)
+	players, slots = squadPlanWithoutPreserved(players, slots, preservados)
 
 	locked, remainingSlots, remainingPlayers, err := resolveSquadPlanLocks(players, slots, req.Locks, club, req)
 	if err != nil {
 		plan.Reason = err.Error()
 		return plan
 	}
+	locked = append(locked, preservados...)
 
-	baseline, ok := buildSquadScenario(remainingPlayers, remainingSlots, locked, slots, club, req, 0, "")
+	baseline, ok := buildSquadScenario(remainingPlayers, remainingSlots, locked, allSlots, club, req, 0, "")
 	if !ok {
 		plan.Reason = "não há jogadores elegíveis para todos os slots"
 		return plan
 	}
 
-	scenarios := paretoSquadScenarios(remainingPlayers, remainingSlots, locked, slots, club, req)
+	scenarios := paretoSquadScenarios(remainingPlayers, remainingSlots, locked, allSlots, club, req)
 	if len(scenarios) == 0 {
 		scenarios = []SquadPlanScenario{baseline}
 	}
@@ -194,6 +199,34 @@ func BuildSquadPlan(club domain.Club, req SquadPlanRequest) SquadPlannerPlan {
 	plan.Scenarios = scenarios
 	plan.Needs = squadPlanNeeds(baseline, players, req)
 	return plan
+}
+
+// squadPlanWithoutPreserved tira do matching as vagas cuja fonte não publicou
+// nota e a cópia que já as ocupa. A carta continua no XI e na química, mas
+// nunca ganha nota zero nem substituição inferida.
+func squadPlanWithoutPreserved(players []domain.ClubPlayer, slots []domain.SquadSlot, preserved []SquadAssignment) ([]domain.ClubPlayer, []domain.SquadSlot) {
+	if len(preserved) == 0 {
+		return players, slots
+	}
+	bySlot := make(map[int]bool, len(preserved))
+	byPlayer := make(map[string]bool, len(preserved))
+	for _, a := range preserved {
+		bySlot[a.Index] = true
+		byPlayer[a.Player.PlayerKey()] = true
+	}
+	remainingSlots := make([]domain.SquadSlot, 0, len(slots)-len(preserved))
+	for _, s := range slots {
+		if !bySlot[s.Index] {
+			remainingSlots = append(remainingSlots, s)
+		}
+	}
+	remainingPlayers := make([]domain.ClubPlayer, 0, len(players)-len(preserved))
+	for _, p := range players {
+		if !byPlayer[p.PlayerKey()] {
+			remainingPlayers = append(remainingPlayers, p)
+		}
+	}
+	return remainingPlayers, remainingSlots
 }
 
 // squadPlanPoolExcluding filtra o Player.ID excluído — mesma régua de
@@ -312,7 +345,7 @@ func buildSquadScenario(players []domain.ClubPlayer, remainingSlots []domain.Squ
 		}
 		for j, s := range remainingSlots {
 			avaliacao := avaliarNaReguaDoElenco(chosen[j].Player, s.Position, req.Evaluator, contextoDaVaga(req.Contexto, req.ContextosPorVaga, s))
-			starters = append(starters, SquadAssignment{s.Index, s.Position, chosen[j], avaliacao.Nota})
+			starters = append(starters, SquadAssignment{Index: s.Index, Position: s.Position, Player: chosen[j], Rating: avaliacao.Nota})
 		}
 	}
 	starters = append(starters, locked...)
@@ -334,10 +367,14 @@ func buildSquadScenario(players []domain.ClubPlayer, remainingSlots []domain.Squ
 
 	sc := SquadPlanScenario{Label: label, ChemistryWeight: weight, Starters: starters}
 	for _, a := range starters {
+		if a.RatingUnavailable {
+			continue
+		}
 		sc.TotalRating += a.Rating
+		sc.RatedStarters++
 	}
-	if len(starters) > 0 {
-		sc.AverageRating = sc.TotalRating / float64(len(starters))
+	if sc.RatedStarters > 0 {
+		sc.AverageRating = sc.TotalRating / float64(sc.RatedStarters)
 	}
 	sc.Moves = squadPlanMoves(starters, allSlots, club, req)
 	sc.Quimica = quimicaDaSugestao(req.ChemistryModel, starters)
@@ -595,6 +632,9 @@ func squadPlanNeeds(baseline SquadPlanScenario, players []domain.ClubPlayer, req
 	altCount := squadPlanAlternativeCounts(baseline.Starters, players, req)
 	var needs []SquadPlanNeed
 	for _, a := range baseline.Starters {
+		if a.RatingUnavailable {
+			continue
+		}
 		switch {
 		case altCount[a.Index] == 0:
 			needs = append(needs, SquadPlanNeed{Index: a.Index, Position: a.Position, Reason: "sem alternativa no elenco além do titular escalado"})

@@ -185,11 +185,28 @@ func avaliarFutGG(card domain.Player, pos domain.Position, ctx domain.ContextoAv
 	if ctx.Ciclo == "" {
 		ctx.Ciclo = card.Cycle
 	}
-	nota, ok := card.GGRatingAt(pos)
-	if !ok {
-		return domain.AvaliacaoCarta{Contexto: ctx, Motivo: "FUT.GG não publicou nota para esta carta nesta posição", Cobertura: []string{"nota externa ausente"}}
+	ratingPos := card.GGRatingPos
+	if ratingPos == "" {
+		ratingPos = card.Position
 	}
-	return domain.AvaliacaoCarta{Disponivel: true, Nota: nota, Contexto: ctx, Cobertura: []string{"nota posicional do FUT.GG"}, Componentes: []domain.ComponenteAvaliacao{{Chave: "gg_rating", Rotulo: "GG Rating posicional", Valor: nota}}}
+	if card.GGRating > 0 && ratingPos == pos {
+		return domain.AvaliacaoCarta{Disponivel: true, Nota: card.GGRating, Contexto: ctx,
+			Cobertura:   []string{"GG Rating da própria carta publicado pelo FUT.GG"},
+			Componentes: []domain.ComponenteAvaliacao{{Chave: "gg_rating_carta", Rotulo: "GG Rating da carta", Valor: card.GGRating}},
+		}
+	}
+	return domain.AvaliacaoCarta{Contexto: ctx, Motivo: "GG Rating do FUT.GG ausente para esta carta nesta posição", Cobertura: []string{"GG Rating da carta sem cobertura nesta vaga"}}
+}
+
+// motivoAvaliacaoIndisponivel mantém a lacuna na fonte rastreável até a vaga
+// física e a carta afetadas. Um resumo genérico não permite ao usuário saber
+// se deve sincronizar o XI, aguardar a fonte ou simplesmente trocar de vaga.
+func motivoAvaliacaoIndisponivel(slot domain.SquadSlot, player domain.ClubPlayer, avaliacao domain.AvaliacaoCarta) string {
+	motivo := avaliacao.Motivo
+	if motivo == "" {
+		motivo = "a fonte ativa não confirmou nota para esta vaga"
+	}
+	return fmt.Sprintf("%s %s: %s", slot.Position, player.Display(), motivo)
 }
 
 func (r *RegistroAvaliadores) avaliarPerfil(card domain.Player, pos domain.Position, ctx domain.ContextoAvaliacao, profile perfilArquivo) domain.AvaliacaoCarta {
@@ -373,7 +390,8 @@ func ClubeNaRegua(club domain.Club, evaluator Avaliador, ctx domain.ContextoAval
 		original := player.Player
 		player.GGRating = 0
 		player.GGRatingPos = ""
-		player.GGRatings = make(map[domain.Position]float64)
+		player.GGRatings = nil
+		player.NotasNaRegua = make(map[domain.Position]float64)
 		positions := append([]domain.Position{player.Position}, player.AltPositions...)
 		for _, pos := range positions {
 			cardCtx := ctx
@@ -385,7 +403,7 @@ func ClubeNaRegua(club domain.Club, evaluator Avaliador, ctx domain.ContextoAval
 			if !result.Disponivel {
 				continue
 			}
-			player.GGRatings[pos] = result.Nota
+			player.NotasNaRegua[pos] = result.Nota
 			if result.Nota > player.GGRating {
 				player.GGRating, player.GGRatingPos = result.Nota, pos
 			}

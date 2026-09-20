@@ -51,3 +51,26 @@ func TestLeituraDoBotPromoverExplicaVagaTitularENotasPosicionais(t *testing.T) {
 		t.Errorf("promoção = %+v, esperava CAM, Vitinha, 99.1, 99.4 e +0.3", got.Promocao)
 	}
 }
+
+func TestLeituraDoBotIgnoraPromocaoLegadaBaseadaEmMetarank(t *testing.T) {
+	titular := domain.ClubPlayer{Player: domain.Player{ID: 1, Name: "Kerolin Nicoli"}}
+	reserva := domain.ClubPlayer{Player: domain.Player{ID: 2, Name: "Paulo Dybala"}}
+	avaliacaoTitular := domain.AvaliacaoCarta{
+		Disponivel:  true,
+		Componentes: []domain.ComponenteAvaliacao{{Chave: "metarank_score", Rotulo: "Score do metarank", Valor: 82.79}},
+	}
+	avaliacaoReserva := domain.AvaliacaoCarta{
+		Disponivel:  true,
+		Componentes: []domain.ComponenteAvaliacao{{Chave: "metarank_score", Rotulo: "Score do metarank", Valor: 86.28}},
+	}
+	swap := &analyze.SquadSwap{
+		Index: 10, Slot: domain.ST, Current: titular, Candidate: reserva,
+		CurrentRating: 82.79, CandidateRating: 86.28, GGRatingGap: 3.49,
+		CurrentEvaluation: avaliacaoTitular, CandidateEvaluation: avaliacaoReserva,
+	}
+
+	got := leituraDoBot(analyze.SellCandidate{Player: reserva, Recommendation: "promover"}, store.PriceTrend{}, false, nil, swap)
+	if got.Kind != "" || got.Promocao != nil {
+		t.Fatalf("leitura = %+v, esperava descartar a promoção por metarank", got)
+	}
+}

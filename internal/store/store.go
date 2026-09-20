@@ -13,6 +13,7 @@ import (
 	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/futgg"
+	"github.com/gscarneiro/eafc-bot/internal/galeria"
 )
 
 // PricePoint é uma cotação observada num instante.
@@ -186,6 +187,22 @@ type SavedEvolutionPathStore interface {
 	DeleteSavedEvolutionPath(ctx context.Context, cycle, id string) error
 }
 
+// GaleriaStore guarda o catálogo, a memória acumulada da coleção, avaliações
+// e conclusões. É opcional para preservar fakes e backends antigos: a API
+// continua servindo snapshots mesmo antes da migração da Gallery.
+type GaleriaStore interface {
+	ListGallery(ctx context.Context, cycle, club, platform string) ([]galeria.Record, error)
+	SaveGallery(ctx context.Context, cycle, club, platform string, records []galeria.Record) error
+	ListGalleryCards(ctx context.Context, cycle, club, platform string) ([]galeria.Card, error)
+	SaveGalleryCards(ctx context.Context, cycle, club, platform string, cards []galeria.Card) error
+	SaveGalleryOverride(ctx context.Context, cycle, club, platform string, override galeria.CollectionOverride) error
+	DeleteGalleryOverride(ctx context.Context, cycle, club, platform string, cardID int64) error
+	ListGalleryOverrides(ctx context.Context, cycle, club, platform string) ([]galeria.CollectionOverride, error)
+	SaveGalleryCompletion(ctx context.Context, cycle, club, platform string, completion galeria.Completion) error
+	ListGalleryCompletions(ctx context.Context, cycle, club, platform string) ([]galeria.Completion, error)
+	DeleteGalleryCompletion(ctx context.Context, cycle, club, platform, setID string) error
+}
+
 // SavedSquadPlanStore guarda os planos que a pessoa montou no editor. É uma
 // extensão opcional pelo mesmo motivo dos paths salvos: stores/fakes antigos
 // ainda podem servir as telas de leitura sem precisar fingir persistência.
@@ -273,6 +290,7 @@ type Snapshot struct {
 	Cards            []cards.CardReport           `json:"cards"`
 	PlayStyleCatalog []domain.PlayStyleDefinition `json:"play_style_catalog,omitempty"`
 	RoleCatalog      futgg.RolesTable             `json:"role_catalog,omitempty"`
+	GallerySets      []galeria.Set                `json:"gallery_sets,omitempty"`
 
 	// GauntletPlan é o planejamento das quatro rodadas do modo Gauntlet
 	// (ver internal/analyze/gauntlet.go). Status vazio é o sentinela de

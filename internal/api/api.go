@@ -185,6 +185,15 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/resumo", s.handleResumo)
+	mux.HandleFunc("GET /api/galeria", s.handleGaleria)
+	mux.HandleFunc("GET /api/galeria/{id}", s.handleGaleriaDetalhe)
+	mux.HandleFunc("PUT /api/galeria/{id}/conclusao", s.guardLocalWrite(s.handleGaleriaConclusao))
+	mux.HandleFunc("DELETE /api/galeria/{id}/conclusao", s.guardLocalWrite(s.handleGaleriaConclusaoDelete))
+	mux.HandleFunc("GET /api/galeria/colecao", s.handleGaleriaColecao)
+	// O prefixo card evita a ambiguidade do ServeMux entre /galeria/{id}/conclusao
+	// e /galeria/colecao/{id}; a resposta continua sendo a coleção Gallery.
+	mux.HandleFunc("PUT /api/galeria/colecao/card/{id}", s.guardLocalWrite(s.handleGaleriaColecaoUpdate))
+	mux.HandleFunc("DELETE /api/galeria/colecao/card/{id}", s.guardLocalWrite(s.handleGaleriaColecaoDelete))
 	mux.HandleFunc("GET /api/saude", s.handleSaude)
 	mux.HandleFunc("GET /api/time", s.handleTime)
 	mux.HandleFunc("GET /api/time/{slug}", s.handleTimeSlug)
@@ -734,15 +743,16 @@ type SquadAlternativeView struct {
 	Players  []StarterCard   `json:"players"`
 }
 
-// currentChemistry devolve o entrosamento do XI ativo do snapshot. Usa o
-// valor persistido quando existe (o normal); recalcula só para snapshot
-// gravado antes deste campo existir (ponteiro nil) — mesmo padrão de
-// snap.GauntletPlan.Status=="".
+// currentChemistry devolve o entrosamento do XI ativo na regra configurada.
+// O valor persistido só é reutilizável quando foi calculado pelo mesmo
+// modelo; trocar de fc26_observado para fc26_vinculos sem essa guarda deixava
+// o resumo preso em 33/33 até a próxima coleta.
 func (s *Server) currentChemistry(snap store.Snapshot) *chemistry.Resultado {
-	if snap.Quimica != nil {
+	model := s.resolveChemistryModel()
+	if snap.Quimica != nil && snap.Quimica.Modelo == model.Nome {
 		return snap.Quimica
 	}
-	return chemistry.Avaliar(s.resolveChemistryModel(), snap.Club)
+	return chemistry.Avaliar(model, snap.Club)
 }
 
 // chemistryBySlot indexa o resultado pela vaga física. PlayerID não basta

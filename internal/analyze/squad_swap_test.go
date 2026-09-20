@@ -147,6 +147,74 @@ func TestFindSquadSwapsComparaGGDaVagaFisica(t *testing.T) {
 	}
 }
 
+// O GG Rating da carta e o score do metarank vêm de endpoints diferentes e
+// não têm escala documentada em comum. Quando só o titular tem a nota da
+// própria carta na vaga e só o reserva tem metarank, não existe comparação
+// segura — foi assim que Gabriel Suazo apareceu falsamente 4,3 acima de
+// Chloe Kelly na LM (89,63 de metarank contra 85,33 de GG Rating da carta).
+func TestFindSquadSwapsNaoMisturaGGRatingDaCartaComMetarank(t *testing.T) {
+	titular := mk(86, domain.RM, 89, 85, 85, 84, 49, 75)
+	titular.AltPositions = []domain.Position{domain.LM, domain.LW, domain.RW}
+	titular.GGRating = 85.33
+	titular.GGRatingPos = domain.LM
+	titular.GGRatings = map[domain.Position]float64{domain.RM: 88.1}
+
+	reserva := mk(81, domain.LB, 81, 67, 77, 78, 77, 82)
+	reserva.AltPositions = []domain.Position{domain.LM, domain.LW}
+	reserva.GGRating = 80.36
+	reserva.GGRatingPos = domain.LB
+	reserva.GGRatings = map[domain.Position]float64{
+		domain.LB: 92.19,
+		domain.LM: 89.63,
+	}
+
+	club := domain.Club{
+		Players: []domain.ClubPlayer{starterCP(1, titular), starterCP(2, reserva)},
+		Squad: domain.Squad{Starters: []domain.SquadSlot{
+			{Index: 8, Position: domain.LM, PlayerID: 1},
+		}},
+	}
+
+	for nome, options := range map[string]SquadSwapOptions{
+		"contrato legado": {},
+		"avaliador FUT.GG da API": {
+			Evaluator: &RegistroAvaliadores{},
+			Contexto:  domain.ContextoAvaliacao{Fonte: domain.FonteFutGG},
+		},
+	} {
+		t.Run(nome, func(t *testing.T) {
+			if swaps := FindSquadSwapsWithOptions(club, options); len(swaps) != 0 {
+				t.Fatalf("sugeriu troca misturando GG Rating da carta com metarank: %+v", swaps)
+			}
+		})
+	}
+}
+
+func TestFindSquadSwapsNaoUsaMetarankMesmoNosDoisLados(t *testing.T) {
+	titular := domain.Player{ID: 267234, Name: "Kerolin Nicoli", Position: domain.ST,
+		GGRating: 84, GGRatingPos: domain.RM,
+		GGRatings: map[domain.Position]float64{domain.ST: 82.79}}
+	reserva := domain.Player{ID: 211110, Name: "Paulo Dybala", Position: domain.CAM, AltPositions: []domain.Position{domain.ST},
+		GGRating: 83.95, GGRatingPos: domain.CAM,
+		GGRatings: map[domain.Position]float64{domain.ST: 86.28}}
+
+	club := domain.Club{
+		Players: []domain.ClubPlayer{starterCP(1, titular), starterCP(2, reserva)},
+		Squad:   domain.Squad{Starters: []domain.SquadSlot{{Index: 9, Position: domain.ST, PlayerID: 1}}},
+	}
+
+	for nome, options := range map[string]SquadSwapOptions{
+		"contrato legado":         {},
+		"avaliador FUT.GG da API": {Evaluator: &RegistroAvaliadores{}, Contexto: domain.ContextoAvaliacao{Fonte: domain.FonteFutGG}},
+	} {
+		t.Run(nome, func(t *testing.T) {
+			if swaps := FindSquadSwapsWithOptions(club, options); len(swaps) != 0 {
+				t.Fatalf("sugeriu Dybala na ST por metarank (86,28 contra 82,79), sem GG Rating publicado na vaga")
+			}
+		})
+	}
+}
+
 // Uma formação repete posição (dois CB) — sem o índice do slot físico, a
 // UI não sabe QUAL dos dois zagueiros a troca sugerida é sobre (ver
 // CLAUDE.md, "SquadSlot é lugar físico, não posição lógica"). Só um dos

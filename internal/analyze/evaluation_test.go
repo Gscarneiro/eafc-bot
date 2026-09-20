@@ -175,6 +175,23 @@ func TestClubeNaReguaNaoMisturaFonteQuandoBotNaoTemCobertura(t *testing.T) {
 	}
 }
 
+func TestClubeNaReguaPreservaAvaliadorExplicitoSemReusarMetarank(t *testing.T) {
+	club := domain.Club{Players: []domain.ClubPlayer{{Player: domain.Player{
+		ID: 1, Position: domain.CB, AltPositions: []domain.Position{domain.CDM},
+		GGRating: 80, GGRatingPos: domain.CB,
+		GGRatings: map[domain.Position]float64{domain.CB: 99, domain.CDM: 98},
+	}}}}
+	got := ClubeNaRegua(club, avaliadorGauntletInvertido{}, domain.ContextoAvaliacao{Fonte: domain.FonteBot})
+	for _, pos := range []domain.Position{domain.CB, domain.CDM} {
+		if nota, ok := got.Players[0].GGRatingAt(pos); !ok || nota != 20 {
+			t.Fatalf("avaliação explícita em %s = %v/%v; esperava 20", pos, nota, ok)
+		}
+	}
+	if len(got.Players[0].GGRatings) != 0 || club.Players[0].GGRating != 80 || club.Players[0].GGRatings[domain.CDM] != 98 {
+		t.Fatal("projeção reutilizou metarank ou alterou as notas da carta original")
+	}
+}
+
 func zagueiroDetalhado() domain.Player {
 	v := func(n int) *int { return &n }
 	return domain.Player{Cycle: "27", Version: "TOTW", Position: domain.CB, WeakFoot: 4, SkillMoves: 2, Height: 185, WeightKg: v(80), AccelerateType: "Lengthy", DetailedAttributes: &domain.DetailedAttributes{

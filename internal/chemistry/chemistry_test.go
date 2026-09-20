@@ -106,7 +106,7 @@ func TestBaseTresDaTrintaETresIndependenteDeVinculo(t *testing.T) {
 	for i := int64(1); i <= 11; i++ {
 		xi = append(xi, carta(i, domain.CM, "Clube "+string(rune('A'+i)), "Liga "+string(rune('A'+i)), "Nação "+string(rune('A'+i))))
 	}
-	res := Calcular(ModeloPadrao(), xi)
+	res := Calcular(modeloFC26Observado, xi)
 	if res.Total != 33 {
 		t.Fatalf("total = %d, esperava 33 (a posição sozinha enche a barra no modelo observado)", res.Total)
 	}
@@ -114,6 +114,19 @@ func TestBaseTresDaTrintaETresIndependenteDeVinculo(t *testing.T) {
 	// exatamente a diferença que a calibração mede.
 	if got := Calcular(vinculos(), xi).Total; got != 0 {
 		t.Fatalf("pelo modelo de vínculos o mesmo XI deu %d, esperava 0", got)
+	}
+}
+
+// Um XI sem clube, liga ou nação em comum não pode receber a barra inteira
+// só por estar em posição. Foi o comportamento que escondia a química real
+// em 33/33 depois que a observação antiga virou o modelo padrão.
+func TestModeloPadraoNaoDaQuimicaMaximaSemVinculos(t *testing.T) {
+	var xi []Titular
+	for i := int64(1); i <= 11; i++ {
+		xi = append(xi, carta(i, domain.CM, "Clube "+string(rune('A'+i)), "Liga "+string(rune('A'+i)), "Nação "+string(rune('A'+i))))
+	}
+	if got := Calcular(ModeloPadrao(), xi).Total; got != 0 {
+		t.Fatalf("modelo padrão deu %d para um XI sem vínculos; esperava 0", got)
 	}
 }
 

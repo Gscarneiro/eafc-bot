@@ -4,41 +4,48 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 )
 
-// Ter duas CÓPIAS da mesma carta no clube é normal no FUT, e o elenco real
-// tem várias. A nota por posição precisa chegar nas duas: parando na
-// primeira, a segunda ficava só com a nota escalar e chegava mais fraca do
-// que é na hora de escalar (analyze.gauntletValue), quando não sumia do pool.
-func TestEnrichPositionRatingsAtualizaTodasAsCopiasDaMesmaCarta(t *testing.T) {
+func TestColetaUsaNotaDaCartaSemConsultarMetarank(t *testing.T) {
+	var consultas atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":[{"eaId":168027413,"position":14,"score":94.05}]}`))
+		switch r.URL.Path {
+		case "/clube":
+			w.Write([]byte(`{"players":[{"eaId":168027413,"position":14,"ggRating":80.36,"ggRatingPosition":14}]}`))
+		case "/elenco":
+			w.Write([]byte(`{"data":{"activeGroupPositions":[{"group":"FIELD","positionIdx":0,"playerEaId":168027413}]}}`))
+		case "/metarank":
+			consultas.Add(1)
+			w.Write([]byte(`{"data":[{"eaId":168027413,"position":14,"score":94.05}]}`))
+		default:
+			w.Write([]byte(`{"data":[]}`))
+		}
 	}))
 	defer srv.Close()
 
 	c := New(Config{
 		BaseURL:   srv.URL,
 		Cycle:     "26",
-		Endpoints: map[string]string{"metarank": "/api/fut/metarank/players/"},
+		Endpoints: map[string]string{"club": "/clube", "club_squad": "/elenco", "metarank": "/metarank"},
 	})
 
-	carta := domain.ClubPlayer{Player: domain.Player{ID: 168027413, Position: domain.CM}}
-	club := domain.Club{
-		Players: []domain.ClubPlayer{carta, carta},
-		Squad:   domain.Squad{Starters: []domain.SquadSlot{{Index: 0, Position: domain.CM, PlayerID: 168027413}}},
-	}
-
-	if err := c.enrichPositionRatings(context.Background(), &club); err != nil {
+	snap, err := c.Collect(context.Background(), "clube-teste", PlayerFilter{Pages: 1})
+	if err != nil {
 		t.Fatal(err)
 	}
-	for i, p := range club.Players {
-		got, ok := p.GGRatingAt(domain.CM)
-		if !ok || got != 94.05 {
-			t.Fatalf("cópia %d ficou com GGRatingAt(CM) = %v/%v, esperava 94.05 — a nota parou na primeira linha", i, got, ok)
-		}
+	if len(snap.Club.Players) != 1 || len(snap.Club.Squad.Starters) != 1 {
+		t.Fatalf("coleta não carregou carta e vaga para exercitar o enriquecimento antigo: %+v", snap.Club)
+	}
+	if consultas.Load() != 0 {
+		t.Fatalf("consultou metarank %d vezes apesar de a fonte não ser referência de GG Rating", consultas.Load())
+	}
+	p := snap.Club.Players[0]
+	if got, ok := p.GGRatingAt(domain.CM); !ok || got != 80.36 || len(p.GGRatings) != 0 {
+		t.Fatalf("nota = %v/%v, metarank = %v; esperava somente GG Rating 80,36", got, ok, p.GGRatings)
 	}
 }

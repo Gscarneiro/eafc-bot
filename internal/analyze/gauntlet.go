@@ -171,20 +171,11 @@ type gauntletCard struct {
 	key string // domain.Player.PlayerKey(): o JOGADOR, não a carta
 }
 
-// gauntletValue é a melhor nota conhecida da carta, em qualquer posição —
-// usa o campo escalar GGRating quando presente (é o que a maioria dos
-// snapshots preenche) e cai para o maior valor do mapa GGRatings quando só
-// ele existir. Mesma dualidade de fonte que domain.Player.GGRatingAt já
-// trata por posição; aqui é o "melhor em qualquer posição", usado só para
-// ordenar elegibilidade e o banco, não para escalar ninguém num slot.
+// A elegibilidade e a ordem do banco usam a nota da carta (ou a melhor nota
+// da projeção explícita). Metarank legado não pode nem incluir uma carta
+// sem GG Rating no pool, nem colocá-la à frente de uma cópia melhor.
 func gauntletValue(p domain.ClubPlayer) float64 {
-	best := p.GGRating
-	for _, v := range p.GGRatings {
-		if v > best {
-			best = v
-		}
-	}
-	return best
+	return p.GGRating
 }
 
 // matchGauntletRound escolhe os 11 titulares de UMA rodada entre as cartas

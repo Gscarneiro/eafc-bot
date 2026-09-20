@@ -1,0 +1,238 @@
+.galeria-page {
+  max-width: 1240px;
+}
+
+.gallery-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 12px;
+}
+
+.gallery-toolbar input,
+.gallery-toolbar select {
+  min-height: 38px;
+  border: 1px solid var(--rule-strong);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 8px 10px;
+  font: 12px var(--font-body);
+}
+
+.gallery-toolbar input {
+  flex: 1;
+  min-width: 220px;
+}
+
+.gallery-toolbar input:focus-visible,
+.gallery-toolbar select:focus-visible {
+  outline: 2px solid var(--turf);
+  outline-offset: 2px;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.gallery-card {
+  display: block;
+  min-height: 142px;
+  padding: 14px;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--turf);
+  background: var(--panel);
+  color: var(--ink);
+  text-decoration: none;
+  transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+
+.gallery-card:hover,
+.gallery-card:focus-visible {
+  border-color: var(--turf);
+  box-shadow: 0 5px 16px rgb(24 45 36 / 10%);
+  transform: translateY(-1px);
+}
+
+.gallery-card:focus-visible {
+  outline: 2px solid var(--turf);
+  outline-offset: 2px;
+}
+
+.gallery-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+
+.gallery-card-head strong {
+  font: 600 14px/1.25 var(--font-body);
+}
+
+.gallery-grade {
+  flex: 0 0 auto;
+  min-width: 27px;
+  padding: 4px 6px;
+  border: 1px solid var(--rule-strong);
+  color: var(--turf);
+  font: 700 12px var(--font-mono);
+  text-align: center;
+}
+
+.gallery-meta,
+.gallery-next,
+.gallery-warning {
+  margin-top: 9px;
+  color: var(--ink-3);
+  font: 11px/1.35 var(--font-mono);
+}
+
+.gallery-score {
+  margin-top: 14px;
+  color: var(--ink);
+  font: 700 13px var(--font-mono);
+}
+
+.gallery-score span {
+  margin-left: 8px;
+  color: var(--turf);
+  font: 600 10px var(--font-mono);
+  text-transform: uppercase;
+}
+
+.gallery-next {
+  color: var(--coin);
+}
+
+.gallery-warning {
+  color: var(--alert);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, .7fr);
+  gap: 16px;
+}
+
+.detail-score {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--rule);
+}
+
+.detail-score > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  background: var(--panel);
+}
+
+.detail-score span {
+  color: var(--ink-3);
+  font: 10px var(--font-mono);
+  text-transform: uppercase;
+}
+
+.detail-score strong {
+  font: 700 18px var(--font-mono);
+}
+
+.completion-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.completion-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+
+.completion-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--ink-3);
+  font: 10px var(--font-mono);
+  text-transform: uppercase;
+}
+
+.completion-form input,
+.completion-form select {
+  min-height: 36px;
+  border: 1px solid var(--rule-strong);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 7px 9px;
+  font: 12px var(--font-body);
+}
+
+.gallery-equation {
+  color: var(--muted);
+  font: 12px var(--font-mono);
+}
+
+.gallery-tags {
+  margin-top: 12px;
+}
+
+.gallery-tag-list {
+  display: grid;
+  gap: 8px;
+}
+
+.gallery-tag-list details {
+  border-bottom: 1px solid var(--rule);
+  padding: 8px 0;
+}
+
+.gallery-tag-list summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+.gallery-tag-list summary span {
+  color: var(--turf);
+  font: 700 11px var(--font-mono);
+}
+
+.gallery-tag-list p {
+  margin: 8px 0 2px;
+  color: var(--muted);
+  font-size: .85rem;
+}
+
+.field-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--alert);
+}
+
+@media (max-width: 720px) {
+  .gallery-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .gallery-toolbar input {
+    min-width: 0;
+  }
+
+  .gallery-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-grid,
+  .detail-score {
+    grid-template-columns: 1fr;
+  }
+}

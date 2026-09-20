@@ -19,6 +19,9 @@ import PathsSalvos from "./pages/PathsSalvos";
 import Investimentos from "./pages/Investimentos";
 import Configuracoes from "./pages/Configuracoes";
 import FeedbackGameplay from "./pages/FeedbackGameplay";
+import Galeria from "./pages/Galeria";
+import GaleriaDetalhe from "./pages/GaleriaDetalhe";
+import GaleriaColecao from "./pages/GaleriaColecao";
 import { inicializarTema } from "./theme";
 
 inicializarTema();
@@ -33,7 +36,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="time/insights" element={<ClubInsights />} />
           <Route path="time/gauntlet" element={<Gauntlet />} />
 		  <Route path="time/planos" element={<PlanoElenco />} />
-		  <Route path="time/editor" element={<EditorElenco />} />
+          <Route path="time/editor" element={<EditorElenco />} />
+		  <Route path="galeria" element={<Galeria />} />
+		  <Route path="galeria/colecao" element={<GaleriaColecao />} />
+		  <Route path="galeria/:id" element={<GaleriaDetalhe />} />
 		  <Route path="time/:slug" element={<CardDetail />} />
           <Route path="mercado" element={<Mercado />} />
           <Route path="mercado/plano" element={<PlanoMercado />} />

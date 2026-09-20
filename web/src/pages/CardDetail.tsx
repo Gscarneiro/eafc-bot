@@ -180,10 +180,11 @@ export default function CardDetail() {
   if (error instanceof ApiError && error.status === 404) return <div className="wrap narrow"><Link className="back-link" to="/time">← voltar para o time</Link><div className="empty">Carta não encontrada na última coleta.</div></div>;
   const gate = asyncGate(loading, error, !!report, refetch); if (gate) return gate; if (!report) return null;
   const p = report.player;
-  const allPositions = [p.position, ...(p.alt_positions ?? []), ...(p.gg_rating_pos ? [p.gg_rating_pos] : []), ...Object.keys(p.gg_ratings ?? {}) as Position[]];
+  const allPositions = [p.position, ...(p.alt_positions ?? []), ...(p.gg_rating_pos ? [p.gg_rating_pos] : [])];
   const positions = [...new Set(allPositions)].filter(Boolean);
-  const ratings: Partial<Record<Position, number>> = { ...(p.gg_ratings ?? {}) };
-  if (p.gg_rating && p.gg_rating_pos && !ratings[p.gg_rating_pos]) ratings[p.gg_rating_pos] = p.gg_rating;
+  const ratings: Partial<Record<Position, number>> = {};
+  const ratingPosition = p.gg_rating_pos || p.position;
+  if (p.gg_rating && p.gg_rating > 0 && ratingPosition) ratings[ratingPosition] = p.gg_rating;
   const bestPosition = positions.reduce<Position | null>((best, position) => !best || (ratings[position] ?? 0) > (ratings[best] ?? 0) ? position : best, null) ?? p.position;
   const activePosition = selectedPosition && positions.includes(selectedPosition) ? selectedPosition : bestPosition;
   const recommendation = report.play_style_recommendations?.find(item => item.position === activePosition);
@@ -229,7 +230,7 @@ export default function CardDetail() {
           <div className="panel-head"><span>Nota por posição</span><span className="panel-head-meta">fut.gg</span></div>
           <div className="panel-body">
             <PositionPicker positions={positions} selected={activePosition} ratings={ratings} onSelect={setSelectedPosition}/>
-            <p className="detail-helper">A nota EA da carta é {p.rating}. A GG atual identifica esta cópia do clube; a nota posicional vem da referência do fut.gg e pode ser compartilhada entre cópias da mesma carta.</p>
+            <p className="detail-helper">O GG Rating publicado pelo FUT.GG vale para esta cópia na posição indicada. As demais posições ficam sem nota quando não há GG Rating confirmado.</p>
           </div>
         </section>
 

@@ -258,9 +258,14 @@ type Player struct {
 	// — o número que você já conhece do site, e que nunca estoura a escala.
 	GGRating    float64  `json:"gg_rating,omitempty"`
 	GGRatingPos Position `json:"gg_rating_pos,omitempty"`
-	// GGRatings guarda a nota do fut.gg em cada posição elegível. A nota
-	// escalar acima continua para compatibilidade com snapshots antigos.
+	// GGRatings conserva o metarank de snapshots antigos para leitura do
+	// histórico. Sua equivalência com GG Rating não foi confirmada, portanto
+	// não participa de avaliações, recomendações ou notas exibidas.
 	GGRatings map[Position]float64 `json:"gg_ratings,omitempty"`
+	// NotasNaRegua é uma projeção transitória do avaliador escolhido para os
+	// algoritmos de escalação. Não persiste como se fosse dado do FUT.GG nem
+	// compartilha o campo legado de metarank.
+	NotasNaRegua map[Position]float64 `json:"-"`
 	// ExternalRatings armazena avaliações posicionais importadas com sua
 	// própria métrica, escala e evidência. Elas não substituem nem ajustam o
 	// GG Rating: a seleção explícita do avaliador decide qual delas usar.
@@ -325,13 +330,17 @@ func (p Player) PlayerKey() string {
 
 // GGRatingVersion invalida planos calculados com outra regra de notas.
 // A versão zero identifica snapshots anteriores à comparação das fontes.
-const GGRatingVersion = 1
+const GGRatingVersion = 2
 
-// GGRatingAt devolve a maior nota conhecida para o lugar físico da escalação.
+// GGRatingAt devolve a nota aplicável ao lugar físico da escalação.
+//
+// Fora de uma projeção explícita do avaliador, só a nota da própria carta
+// confirma GG Rating na posição publicada. Metarank legado não preenche
+// lacunas: sua equivalência com essa nota não foi validada.
 func (p Player) GGRatingAt(pos Position) (float64, bool) {
-	var best float64
-	if v, ok := p.GGRatings[pos]; ok && v > 0 {
-		best = v
+	if p.NotasNaRegua != nil {
+		v := p.NotasNaRegua[pos]
+		return v, v > 0
 	}
 	ratingPos := p.GGRatingPos
 	if ratingPos == "" {
@@ -340,12 +349,10 @@ func (p Player) GGRatingAt(pos Position) (float64, bool) {
 		// vaga transformaria uma lacuna de dados em uma comparação falsa.
 		ratingPos = p.Position
 	}
-	// O metarank é compartilhado por EA ID, mas uma cópia evoluída pode
-	// superá-lo. A nota dessa cópia só vale na posição informada pela fonte.
-	if p.GGRating > best && ratingPos == pos {
-		best = p.GGRating
+	if p.GGRating > 0 && ratingPos == pos {
+		return p.GGRating, true
 	}
-	return best, best > 0
+	return 0, false
 }
 
 // Display devolve o nome mais curto e reconhecível da carta.

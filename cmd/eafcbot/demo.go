@@ -13,6 +13,7 @@ import (
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
 	"github.com/gscarneiro/eafc-bot/internal/futgg"
+	"github.com/gscarneiro/eafc-bot/internal/galeria"
 	"github.com/gscarneiro/eafc-bot/internal/report"
 	"github.com/gscarneiro/eafc-bot/internal/store"
 )
@@ -80,14 +81,15 @@ func demoSnapshot(rng *rand.Rand) *futgg.Snapshot {
 	sbcs := demoSBCs()
 	objectives := demoObjectives()
 	news := demoNews()
-	return &futgg.Snapshot{
-		Club:       club,
-		Market:     market,
-		Evolutions: evolutions,
-		SBCs:       sbcs,
-		Objectives: objectives,
-		News:       news,
-		Stats:      futgg.Stats{Requests: 14, CacheHits: 3, Retries: 1, Bytes: 2_400_000},
+	snap := &futgg.Snapshot{
+		Club:        club,
+		Market:      market,
+		Evolutions:  evolutions,
+		SBCs:        sbcs,
+		Objectives:  objectives,
+		News:        news,
+		GallerySets: []galeria.Set{{ID: "demo-starter", Name: "Starter Set", Category: "Rarities", RequiredCards: 5, Thresholds: map[galeria.Grade]int{galeria.GradeD: 10, galeria.GradeC: 250, galeria.GradeB: 500, galeria.GradeA: 1000, galeria.GradeS: 2000}}},
+		Stats:       futgg.Stats{Requests: 14, CacheHits: 3, Retries: 1, Bytes: 2_400_000},
 		// Capabilities fictícia, coerente com o resto do dado sintético: o
 		// modo demo não passa por Collect() (não há rede), então nada aqui
 		// vem de fato de "futgg" — mas /api/saude precisa de ALGUM contrato
@@ -102,7 +104,22 @@ func demoSnapshot(rng *rand.Rand) *futgg.Snapshot {
 			"notícias":  {Source: "demo", ObservedAt: time.Now(), Coverage: len(news), Status: futgg.StatusConfirmado},
 		},
 	}
+	// A tela demo precisa mostrar uma oportunidade Gallery realista sem rede:
+	// os mesmos itens do clube recebem Item Score fictício e elegibilidade
+	// confirmada no pool, preservando a separação entre overall e Gallery.
+	snap.GallerySets[0].Rules = []galeria.TagRule{{Name: "First Owner", Attribute: "FIRST_OWNED", Operator: "COUNT", Values: []string{"true"}, Tiers: []galeria.Tier{{MinItems: 5, BonusPercent: 150}}, BonusType: "ITEM_SCORE_PERCENTAGE"}}
+	pool := futgg.GalleryPoolResult{Set: snap.GallerySets[0]}
+	for _, cp := range club.Players {
+		c := galeria.Card{ID: cp.ID, PlayerID: cp.BasePlayerEaID, Name: cp.CommonName, Rating: cp.Rating, ItemScore: cp.Rating * 10, Eligible: boolPtr(true), Source: "demo"}
+		pool.Cards = append(pool.Cards, c)
+		pool.Set.EligibleIDs = append(pool.Set.EligibleIDs, c.ID)
+	}
+	pool.Set.PoolSize = len(pool.Cards)
+	snap.GalleryPools = map[string]futgg.GalleryPoolResult{pool.Set.ID: pool}
+	return snap
 }
+
+func boolPtr(v bool) *bool { return &v }
 
 func p(id int64, name string, rating int, pos domain.Position, version string,
 	pac, sho, pas, dri, def, phy int, price int, styles ...domain.PlayStyle) domain.Player {
@@ -181,7 +198,7 @@ func demoClub() domain.Club {
 		// elenco real, ver internal/chemistry/modelos.go). ChemistrySynced
 		// true porque, no demo, "a coleta" é sempre completa por definição.
 		Squad: domain.Squad{Name: "Titular", Formation: "4-2-3-1", Chemistry: 33, ChemistrySynced: true, Starters: starters, SyncedAt: time.Now()},
-		Cycle: "26", SyncedAt: time.Now(), Source: "demo",
+		Cycle: "27", SyncedAt: time.Now(), Source: "demo",
 	}
 }
 

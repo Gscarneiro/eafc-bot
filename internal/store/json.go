@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gscarneiro/eafc-bot/internal/domain"
+	"github.com/gscarneiro/eafc-bot/internal/galeria"
 )
 
 // JSONStore guarda tudo em arquivos JSON num diretório. É o padrão: o bot
@@ -40,6 +42,20 @@ func NewJSONWithRetention(dir string, retention int) (*JSONStore, error) {
 }
 
 func (s *JSONStore) path(name string) string { return filepath.Join(s.dir, name) }
+
+func galleryKey(cycle, club, platform string) string {
+	clean := func(v string) string {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return "default"
+		}
+		v = strings.ReplaceAll(v, "\\", "_")
+		v = strings.ReplaceAll(v, "/", "_")
+		v = strings.ReplaceAll(v, "..", "_")
+		return v
+	}
+	return clean(cycle) + "_" + clean(club) + "_" + clean(platform)
+}
 
 func (s *JSONStore) readJSON(name string, dst any) error {
 	b, err := os.ReadFile(s.path(name))
@@ -560,6 +576,148 @@ func (s *JSONStore) ClubHistory(ctx context.Context, cycle string, days int) ([]
 		out = append(out, envelope.Club)
 	}
 	return out, nil
+}
+
+// Gallery permanece fora da retenção de snapshots: a carta continua válida
+// depois de sair do elenco e a conclusão S não pode desaparecer após 30 dias.
+func (s *JSONStore) galleryFile(kind, cycle, club, platform string) string {
+	return "gallery_" + kind + "_" + galleryKey(cycle, club, platform) + ".json"
+}
+
+func (s *JSONStore) ListGallery(ctx context.Context, cycle, club, platform string) ([]galeria.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rows []galeria.Record
+	if err := s.readJSON(s.galleryFile("records", cycle, club, platform), &rows); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *JSONStore) SaveGallery(ctx context.Context, cycle, club, platform string, rows []galeria.Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writeJSON(s.galleryFile("records", cycle, club, platform), rows)
+}
+
+func (s *JSONStore) ListGalleryCards(ctx context.Context, cycle, club, platform string) ([]galeria.Card, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rows []galeria.Card
+	if err := s.readJSON(s.galleryFile("cards", cycle, club, platform), &rows); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *JSONStore) SaveGalleryCards(ctx context.Context, cycle, club, platform string, cards []galeria.Card) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writeJSON(s.galleryFile("cards", cycle, club, platform), cards)
+}
+
+func (s *JSONStore) ListGalleryOverrides(ctx context.Context, cycle, club, platform string) ([]galeria.CollectionOverride, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rows []galeria.CollectionOverride
+	if err := s.readJSON(s.galleryFile("overrides", cycle, club, platform), &rows); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *JSONStore) SaveGalleryOverride(ctx context.Context, cycle, club, platform string, override galeria.CollectionOverride) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rows []galeria.CollectionOverride
+	_ = s.readJSON(s.galleryFile("overrides", cycle, club, platform), &rows)
+	if override.UpdatedAt.IsZero() {
+		override.UpdatedAt = time.Now()
+	}
+	found := false
+	for i := range rows {
+		if rows[i].CardID == override.CardID {
+			rows[i] = override
+			found = true
+			break
+		}
+	}
+	if !found {
+		rows = append(rows, override)
+	}
+	return s.writeJSON(s.galleryFile("overrides", cycle, club, platform), rows)
+}
+
+func (s *JSONStore) DeleteGalleryOverride(ctx context.Context, cycle, club, platform string, cardID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rows []galeria.CollectionOverride
+	_ = s.readJSON(s.galleryFile("overrides", cycle, club, platform), &rows)
+	out := rows[:0]
+	for _, row := range rows {
+		if row.CardID != cardID {
+			out = append(out, row)
+		}
+	}
+	return s.writeJSON(s.galleryFile("overrides", cycle, club, platform), out)
+}
+
+func (s *JSONStore) SaveGalleryCompletion(ctx context.Context, cycle, club, platform string, completion galeria.Completion) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rows []galeria.Completion
+	_ = s.readJSON(s.galleryFile("completions", cycle, club, platform), &rows)
+	if completion.CompletedAt.IsZero() {
+		completion.CompletedAt = time.Now()
+	}
+	found := false
+	for i := range rows {
+		if rows[i].SetID == completion.SetID {
+			rows[i] = completion
+			found = true
+			break
+		}
+	}
+	if !found {
+		rows = append(rows, completion)
+	}
+	return s.writeJSON(s.galleryFile("completions", cycle, club, platform), rows)
+}
+
+func (s *JSONStore) ListGalleryCompletions(ctx context.Context, cycle, club, platform string) ([]galeria.Completion, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rows []galeria.Completion
+	if err := s.readJSON(s.galleryFile("completions", cycle, club, platform), &rows); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *JSONStore) DeleteGalleryCompletion(ctx context.Context, cycle, club, platform, setID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rows []galeria.Completion
+	_ = s.readJSON(s.galleryFile("completions", cycle, club, platform), &rows)
+	out := rows[:0]
+	for _, row := range rows {
+		if row.SetID != setID {
+			out = append(out, row)
+		}
+	}
+	return s.writeJSON(s.galleryFile("completions", cycle, club, platform), out)
 }
 
 // PriceSeries é o mesmo histórico que Trends já lê, sem colapsar num resumo

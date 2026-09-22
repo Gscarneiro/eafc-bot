@@ -112,6 +112,8 @@ type TagBreakdown struct {
 	MatchedCards     []Pick  `json:"matched_cards,omitempty"`
 	MatchedCount     int     `json:"matched_count"`
 	MatchedScore     int     `json:"matched_score"`
+	UnknownCount     int     `json:"unknown_count,omitempty"`
+	UnknownCards     []Pick  `json:"unknown_cards,omitempty"`
 	BonusPercent     int     `json:"bonus_percent"`
 	BonusPoints      int     `json:"bonus_points"`
 	NextMinItems     int     `json:"next_min_items,omitempty"`
@@ -223,6 +225,7 @@ type Evaluation struct {
 	MaxProven     bool             `json:"max_proven,omitempty"`
 	ComputedAt    time.Time        `json:"computed_at"`
 	InputHash     string           `json:"input_hash,omitempty"`
+	EngineVersion string           `json:"engine_version,omitempty"`
 }
 
 type Record struct {
@@ -240,7 +243,9 @@ type Input struct {
 	MaxStates   int
 }
 
-func applyOverrides(cards []Card, overrides []CollectionOverride) []Card {
+// ApplyOverrides devolve os dados efetivamente usados pelo motor. A API usa
+// esta mesma função para não exibir "desconhecido" após uma correção manual.
+func ApplyOverrides(cards []Card, overrides []CollectionOverride) []Card {
 	by := map[int64]CollectionOverride{}
 	for _, o := range overrides {
 		by[o.CardID] = o
@@ -271,6 +276,9 @@ func applyOverrides(cards []Card, overrides []CollectionOverride) []Card {
 	}
 	return out
 }
+
+const engineVersion = "futgg-game-floor-v2"
+
 func attr(c Card, a string) string {
 	switch strings.ToUpper(a) {
 	case "NATION":
@@ -431,11 +439,15 @@ func bonus(picks []Card, rules []TagRule) (int, []TagBreakdown, []string, bool) 
 			continue
 		}
 		matched := make([]Card, 0, len(picks))
+		unknown := make([]Card, 0)
 		groups := map[string][]Card{}
 		isGrouping := strings.EqualFold(r.Operator, "COUNT_DIFF") || strings.EqualFold(r.Operator, "MAX_COUNT_ALL_SAME")
 		for _, c := range picks {
 			if c.Loan != nil && *c.Loan {
 				continue
+			}
+			if tagAttributeUnknown(c, r.Attribute) {
+				unknown = append(unknown, c)
 			}
 			if isGrouping {
 				// Nas regras agrupadas values:["0"] \u00e9 apenas um marcador do
@@ -482,10 +494,18 @@ func bonus(picks []Card, rules []TagRule) (int, []TagBreakdown, []string, bool) 
 			continue
 		}
 		tier := tierFor(count, r.Tiers)
-		bd := TagBreakdown{Name: r.Name, Operator: r.Operator, Attribute: r.Attribute, MatchedCount: count, MatchedScore: sum, BonusPercent: tier}
+		bd := TagBreakdown{Name: r.Name, Operator: r.Operator, Attribute: r.Attribute, MatchedCount: count, MatchedScore: sum, BonusPercent: tier, UnknownCount: len(unknown)}
 		for _, c := range matched {
 			bd.MatchedIDs = append(bd.MatchedIDs, c.ID)
 			bd.MatchedCards = append(bd.MatchedCards, Pick{CardID: c.ID, Name: c.Name, ItemScore: c.ItemScore})
+		}
+		for _, c := range unknown {
+			bd.UnknownCards = append(bd.UnknownCards, Pick{CardID: c.ID, Name: c.Name, ItemScore: c.ItemScore})
+		}
+		if len(unknown) > 0 {
+			pending = true
+			bd.Pending = true
+			bd.Reason = fmt.Sprintf("%d carta(s) sem %s confirmado", len(unknown), strings.ToLower(strings.ReplaceAll(r.Attribute, "_", " ")))
 		}
 		for _, t := range r.Tiers {
 			if t.MinItems > count && (bd.NextMinItems == 0 || t.MinItems < bd.NextMinItems) {
@@ -494,9 +514,9 @@ func bonus(picks []Card, rules []TagRule) (int, []TagBreakdown, []string, bool) 
 			}
 		}
 		if tier > 0 {
-			// O builder público aplica floor(max(percentual*soma-1,0)/100).
-			// O -1 é observável em scores exatamente divisíveis por 100 e
-			// evita prometer ao usuário a regra textual arredondada do FAQ.
+			// A interface do jogo confirma a divisão inteira direta em valores
+			// exatos (por exemplo 500% de 12.910 = 64.550). O bundle público
+			// contém um -1 divergente; a previsão reproduz o jogo, não esse artefato.
 			b := floorBonus(tier, sum)
 			bd.BonusPoints = b
 			total += b
@@ -520,11 +540,20 @@ func floorBonus(percent, subtotal int) int {
 	if percent <= 0 || subtotal <= 0 {
 		return 0
 	}
-	n := int64(percent)*int64(subtotal) - 1
-	if n < 0 {
-		n = 0
+	return int(int64(percent) * int64(subtotal) / 100)
+}
+
+func tagAttributeUnknown(c Card, attribute string) bool {
+	switch strings.ToUpper(attribute) {
+	case "FIRST_OWNED":
+		return c.FirstOwner == nil
+	case "WEAK_FOOT":
+		return c.WeakFoot == 0
+	case "SKILL_MOVES":
+		return c.SkillMoves == 0
+	default:
+		return false
 	}
-	return int(n / 100)
 }
 
 // Evaluate encontra uma combinacao valida por busca exaustiva limitada. O
@@ -535,7 +564,7 @@ func Evaluate(in Input) []Record {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	cards := applyOverrides(in.Cards, in.Overrides)
+	cards := ApplyOverrides(in.Cards, in.Overrides)
 	if in.MaxStates <= 0 {
 		in.MaxStates = 100000
 	}
@@ -544,12 +573,12 @@ func Evaluate(in Input) []Record {
 		rec := Record{Set: set}
 		if c, ok := in.Completions[set.ID]; ok && c.Grade == GradeS {
 			rec.Completion = &c
-			rec.Evaluation = Evaluation{SetID: set.ID, Status: StatusFinal, Grade: GradeS, Score: c.Score, ComputedAt: now, InputHash: evaluationHash(set, nil, c)}
+			rec.Evaluation = Evaluation{SetID: set.ID, Status: StatusFinal, Grade: GradeS, Score: c.Score, ComputedAt: now, InputHash: evaluationHash(set, nil, c), EngineVersion: engineVersion}
 			out = append(out, rec)
 			continue
 		}
 		if set.RequiredCards <= 0 || !validThresholds(set.Thresholds) {
-			rec.Evaluation = Evaluation{SetID: set.ID, Status: StatusUnavailable, Required: set.RequiredCards, Warnings: []string{"catálogo sem vagas ou limites D–S completos"}, Coverage: coverage(set), ComputedAt: now, InputHash: evaluationHash(set, nil, in.Completions[set.ID])}
+			rec.Evaluation = Evaluation{SetID: set.ID, Status: StatusUnavailable, Required: set.RequiredCards, Warnings: []string{"catálogo sem vagas ou limites D–S completos"}, Coverage: coverage(set), ComputedAt: now, InputHash: evaluationHash(set, nil, in.Completions[set.ID]), EngineVersion: engineVersion}
 			if c, ok := in.Completions[set.ID]; ok {
 				rec.Completion = &c
 			}
@@ -562,7 +591,7 @@ func Evaluate(in Input) []Record {
 			rec.Set = set
 		}
 		if len(candidates) < set.RequiredCards {
-			rec.Evaluation = Evaluation{SetID: set.ID, Status: StatusMissing, Required: set.RequiredCards, Filled: len(candidates), Missing: []string{fmt.Sprintf("%d cartas", set.RequiredCards-len(candidates))}, Coverage: coverage(set), ComputedAt: now, InputHash: evaluationHash(set, candidates, in.Completions[set.ID])}
+			rec.Evaluation = Evaluation{SetID: set.ID, Status: StatusMissing, Required: set.RequiredCards, Filled: len(candidates), Missing: []string{fmt.Sprintf("%d cartas", set.RequiredCards-len(candidates))}, Coverage: coverage(set), ComputedAt: now, InputHash: evaluationHash(set, candidates, in.Completions[set.ID]), EngineVersion: engineVersion}
 			if c, ok := in.Completions[set.ID]; ok {
 				rec.Completion = &c
 			}
@@ -576,9 +605,9 @@ func Evaluate(in Input) []Record {
 		next, threshold := nextGrade(score, set.Thresholds)
 		// Uma combina\u00e7\u00e3o formada apenas por cartas confirmadas continua v\u00e1lida
 		// mesmo quando n\u00e3o \u00e9 poss\u00edvel provar o m\u00e1ximo global do pool.
-		ev := Evaluation{SetID: set.ID, Status: StatusAvailable, Required: set.RequiredCards, Filled: set.RequiredCards, Score: score, BaseScore: baseScore, BonusScore: bonusScore, Tags: tags, Grade: grade, NextGrade: next, NextThreshold: threshold, States: states, MaxProven: !set.PoolTruncated && !pending && !limited, Coverage: coverage(set), ComputedAt: now, InputHash: evaluationHash(set, candidates, in.Completions[set.ID])}
+		ev := Evaluation{SetID: set.ID, Status: StatusAvailable, Required: set.RequiredCards, Filled: set.RequiredCards, Score: score, BaseScore: baseScore, BonusScore: bonusScore, Tags: tags, Grade: grade, NextGrade: next, NextThreshold: threshold, States: states, MaxProven: !set.PoolTruncated && !pending && !limited, Coverage: coverage(set), ComputedAt: now, InputHash: evaluationHash(set, candidates, in.Completions[set.ID]), EngineVersion: engineVersion}
 		if pending {
-			ev.Warnings = append(ev.Warnings, "há regras de bônus sem dados ou operador suportado")
+			ev.Warnings = append(ev.Warnings, "há dados ou regras de bônus pendentes; veja o detalhamento das tags")
 		}
 		if limited {
 			ev.Warnings = append(ev.Warnings, "limite de busca atingido; resultado parcial")
@@ -770,12 +799,12 @@ func nextGrade(score int, t map[Grade]int) (Grade, int) {
 
 func evaluationHash(set Set, cards []Card, completion Completion) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s|%d|%v|", set.ID, set.RequiredCards, set.Thresholds)
+	fmt.Fprintf(h, "%s|%s|%d|%v|", engineVersion, set.ID, set.RequiredCards, set.Thresholds)
 	for _, r := range set.Rules {
 		fmt.Fprintf(h, "%s|%s|%s|%v|%v|", r.Name, r.Attribute, r.Operator, r.Values, r.Tiers)
 	}
 	for _, c := range cards {
-		fmt.Fprintf(h, "%d:%d:%d:%t:%v|", c.ID, c.ItemScore, c.PlayerID, c.Holographic, c.FirstOwner)
+		fmt.Fprintf(h, "%d:%d:%d:%t:%v:%v:%v|", c.ID, c.ItemScore, c.PlayerID, c.Holographic, c.FirstOwner, c.Loan, c.Eligible)
 	}
 	fmt.Fprintf(h, "completion:%s:%s:%d", completion.SetID, completion.Grade, completion.Score)
 	return hex.EncodeToString(h.Sum(nil))

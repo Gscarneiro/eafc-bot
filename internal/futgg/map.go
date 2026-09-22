@@ -394,6 +394,21 @@ func mapClubPlayer(n node, cycle string, l lens) domain.ClubPlayer {
 		EvosApplied:  n.strs("evolutions", "evos", "appliedEvolutions"),
 		EvoExhausted: n.bool_("evolutionComplete", "isEvolved", "evoExhausted", "hasEvolution"),
 	}
+	// O GG Club expõe esses dois estados no playerDef. Eles não podem ser
+	// deduzidos de inegociável ou contratos: há primeiro dono negociável e
+	// loanDuration nulo significa que a fonte não informou o estado.
+	if firstOwner, ok := optionalBool(inner, "isFirstOwner", "is_first_owner"); ok {
+		cp.FirstOwner = &firstOwner
+	} else if firstOwner, ok := optionalBool(n, "isFirstOwner", "is_first_owner"); ok {
+		cp.FirstOwner = &firstOwner
+	}
+	if duration, ok := optionalInt(inner, "loanDuration", "loan_duration"); ok {
+		loan := duration > 0
+		cp.Loan = &loan
+	} else if duration, ok := optionalInt(n, "loanDuration", "loan_duration"); ok {
+		loan := duration > 0
+		cp.Loan = &loan
+	}
 	if len(cp.EvosApplied) > 0 {
 		cp.EvoExhausted = true
 	}

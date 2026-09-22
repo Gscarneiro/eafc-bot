@@ -250,10 +250,72 @@
   color: var(--alert);
 }
 
+.gallery-data-callout {
+  margin: 12px 0 0;
+  padding: 9px 10px;
+  border-left: 3px solid var(--coin);
+  background: color-mix(in srgb, var(--coin) 8%, var(--panel));
+  color: var(--muted);
+  font-size: .84rem;
+  line-height: 1.45;
+}
+
+.gallery-data-callout a {
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .detail-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, .7fr);
+  grid-template-columns: minmax(300px, .8fr) minmax(0, 1.45fr);
   gap: 16px;
+  align-items: start;
+}
+
+.gallery-summary {
+  position: sticky;
+  top: 14px;
+}
+
+.gallery-picks {
+  min-width: 0;
+}
+
+.gallery-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  padding: 1px;
+  list-style: none;
+  background: var(--rule);
+}
+
+.gallery-pick-grid li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 10px;
+  background: var(--panel);
+}
+
+.gallery-pick-grid span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-pick-grid strong {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font: 700 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .detail-score {
@@ -339,7 +401,15 @@
 }
 
 .gallery-rewards {
+  margin: 0;
+}
+
+.gallery-footer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, .7fr);
+  gap: 12px;
   margin-top: 12px;
+  align-items: start;
 }
 
 .gallery-reward-timeline {
@@ -394,7 +464,8 @@
 
 .gallery-tag-list {
   display: grid;
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 16px;
 }
 
 .gallery-tag-list details {
@@ -409,6 +480,11 @@
   gap: 12px;
   min-height: 32px;
   cursor: pointer;
+}
+
+.gallery-tag-list summary:focus-visible {
+  outline: 2px solid var(--turf);
+  outline-offset: 3px;
 }
 
 .gallery-tag-list summary span {
@@ -471,7 +547,20 @@
   }
 
   .detail-grid,
-  .detail-score {
+  .detail-score,
+  .gallery-footer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gallery-summary {
+    position: static;
+  }
+
+  .gallery-pick-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gallery-tag-list {
     grid-template-columns: 1fr;
   }
 

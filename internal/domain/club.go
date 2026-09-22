@@ -18,8 +18,13 @@ type ClubPlayer struct {
 	// fonte o fornece. Ele é diferente de Player.ID: duas cópias da mesma
 	// carta compartilham o segundo, mas não deveriam ser colapsadas no diff
 	// do elenco. Vazio significa que a fonte ainda não provou essa identidade.
-	ClubItemID   string     `json:"club_item_id,omitempty"`
-	Untradeable  bool       `json:"untradeable"`
+	ClubItemID  string `json:"club_item_id,omitempty"`
+	Untradeable bool   `json:"untradeable"`
+	// FirstOwner e Loan guardam somente o que a fonte afirmou. Ponteiros
+	// preservam a diferença entre falso e ausente: Gallery não pode
+	// transformar um campo omitido em bônus nem supor que é empréstimo.
+	FirstOwner   *bool      `json:"first_owner,omitempty"`
+	Loan         *bool      `json:"loan,omitempty"`
 	InSquad      bool       `json:"in_squad"`
 	SquadSlot    Position   `json:"squad_slot"` // onde ele joga HOJE no seu time
 	OutOfPos     bool       `json:"out_of_pos"` // escalado fora da posição natural

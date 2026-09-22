@@ -1071,6 +1071,34 @@ func (s *PostgresStore) ListGalleryOverrides(ctx context.Context, cycle, club, p
 	return out, rows.Err()
 }
 func (s *PostgresStore) SaveGalleryOverride(ctx context.Context, cycle, club, platform string, x galeria.CollectionOverride) error {
+	current, err := s.ListGalleryOverrides(ctx, cycle, club, platform)
+	if err != nil {
+		return err
+	}
+	for _, old := range current {
+		if old.CardID != x.CardID {
+			continue
+		}
+		if x.FirstOwner == nil {
+			x.FirstOwner = old.FirstOwner
+		}
+		if x.Loan == nil {
+			x.Loan = old.Loan
+		}
+		if x.Eligible == nil {
+			x.Eligible = old.Eligible
+		}
+		if x.ItemScore == nil {
+			x.ItemScore = old.ItemScore
+		}
+		if x.OriginalPlayerID == nil {
+			x.OriginalPlayerID = old.OriginalPlayerID
+		}
+		if x.Source == "" {
+			x.Source = old.Source
+		}
+		break
+	}
 	b, err := json.Marshal(x)
 	if err != nil {
 		return err

@@ -568,7 +568,7 @@ func analyzeAndBuild(ctx context.Context, cfg config.Config, st store.Store,
 			data.Errors = append(data.Errors,
 				"snapshot não gravado: clube veio vazio, mantendo o último snapshot bom")
 		} else {
-			atualizarGaleria(ctx, st, snap, cfg.FutGG.Cycle)
+			atualizarGaleria(ctx, st, snap, cfg.FutGG.Cycle, cfg.FutGG.CacheDir)
 			diff := store.ClubDiff{}
 			if prev, ok, err := st.PreviousClub(ctx, snap.Club.GamerTag, cfg.FutGG.Cycle); err == nil && ok {
 				diff = store.DiffClubs(prev, snap.Club)
@@ -765,7 +765,7 @@ func clubErrorMessage(errs []string) string {
 // atualizarGaleria acumula cartas observadas sem apagar as que saíram do
 // elenco. O catálogo pode chegar vazio em uma coleta parcial; nesse caso os
 // registros anteriores continuam válidos e a API mantém o último resultado.
-func atualizarGaleria(ctx context.Context, st store.Store, snap *futgg.Snapshot, configuredCycle string) {
+func atualizarGaleria(ctx context.Context, st store.Store, snap *futgg.Snapshot, configuredCycle, cacheDir string) {
 	gs, ok := st.(store.GaleriaStore)
 	if !ok || snap == nil || len(snap.Club.Players) == 0 {
 		return
@@ -783,7 +783,7 @@ func atualizarGaleria(ctx context.Context, st store.Store, snap *futgg.Snapshot,
 		if p.ID == 0 {
 			continue
 		}
-		c := galeria.Card{ID: p.ID, ClubItemID: p.ClubItemID, Name: p.CommonName, Version: p.Version, Rating: p.Rating, Club: p.Club, League: p.League, Nation: p.Nation, Rarity: p.Version, Position: string(p.Position), ItemScore: 0, Source: "futgg", ObservedAt: now}
+		c := galeria.Card{ID: p.ID, ClubItemID: p.ClubItemID, Name: p.CommonName, Version: p.Version, Rating: p.Rating, Club: p.Club, League: p.League, Nation: p.Nation, Rarity: p.Version, Position: string(p.Position), ItemScore: 0, FirstOwner: p.FirstOwner, Loan: p.Loan, Source: "futgg", ObservedAt: now}
 		c.PlayerID = p.BasePlayerEaID
 		if c.PlayerID == 0 {
 			c.PlayerID = c.ID
@@ -795,8 +795,12 @@ func atualizarGaleria(ctx context.Context, st store.Store, snap *futgg.Snapshot,
 			if prev.ItemScore > 0 {
 				c.ItemScore = prev.ItemScore
 			}
-			c.FirstOwner = prev.FirstOwner
-			c.Loan = prev.Loan
+			if c.FirstOwner == nil {
+				c.FirstOwner = prev.FirstOwner
+			}
+			if c.Loan == nil {
+				c.Loan = prev.Loan
+			}
 			c.Eligible = prev.Eligible
 			c.OriginalPlayerID = prev.OriginalPlayerID
 			c.NationID, c.ClubID, c.LeagueID, c.RarityID = prev.NationID, prev.ClubID, prev.LeagueID, prev.RarityID
@@ -809,6 +813,31 @@ func atualizarGaleria(ctx context.Context, st store.Store, snap *futgg.Snapshot,
 	cards := make([]galeria.Card, 0, len(byID))
 	for _, c := range byID {
 		cards = append(cards, c)
+	}
+	// Snapshots antigos foram salvos antes de FirstOwner existir no modelo.
+	// O cache do GG Club ainda pode provar esse estado para a mesma cópia
+	// física; ele complementa somente campos ausentes e nunca transforma uma
+	// página antiga em elenco atual nem usa ausência como valor falso.
+	wanted := make(map[string]bool)
+	for _, c := range cards {
+		if c.ClubItemID != "" && (c.FirstOwner == nil || c.Loan == nil) {
+			wanted[c.ClubItemID] = true
+		}
+	}
+	evidence := futgg.RecoverClubItemStates(cacheDir, wanted)
+	for i := range cards {
+		state, ok := evidence[cards[i].ClubItemID]
+		if !ok {
+			continue
+		}
+		if cards[i].FirstOwner == nil && state.FirstOwner != nil {
+			cards[i].FirstOwner = state.FirstOwner
+			cards[i].Source = "cache FUT.GG"
+		}
+		if cards[i].Loan == nil && state.Loan != nil {
+			cards[i].Loan = state.Loan
+			cards[i].Source = "cache FUT.GG"
+		}
 	}
 	_ = gs.SaveGalleryCards(ctx, cycle, club, platform, cards)
 	if len(snap.GallerySets) == 0 {

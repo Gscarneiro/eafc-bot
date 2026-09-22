@@ -28,7 +28,7 @@ const clubPlayerReal = `{"data":[
    "overall":99,"position":14,"alternativePositionIds":[16,10,18,12],
    "facePace":96,"faceShooting":95,"facePassing":99,
    "faceDribbling":99,"faceDefending":92,"facePhysicality":90,
-   "skillMoves":5,"weakFoot":5,"rarityName":"FUTTIES"}}],
+   "skillMoves":5,"weakFoot":5,"rarityName":"FUTTIES","isFirstOwner":true,"loanDuration":0}}],
  "next":null,"currentPage":1,"total":1}`
 
 func TestClubeLeOElencoPublicoDoGGClub(t *testing.T) {
@@ -75,9 +75,32 @@ func TestClubeLeOElencoPublicoDoGGClub(t *testing.T) {
 	if !cp.Untradeable {
 		t.Error("isUntradeable não virou Untradeable")
 	}
+	if cp.FirstOwner == nil || !*cp.FirstOwner {
+		t.Errorf("isFirstOwner não foi preservado: %v", cp.FirstOwner)
+	}
+	if cp.Loan == nil || *cp.Loan {
+		t.Errorf("loanDuration 0 não virou empréstimo falso: %v", cp.Loan)
+	}
 	// As alternativas também vêm como id.
 	if len(cp.Player.AltPositions) != 4 || !cp.Player.PlaysAt(domain.CAM) {
 		t.Errorf("posições alternativas %v", cp.Player.AltPositions)
+	}
+}
+
+func TestClubePreservaPrimeiroDonoAusenteEEmprestimo(t *testing.T) {
+	var wrapper node
+	const raw = `{"data":[{"id":"item-loan","eaId":10,"playerDef":{"eaId":10,"commonName":"Loan","overall":80,"position":14,"isFirstOwner":false,"loanDuration":7}},{"id":"item-unknown","eaId":11,"playerDef":{"eaId":11,"commonName":"Unknown","overall":80,"position":14}}]}`
+	if err := jsonUnmarshalNode([]byte(raw), &wrapper); err != nil {
+		t.Fatal(err)
+	}
+	nodes := wrapper.nodes("data")
+	loan := mapClubPlayer(nodes[0], "27", lens{})
+	unknown := mapClubPlayer(nodes[1], "27", lens{})
+	if loan.FirstOwner == nil || *loan.FirstOwner || loan.Loan == nil || !*loan.Loan {
+		t.Fatalf("estados explícitos perdidos: primeiro_dono=%v empréstimo=%v", loan.FirstOwner, loan.Loan)
+	}
+	if unknown.FirstOwner != nil || unknown.Loan != nil {
+		t.Fatalf("campo ausente deve continuar desconhecido: primeiro_dono=%v empréstimo=%v", unknown.FirstOwner, unknown.Loan)
 	}
 }
 

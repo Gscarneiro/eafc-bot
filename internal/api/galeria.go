@@ -342,6 +342,14 @@ func (s *Server) handleGaleriaColecao(w http.ResponseWriter, r *http.Request) {
 	if cards == nil {
 		cards = []galeria.Card{}
 	}
+	overrides, err := gs.ListGalleryOverrides(r.Context(), cycle, club, platform)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// A coleção é a visão do motor, não o arquivo bruto. Sem isso a pessoa
+	// salvava primeiro dono e a tela ainda mostrava "desconhecido".
+	cards = galeria.ApplyOverrides(cards, overrides)
 	writeJSON(w, struct {
 		Value []galeria.Card `json:"value"`
 		Count int            `json:"@odata.count"`
@@ -370,6 +378,20 @@ func (s *Server) handleGaleriaColecaoUpdate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	cycle, club, platform := s.galleryContext(r)
+	if saved, err := gs.ListGalleryOverrides(r.Context(), cycle, club, platform); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	} else {
+		for _, old := range saved {
+			if old.CardID == in.CardID {
+				in = mergeGalleryOverride(old, in)
+				break
+			}
+		}
+	}
+	if in.Source == "" {
+		in.Source = "correção manual"
+	}
 	if err := gs.SaveGalleryOverride(r.Context(), cycle, club, platform, in); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -382,6 +404,30 @@ func (s *Server) handleGaleriaColecaoUpdate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, in)
+}
+
+// mergeGalleryOverride evita que uma correção parcial (por exemplo, primeiro
+// dono) apague procedência, elegibilidade ou versão original já informadas.
+func mergeGalleryOverride(old, next galeria.CollectionOverride) galeria.CollectionOverride {
+	if next.FirstOwner == nil {
+		next.FirstOwner = old.FirstOwner
+	}
+	if next.Loan == nil {
+		next.Loan = old.Loan
+	}
+	if next.Eligible == nil {
+		next.Eligible = old.Eligible
+	}
+	if next.ItemScore == nil {
+		next.ItemScore = old.ItemScore
+	}
+	if next.OriginalPlayerID == nil {
+		next.OriginalPlayerID = old.OriginalPlayerID
+	}
+	if next.Source == "" {
+		next.Source = old.Source
+	}
+	return next
 }
 
 func (s *Server) handleGaleriaColecaoDelete(w http.ResponseWriter, r *http.Request) {

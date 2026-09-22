@@ -47,3 +47,20 @@ afirmar que um item foi resgatado no jogo.
 ## Limitações
 
 O perfil público do GG Club não fornece um histórico Gallery completo nem comprova primeiro dono para todos os itens. A implementação acumula cartas observadas nos snapshots e aceita correções manuais. Pools truncados, regras desconhecidas e combinações limitadas pelo orçamento de busca mantêm cobertura parcial; o bot não afirma impossibilidade ou máximo global nesses casos.
+
+## Validação no jogo: LALIGA EA SPORTS em 20/09/2026
+
+O bundle público contém `floor(max(percentual * subtotal - 1, 0) / 100)`, mas
+a interface do jogo diverge nos produtos exatamente divisíveis por 100. No
+caso real de 30 cartas, a tela mostra `500% × 12.910 = 64.550` para First
+Owner. O `-1` produziria 64.549 e o total seria 81.449, enquanto o jogo mostra
+81.454. A implementação usa, portanto, `floor(percentual * subtotal / 100)`
+com inteiros de 64 bits: as tags continuam aditivas, e a previsão reproduz a
+fonte de verdade jogável.
+
+O GG Club fornece `playerDef.isFirstOwner` e `playerDef.loanDuration` quando
+esses dados existem. A coleta preserva os dois como verdadeiro, falso ou
+desconhecido: inegociável não prova primeiro dono e duração nula não vira
+empréstimo falso. Para esta combinação, as seis cartas históricas sem
+procedência recuperável receberam confirmação manual limitada ao caso; Gordon
+foi marcado explicitamente como não-primeiro-dono.

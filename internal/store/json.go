@@ -646,6 +646,26 @@ func (s *JSONStore) SaveGalleryOverride(ctx context.Context, cycle, club, platfo
 	found := false
 	for i := range rows {
 		if rows[i].CardID == override.CardID {
+			// Escritas podem vir de importação e não só do handler HTTP; manter
+			// os campos já confirmados evita perder uma correção ao salvar outra.
+			if override.FirstOwner == nil {
+				override.FirstOwner = rows[i].FirstOwner
+			}
+			if override.Loan == nil {
+				override.Loan = rows[i].Loan
+			}
+			if override.Eligible == nil {
+				override.Eligible = rows[i].Eligible
+			}
+			if override.ItemScore == nil {
+				override.ItemScore = rows[i].ItemScore
+			}
+			if override.OriginalPlayerID == nil {
+				override.OriginalPlayerID = rows[i].OriginalPlayerID
+			}
+			if override.Source == "" {
+				override.Source = rows[i].Source
+			}
 			rows[i] = override
 			found = true
 			break

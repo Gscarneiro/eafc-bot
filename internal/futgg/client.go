@@ -332,6 +332,18 @@ func New(cfg Config) *Client {
 	if cfg.BaseURL == "" {
 		cfg = DefaultConfig()
 	}
+	// Configurações criadas antes da Gallery não têm essas chaves. Acrescentar
+	// somente as ausentes mantém qualquer URL personalizada e evita uma coleta
+	// silenciosamente sem catálogo, que deixaria a coleção sem reavaliação.
+	if cfg.Endpoints == nil {
+		cfg.Endpoints = map[string]string{}
+	}
+	galleryDefaults := DefaultConfig().Endpoints
+	for _, logical := range []string{"gallery_catalog", "gallery_pool"} {
+		if _, configured := cfg.Endpoints[logical]; !configured {
+			cfg.Endpoints[logical] = galleryDefaults[logical]
+		}
+	}
 	if cfg.Concurrency <= 0 {
 		cfg.Concurrency = 6
 	}

@@ -175,8 +175,14 @@ func DefaultConfig() Config {
 			// ao final — inclusive o GG Rating final, que a carta sozinha
 			// não tem enquanto não evoluiu de verdade. Ver evopaths.go.
 			"evolution_paths": "/api/fut/evolutions/v2/{cycle}/paths/v2/{id}/",
-			"gallery_catalog": "/api/fut/gallery/fc{cycle}/",
-			"gallery_pool":    "/api/fut/gallery/fc{cycle}/sets/{setId}/pool/",
+			// O GG Rating da carta em CADA posição (o elenco só manda o da
+			// melhor). É a rota que a página da carta usa para a tabela "GG
+			// Rating" — queryKey ["ggRating","player-metarank",eaId,ciclo] no
+			// bundle, getPlayerMetarank: metarank/player/:eaId/ com
+			// ?game=<ciclo>. Testada ao vivo em 23/09/2026. Ver gg_posicao.go.
+			"gg_rating_posicao": "/api/fut/metarank/player/{id}/?game={cycle}",
+			"gallery_catalog":   "/api/fut/gallery/fc{cycle}/",
+			"gallery_pool":      "/api/fut/gallery/fc{cycle}/sets/{setId}/pool/",
 		},
 		UserAgent:      defaultUA,
 		RequestsPerSec: 3,
@@ -339,7 +345,7 @@ func New(cfg Config) *Client {
 		cfg.Endpoints = map[string]string{}
 	}
 	galleryDefaults := DefaultConfig().Endpoints
-	for _, logical := range []string{"gallery_catalog", "gallery_pool"} {
+	for _, logical := range []string{"gallery_catalog", "gallery_pool", "gg_rating_posicao"} {
 		if _, configured := cfg.Endpoints[logical]; !configured {
 			cfg.Endpoints[logical] = galleryDefaults[logical]
 		}

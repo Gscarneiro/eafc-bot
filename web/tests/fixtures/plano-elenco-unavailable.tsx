@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import PlanoElenco from "../../src/pages/PlanoElenco";
+import TimePlanejador from "../../src/pages/TimePlanejador";
 
-createRoot(document.getElementById("root")!).render(<BrowserRouter><PlanoElenco /></BrowserRouter>);
+createRoot(document.getElementById("root")!).render(<BrowserRouter><TimePlanejador regua={0} /></BrowserRouter>);

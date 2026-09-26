@@ -143,6 +143,59 @@ func TestVerificarNaoConfundeOraculoAusenteComQuimicaZero(t *testing.T) {
 	}
 }
 
+// clubeLigasFemininas lê o retrato REAL do XI de 22-23/09/2026: Yui
+// Hasegawa e Nicole Anyomi (Barclays Women's Super League, junto com Grace
+// Geyoro) divergiam em +1 cada sob o degrau de liga masculino — a amostra
+// que motivou LigaMulher. Vira teste de regressão pelo mesmo motivo que
+// xi_2026-08-24.json: se um dia alguém "simplificar" o degrau de volta para
+// um só, isto quebra e conta por quê.
+func clubeLigasFemininas(t *testing.T) domain.Club {
+	t.Helper()
+	b, err := os.ReadFile("testdata/xi_2026-09-23_ligas_femininas.json")
+	if err != nil {
+		t.Fatalf("lendo testdata: %v", err)
+	}
+	var club domain.Club
+	if err := json.Unmarshal(b, &club); err != nil {
+		t.Fatalf("decodificando testdata: %v", err)
+	}
+	if len(club.Squad.Starters) != 11 {
+		t.Fatalf("fixture com %d titulares, esperava 11", len(club.Squad.Starters))
+	}
+	return club
+}
+
+func TestModeloDeVinculosReproduzXIComLigaFeminina(t *testing.T) {
+	club := clubeLigasFemininas(t)
+	v := Verificar(modeloFC26Vinculos, club)
+
+	if v.Status != StatusConfere {
+		t.Fatalf("status = %q (%s), esperava confere", v.Status, v.Detalhe)
+	}
+	if v.Calculado != 29 || v.Observado != 29 {
+		t.Fatalf("calculado=%d observado=%d, esperava 29/29", v.Calculado, v.Observado)
+	}
+	if v.Conferem != 11 || v.Total != 11 {
+		t.Fatalf("%d de %d jogadores conferem, esperava 11 de 11", v.Conferem, v.Total)
+	}
+}
+
+// Sem LigaMulher, o mesmo XI subestima Hasegawa e Anyomi em 1 ponto cada —
+// é a divergência real que a calibração pegou em 22/09/2026.
+func TestSemLigaMulherOMesmoXIDiverge(t *testing.T) {
+	club := clubeLigasFemininas(t)
+	semAjuste := modeloFC26Vinculos
+	semAjuste.LigaMulher = nil
+
+	v := Verificar(semAjuste, club)
+	if v.Status != StatusDiverge {
+		t.Fatalf("status = %q, esperava diverge sem o degrau de liga feminina", v.Status)
+	}
+	if v.Calculado != 27 {
+		t.Fatalf("calculado = %d, esperava 27 (2 a menos: Hasegawa e Anyomi)", v.Calculado)
+	}
+}
+
 // O total é uma soma nossa dos 11 valores por carta, então um modelo errado
 // pode acertá-lo por cancelamento de erros. A verificação compara POR
 // JOGADOR justamente para pegar isso.

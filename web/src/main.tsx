@@ -4,9 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-
 import App from "./App";
 import Status from "./pages/Status";
 import Time from "./pages/Time";
-import ClubInsights from "./pages/ClubInsights";
 import Gauntlet from "./pages/Gauntlet";
-import PlanoElenco from "./pages/PlanoElenco";
 import EditorElenco from "./pages/EditorElenco";
 import CardDetail from "./pages/CardDetail";
 import Mercado from "./pages/Mercado";
@@ -33,9 +31,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route element={<App />}>
           <Route index element={<Status />} />
           <Route path="time" element={<Time />} />
-          <Route path="time/insights" element={<ClubInsights />} />
+          <Route path="time/insights" element={<Navigate to="/time#limpeza" replace />} />
           <Route path="time/gauntlet" element={<Gauntlet />} />
-		  <Route path="time/planos" element={<PlanoElenco />} />
+		  <Route path="time/planos" element={<Navigate to="/time#planejador" replace />} />
           <Route path="time/editor" element={<EditorElenco />} />
 		  <Route path="galeria" element={<Galeria />} />
 		  <Route path="galeria/colecao" element={<GaleriaColecao />} />

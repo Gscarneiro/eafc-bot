@@ -121,10 +121,11 @@
 .panel-body { padding: 12px; }
 
 /* .tab-strip é a barra de abas cheia (cenários do Planejador, rodadas do
-   Gauntlet, categorias de carta do Editor) — células de largura igual coladas
-   num fio de 1px, sem o visual de pílula do .toggle. As três telas mostravam
-   a mesma barra com nome de classe próprio; unificada aqui pelo mesmo motivo
-   que gerou o .panel acima. */
+   Gauntlet) — células de largura igual coladas num fio de 1px, sem o visual
+   de pílula do .toggle. As telas mostravam a mesma barra com nome de classe
+   próprio; unificada aqui pelo mesmo motivo que gerou o .panel acima. O
+   Editor saiu dela no refresh: as categorias de carta lá são abas
+   sublinhadas de largura livre (.editor-pool-tabs). */
 .tab-strip {
   display: flex;
   gap: 1px;

@@ -8,10 +8,11 @@ import (
 )
 
 // Role é uma função tática que o fut.gg reconhece (Wide Playmaker, Box-To-Box,
-// Deep-Lying Playmaker...). Uma carta não recebe uma nota por função — o
-// campo que carregaria isso, roleGgRatings, vem sempre nulo em toda carta que
-// já testamos — mas declara EM QUAIS funções ela é boa/muito boa, e é essa
-// proficiência que fica no relatório por posição.
+// Deep-Lying Playmaker...). A carta declara EM QUAIS funções ela é boa/muito
+// boa (rolesPlus/rolesPlusPlus), e é essa proficiência que fica no relatório
+// por posição. A NOTA por função não vem daqui: no elenco do FC 27 o campo
+// roleGgRatings chega nulo, e o GG por posição sai da rota do metarank, com
+// outra numeração de função — ver gg_posicao.go.
 type Role struct {
 	Name     string
 	Position domain.Position

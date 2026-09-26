@@ -204,7 +204,23 @@ type Pick struct {
 	ItemScore int    `json:"item_score"`
 	Bonus     int    `json:"bonus,omitempty"`
 	Reason    string `json:"reason,omitempty"`
+	// Posição, clube, OVR e primeiro dono só descrevem a carta para a tela
+	// de detalhe ("LW · Real Madrid", coluna 1º dono); não entram na conta
+	// nem no InputHash. FirstOwner nil = desconhecido, como em Card.
+	Position   string `json:"position,omitempty"`
+	Club       string `json:"club,omitempty"`
+	Rating     int    `json:"rating,omitempty"`
+	FirstOwner *bool  `json:"first_owner,omitempty"`
 }
+
+func pickDe(c Card) Pick {
+	position := c.Position
+	if position == "" && len(c.Positions) > 0 {
+		position = c.Positions[0]
+	}
+	return Pick{CardID: c.ID, Name: c.Name, ItemScore: c.ItemScore, Position: position, Club: c.Club, Rating: c.Rating, FirstOwner: c.FirstOwner}
+}
+
 type Evaluation struct {
 	SetID         string           `json:"set_id"`
 	Status        EvaluationStatus `json:"status"`
@@ -497,10 +513,10 @@ func bonus(picks []Card, rules []TagRule) (int, []TagBreakdown, []string, bool) 
 		bd := TagBreakdown{Name: r.Name, Operator: r.Operator, Attribute: r.Attribute, MatchedCount: count, MatchedScore: sum, BonusPercent: tier, UnknownCount: len(unknown)}
 		for _, c := range matched {
 			bd.MatchedIDs = append(bd.MatchedIDs, c.ID)
-			bd.MatchedCards = append(bd.MatchedCards, Pick{CardID: c.ID, Name: c.Name, ItemScore: c.ItemScore})
+			bd.MatchedCards = append(bd.MatchedCards, pickDe(c))
 		}
 		for _, c := range unknown {
-			bd.UnknownCards = append(bd.UnknownCards, Pick{CardID: c.ID, Name: c.Name, ItemScore: c.ItemScore})
+			bd.UnknownCards = append(bd.UnknownCards, pickDe(c))
 		}
 		if len(unknown) > 0 {
 			pending = true
@@ -613,7 +629,7 @@ func Evaluate(in Input) []Record {
 			ev.Warnings = append(ev.Warnings, "limite de busca atingido; resultado parcial")
 		}
 		for _, c := range best {
-			ev.Picks = append(ev.Picks, Pick{CardID: c.ID, Name: c.Name, ItemScore: c.ItemScore})
+			ev.Picks = append(ev.Picks, pickDe(c))
 		}
 		if set.PoolTruncated {
 			ev.Warnings = append(ev.Warnings, "pool de cartas truncado; a ausência não prova inelegibilidade")

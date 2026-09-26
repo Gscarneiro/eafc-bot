@@ -56,12 +56,11 @@ test("o campo exibe o GG da vaga que decide o elo mais fraco", async () => {
 });
 
 test("o campo usa a cópia física como chave e mostra os dois contextos", async () => {
-  const pitch = await read("src/components/Pitch.tsx");
   const time = await read("src/pages/Time.tsx");
-  assert.match(pitch, /card\.player\.club_item_id \|\|/);
+  assert.match(time, /starter\.player\.club_item_id \|\|/);
   assert.match(time, /p\.club_item_id \|\|/);
-  assert.match(pitch, /current=\{player\.gg_rating\}/);
-  assert.match(time, /positional=\{positionalGGRating\}/);
+  assert.match(time, /current=\{p\.gg_rating\}/);
+  assert.match(time, /positional=\{score\}/);
 });
 
 // A tela recebe tanto o GG publicado quanto a nota da régua ativa. Se a

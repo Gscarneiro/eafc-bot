@@ -262,6 +262,15 @@ type Player struct {
 	// histórico. Sua equivalência com GG Rating não foi confirmada, portanto
 	// não participa de avaliações, recomendações ou notas exibidas.
 	GGRatings map[Position]float64 `json:"gg_ratings,omitempty"`
+	// GGRatingPorPosicao é o GG Rating que o fut.gg publica para a carta em
+	// CADA posição que ela joga — o mesmo número da tabela "GG Rating" da
+	// página da carta (Hasegawa: CM 85.83, CDM 85.53, CAM 81.2). O elenco
+	// do GG Club só manda GGRating/GGRatingPos, a nota da MELHOR posição;
+	// este mapa vem de outra rota e só é preenchido quando a nota dele na
+	// GGRatingPos confere com o GGRating publicado (ver
+	// futgg.conferirGGPorPosicao). Diferente de GGRatings: aquele é o
+	// metarank por lista de posição, que NÃO bate com o GG da carta.
+	GGRatingPorPosicao map[Position]float64 `json:"gg_rating_por_posicao,omitempty"`
 	// NotasNaRegua é uma projeção transitória do avaliador escolhido para os
 	// algoritmos de escalação. Não persiste como se fosse dado do FUT.GG nem
 	// compartilha o campo legado de metarank.
@@ -304,6 +313,23 @@ type Player struct {
 	// zero significa "esta fonte não trouxe" (só a rota de momentum manda
 	// esse campo — o mesmo convênio de GGRating).
 	MomentumPct float64 `json:"momentum_pct,omitempty"`
+
+	// Women vem do campo "gender" do fut.gg (2 = feminino, 1 = masculino no
+	// elenco do GG Club; a listagem de mercado não manda o campo e a carta
+	// fica false por padrão). Existe porque a química de LIGA usa um degrau
+	// diferente para ligas femininas (ver internal/chemistry) — sem isto o
+	// pacote de química precisaria adivinhar o gênero pelo nome da liga.
+	Women bool `json:"women,omitempty"`
+	// FullChemistry vem de "isFullChemistry" (espelhado em
+	// rarity.chemistryProfile.isFullChemistry) — o próprio fut.gg marcando
+	// que a carta vale química máxima sozinha, sem depender de clube/liga/
+	// nação. Confirmado ao vivo em 22/09/2026 numa carta "Base Hall of FUT"
+	// (Giovani dos Santos) que ficava presa em 3/3 em todo XI, mesmo sem
+	// vínculo nenhum que justificasse isso. NÃO cobre Icon/Hero: o fut.gg
+	// marca os dois com isFullChemistry:false (dado incompleto da fonte, não
+	// erro daqui) — por isso eles continuam com Curinga próprio em
+	// internal/chemistry.
+	FullChemistry bool `json:"full_chemistry,omitempty"`
 }
 
 // PlayerKey identifica o JOGADOR, não a carta — responde "estas duas cartas
@@ -329,18 +355,25 @@ func (p Player) PlayerKey() string {
 }
 
 // GGRatingVersion invalida planos calculados com outra regra de notas.
-// A versão zero identifica snapshots anteriores à comparação das fontes.
-const GGRatingVersion = 2
+// A versão zero identifica snapshots anteriores à comparação das fontes; a
+// 3 passou a aceitar o GG publicado para cada posição (GGRatingPorPosicao),
+// e um plano da versão 2 deixaria sem nota vagas que agora têm.
+const GGRatingVersion = 3
 
 // GGRatingAt devolve a nota aplicável ao lugar físico da escalação.
 //
-// Fora de uma projeção explícita do avaliador, só a nota da própria carta
-// confirma GG Rating na posição publicada. Metarank legado não preenche
-// lacunas: sua equivalência com essa nota não foi validada.
+// Fora de uma projeção explícita do avaliador, só o GG publicado pelo
+// fut.gg confirma nota numa posição: o da tabela por posição quando a coleta
+// trouxe (GGRatingPorPosicao), senão o da melhor posição, só nela. Metarank
+// legado não preenche lacunas: sua equivalência com essa nota não foi
+// validada.
 func (p Player) GGRatingAt(pos Position) (float64, bool) {
 	if p.NotasNaRegua != nil {
 		v := p.NotasNaRegua[pos]
 		return v, v > 0
+	}
+	if v := p.GGRatingPorPosicao[pos]; v > 0 {
+		return v, true
 	}
 	ratingPos := p.GGRatingPos
 	if ratingPos == "" {

@@ -32,10 +32,11 @@ func TestCheckRobotsContaRotasConfiguradasBloqueadas(t *testing.T) {
 
 	c.checkRobots(context.Background())
 
-	// O cliente completa configurações antigas com catálogo e pool da Gallery;
-	// os dois também são endpoints de produção sob /api/.
-	if got := c.Stats().RobotsBypassed; got != 4 {
-		t.Fatalf("esperava 4 rotas configuradas contadas como bloqueadas, veio %d", got)
+	// O cliente completa configurações antigas com catálogo e pool da Gallery
+	// e com a nota por posição (metarank/player); os três também são
+	// endpoints de produção sob /api/ e precisam aparecer na conta.
+	if got := c.Stats().RobotsBypassed; got != 5 {
+		t.Fatalf("esperava 5 rotas configuradas contadas como bloqueadas, veio %d", got)
 	}
 }
 

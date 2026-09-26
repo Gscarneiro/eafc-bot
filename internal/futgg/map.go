@@ -81,6 +81,11 @@ func mapPlayer(n node, cycle string, l lens) domain.Player {
 			p.GGRatingPos = pos
 		}
 	}
+	// Só o elenco do GG Club manda "gender" e "isFullChemistry" — a listagem
+	// de mercado não, e as duas ficam no zero-value (false), do mesmo jeito
+	// que GGRating fica 0 quando a fonte não traz.
+	p.Women = n.int("gender") == 2
+	p.FullChemistry = n.bool_("isFullChemistry", "rarity.chemistryProfile.isFullChemistry")
 	p.ImageURL = cardImageURL(n)
 	p.BasePlayerEaID = n.i64("basePlayerEaId", "base_player_ea_id")
 	p.BasePlayerSlug = n.str("basePlayerSlug", "base_player_slug")

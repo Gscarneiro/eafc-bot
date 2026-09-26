@@ -1,0 +1,89 @@
+/* Gramado com cartas FC 27 — ver FutPitch.tsx. Uma cor por significado,
+   como no resto do app: turf = na posição/acima da média, alert = upgrade
+   ou evolução disponível (ou fora de posição no Editor), cost = menor nota,
+   coin = alvo que ainda não é seu. */
+
+.fut-pitch { position: relative; height: 720px; overflow: hidden; background: repeating-linear-gradient(0deg, var(--pitch-fill) 0 60px, var(--pitch-stripe) 60px 120px); }
+.fut-pitch.tall { height: 816px; }
+.fut-pitch-mark { position: absolute; pointer-events: none; border: 1px solid var(--pitch-line); }
+.fut-pitch-mark.outline { inset: 12px; }
+.fut-pitch-mark.halfway { left: 12px; right: 12px; top: 50%; height: 1px; border: 0; background: var(--pitch-line); }
+.fut-pitch-mark.circle { left: 50%; top: 50%; width: 132px; height: 132px; border-radius: 50%; transform: translate(-50%, -50%); }
+.fut-pitch-mark.box { left: 50%; width: 46%; height: 15%; transform: translateX(-50%); }
+.fut-pitch-mark.box.small { width: 22%; height: 6.5%; }
+.fut-pitch-mark.box.top { top: 12px; border-top: 0; }
+.fut-pitch-mark.box.bottom { bottom: 12px; border-bottom: 0; }
+.fut-pitch-mark.spot { width: 4px; height: 4px; border: 0; border-radius: 50%; background: var(--pitch-line); transform: translate(-50%, -50%); left: 50%; }
+.fut-pitch-mark.spot.center { top: 50%; width: 5px; height: 5px; }
+.fut-pitch-mark.spot.penalty.top { top: 11%; }
+.fut-pitch-mark.spot.penalty.bottom { top: 89%; }
+.fut-pitch-note { position: absolute; bottom: 14px; color: var(--ink-4); font: 700 9px/1 var(--font-mono); letter-spacing: .18em; text-transform: uppercase; pointer-events: none; }
+.fut-pitch-note.left { left: 14px; }
+.fut-pitch-note.right { right: 14px; }
+
+/* left/top chegam inline, calculados pelo desenho da formação. */
+.fut-slot { position: absolute; z-index: 1; width: clamp(64px, 17%, 96px); transform: translate(-50%, -50%); }
+.fut-pitch.dense .fut-slot { width: clamp(48px, 14%, 76px); }
+
+/* .fut-card é a moldura — <a>, <button> ou <Link>, conforme a tela. */
+.fut-card { position: relative; display: block; width: 100%; padding: 0; border: 1px solid var(--rule-strong); border-top: 2px solid var(--turf); border-radius: 0; background: var(--raised); color: var(--ink); text-align: left; text-decoration: none; box-shadow: var(--card-shadow); cursor: pointer; transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease); }
+.fut-card:hover { color: var(--ink); transform: translateY(-2px); }
+.fut-card.tone-alert { border-color: var(--alert); }
+.fut-card.tone-cost { border-color: var(--cost); }
+.fut-card.tone-coin { border-color: var(--coin); }
+.fut-card.open { box-shadow: 0 0 0 2px var(--turf); }
+
+.fut-card-body { display: flex; gap: 7px; padding: 7px 8px 5px; }
+.fut-card-id { display: flex; flex: 0 0 24px; flex-direction: column; align-items: center; gap: 3px; width: 24px; }
+.fut-card-ovr { font: 700 19px/1 var(--font-mono); }
+.fut-card-pos { color: var(--turf); font: 700 9px/1 var(--font-mono); letter-spacing: .08em; }
+.fut-card.tone-alert .fut-card-pos { color: var(--alert); }
+.fut-card.tone-cost .fut-card-pos { color: var(--cost); }
+.fut-card.tone-coin .fut-card-pos { color: var(--coin); }
+.fut-card-id i { display: block; width: 16px; height: 1px; background: var(--rule-strong); }
+
+.fut-art { display: block; overflow: hidden; border: 1px solid var(--rule); background: repeating-linear-gradient(135deg, var(--sunk) 0 4px, transparent 4px 8px); }
+.fut-art.has-image { border-color: transparent; background: none; }
+.fut-art img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.fut-card-art { flex: 1; min-width: 0; height: 56px; }
+
+.fut-card-name { display: block; padding: 4px 8px; border-top: 1px solid var(--rule); background: var(--panel); font: 700 11px/1.2 var(--font-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fut-card-foot { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 6px; background: var(--panel); }
+.fut-card-score { font: 700 14px/1 var(--font-mono); }
+.fut-card-score.alert { color: var(--alert); }
+.fut-card-score.cost { color: var(--cost); }
+.fut-card-pips { display: flex; gap: 2px; }
+.fut-card-pips span { width: 4px; height: 9px; background: var(--rule-strong); }
+.fut-card-pips span.on { background: var(--turf); }
+.fut-card-badge { display: block; padding: 3px 8px 5px; font: 700 8.5px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
+.fut-card.tone-alert .fut-card-badge { background: var(--alert-bg); color: var(--alert); }
+.fut-card.tone-cost .fut-card-badge { background: var(--cost-bg); color: var(--cost); }
+.fut-card.tone-coin .fut-card-badge { background: var(--coin-bg); color: var(--coin); }
+
+.fut-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 8px 12px; border-top: 1px solid var(--rule); color: var(--ink-3); font: 600 9.5px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
+.fut-legend span { display: flex; align-items: center; gap: 5px; }
+.fut-legend i { display: block; width: 9px; height: 2px; background: var(--turf); }
+.fut-legend i.alert { background: var(--alert); }
+.fut-legend i.cost { background: var(--cost); }
+.fut-legend i.coin { background: var(--coin); }
+
+@media (max-width: 620px) {
+  .fut-pitch { height: 560px; }
+  .fut-pitch.tall { height: 640px; }
+  .fut-pitch-note { display: none; }
+  .fut-pitch.dense .fut-slot { width: clamp(44px, 14%, 56px); }
+  .fut-pitch.dense .fut-card-ovr { font-size: 12px; }
+  .fut-pitch.dense .fut-card-name { font-size: 8px; }
+  .fut-pitch.dense .fut-card-score { font-size: 10px; }
+  /* A carta desce para ~64px: sem espaço para a arte, a coluna de OVR e
+     posição vira linha e o nome/nota encolhem. */
+  .fut-card-art { display: none; }
+  .fut-card-body { padding: 5px 5px 3px; }
+  .fut-card-id { flex: 1; flex-direction: row; justify-content: space-between; width: auto; }
+  .fut-card-id i { display: none; }
+  .fut-card-ovr { font-size: 14px; }
+  .fut-card-name { padding: 3px 5px; font-size: 9.5px; }
+  .fut-card-foot { padding: 3px 5px 4px; }
+  .fut-card-score { font-size: 11.5px; }
+  .fut-card-badge { padding: 2px 5px 3px; font-size: 7px; }
+}

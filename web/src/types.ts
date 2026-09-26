@@ -632,6 +632,25 @@ export interface SavedSquadPlanInput {
 export interface SavedSquadPlanView {
   plano: SavedSquadPlan;
   pendencias?: string[];
+  /** Só vem quando as 11 vagas têm nota na coleta atual. */
+  media?: number;
+}
+
+export interface FormationSlot {
+  index: number;
+  posicao: Position;
+  x: number;
+  y: number;
+}
+
+export interface Formation {
+  nome: string;
+  vagas: FormationSlot[];
+}
+
+export interface FormationsResponse {
+  ciclo: string;
+  value: Formation[];
 }
 
 export interface SavedSquadPlansResponse {
@@ -648,6 +667,8 @@ export interface SquadEditorResponse {
   alvos?: SquadEditorTarget[] | null;
   funcoes?: SquadEditorRole[] | null;
   quimica_referencia?: ChemistryResult;
+  /** Média do XI do jogo pelo mesmo avaliador do rascunho; ausente se alguma vaga ficou sem nota. */
+  media_atual?: number;
   avaliacao: EvaluationContext;
 }
 
@@ -773,7 +794,16 @@ export interface TimeResponse {
   slot_outlook: SlotOutlook[] | null;
   price_series: Record<string, PricePoint[]> | null;
   price_history_status: Record<string, string> | null;
+  /** Clube inteiro (não só a página do banco) por faixa de overall — ver internal/api/time_leitura.go. */
+  distribuicao_ovr: FaixaOVR[] | null;
+  /** Ausente quando o histórico de preço não pôde ser lido. */
+  valor_xi?: ValorXI;
 }
+
+export interface FaixaOVR { faixa: string; min: number; max?: number; total: number; no_xi: number }
+// ValorXI só traz os dias em que TODOS os titulares cotados têm preço; os
+// untradeables e os sem histórico ficam fora da soma (sem_cotacao).
+export interface ValorXI { pontos: { dia: string; moedas: number }[]; cotadas: number; sem_cotacao: number }
 
 export interface PositionMapRow {
   index: number;
@@ -1223,7 +1253,7 @@ export interface TickerRow { name: string; role: string; trend: PriceTrend }
 
 export type GalleryGrade = "" | "D" | "C" | "B" | "A" | "S";
 export interface GalleryReward { id?: string; type?: string; label?: string; value?: number; count?: number; image_url?: string; }
-export interface GalleryPick { card_id: number; name: string; item_score: number; bonus?: number; reason?: string; }
+export interface GalleryPick { card_id: number; name: string; item_score: number; bonus?: number; reason?: string; position?: string; club?: string; rating?: number; /** ausente = primeiro dono desconhecido */ first_owner?: boolean; }
 export interface GalleryTagBreakdown { name: string; operator?: string; attribute?: string; matched_ids?: number[]; matched_cards?: GalleryPick[]; matched_count: number; matched_score: number; unknown_count?: number; unknown_cards?: GalleryPick[]; bonus_percent: number; bonus_points: number; next_min_items?: number; next_bonus_percent?: number; pending?: boolean; reason?: string; }
 export interface GalleryEvaluation { set_id: string; status: string; required: number; filled: number; score: number; base_score: number; bonus_score: number; tags?: GalleryTagBreakdown[]; grade: GalleryGrade; next_grade?: GalleryGrade; next_threshold?: number; picks?: GalleryPick[]; missing?: string[]; warnings?: string[]; coverage?: string; states?: number; max_proven?: boolean; input_hash?: string; engine_version?: string; computed_at: string; }
 export interface GallerySet { id: string; name: string; category?: string; category_id?: number; badge_url?: string; team_id?: number; required_cards: number; thresholds?: Record<string, number>; rewards?: Record<string, GalleryReward[]>; pool_size?: number; pool_truncated?: boolean; }

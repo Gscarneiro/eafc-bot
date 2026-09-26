@@ -15,6 +15,19 @@ var (
 	limiaresClube = []Limiar{{2, 1}, {4, 2}, {7, 3}}
 	limiaresLiga  = []Limiar{{3, 1}, {5, 2}, {8, 3}}
 	limiaresNacao = []Limiar{{2, 1}, {5, 2}, {8, 3}}
+
+	// limiaresLigaMulher é o degrau de LIGA para ligas femininas
+	// (domain.Player.Women) — calibrado contra o próprio jogo em
+	// 22/09/2026: Yui Hasegawa e Nicole Anyomi (Barclays Women's Super
+	// League, 3 titulares + 1 do coringa do Icon = 4) mostravam o SEGUNDO
+	// degrau (2 pontos) onde a tabela masculina, que só libera o segundo
+	// degrau em 5, ainda dava 1. O primeiro degrau (3) conferiu sem ajuste
+	// — uma titular sozinha na liga (+ coringa = 2) continuou em 0 nos dois
+	// dias em que isso apareceu. O terceiro degrau nunca foi observado
+	// nessa amostra (nenhuma liga feminina chegou a 8 titulares); herda o
+	// valor da tabela masculina até aparecer evidência própria — "na dúvida,
+	// não afirma".
+	limiaresLigaMulher = []Limiar{{3, 1}, {4, 2}, {8, 3}}
 )
 
 // curingas é a mesma lista nos dois modelos. A ORDEM importa: Icon primeiro,
@@ -72,6 +85,7 @@ var modeloFC26Observado = Modelo{
 	Base:              3,
 	Clube:             limiaresClube,
 	Liga:              limiaresLiga,
+	LigaMulher:        limiaresLigaMulher,
 	Nacao:             limiaresNacao,
 	MaxPorJogador:     3,
 	MaxDoTime:         33,
@@ -91,6 +105,7 @@ var modeloFC26Vinculos = Modelo{
 	Base:              0,
 	Clube:             limiaresClube,
 	Liga:              limiaresLiga,
+	LigaMulher:        limiaresLigaMulher,
 	Nacao:             limiaresNacao,
 	MaxPorJogador:     3,
 	MaxDoTime:         33,

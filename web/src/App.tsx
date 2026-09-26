@@ -10,7 +10,7 @@ import "./shell.css";
 import "./shared.css"; // .btn (o botão "coletar" da topbar) mora em shared.css
 
 type IconName =
-  | "today" | "agenda" | "squad" | "insights" | "plan" | "gauntlet"
+  | "today" | "agenda" | "squad" | "plan" | "gauntlet"
   | "market" | "mesa" | "capital" | "evolution" | "catalogo" | "salvos" | "gallery"
   | "settings" | "feedback";
 
@@ -18,7 +18,6 @@ const ICON_PATHS: Record<IconName, string> = {
   today: "M4 5h16M5 3v4m14-4v4M5 9h14M7 13h3m-3 4h5M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5Z",
   agenda: "M4 6h16M4 12h16M4 18h10",
   squad: "M12 3 14 8l5 .5-3.8 3.3 1.2 5.1-4.4-2.8-4.4 2.8 1.2-5.1L5 8.5 10 8l2-5Z",
-  insights: "M5 19V10m5 9V5m5 14v-6m5 6V8",
   plan: "M4 5h16M4 12h16M4 19h16M9 3v4m6 10v4",
   gauntlet: "M7 4h10v4a5 5 0 0 1-10 0V4Zm5 9v4m-3 3h6",
   market: "M4 19V5m0 14h16M7 16l3-4 3 2 5-7",
@@ -68,9 +67,9 @@ const GRUPOS: NavGroup[] = [
   {
     title: "Elenco · Squad",
     items: [
+      // Insights e Planejador viraram seções do Meu time (Limpeza do clube e
+      // Planejador) — as rotas antigas redirecionam para #limpeza/#planejador.
       { to: "/time", label: "Meu time", end: true, icon: "squad" },
-      { to: "/time/insights", label: "Insights", icon: "insights" },
-      { to: "/time/planos", label: "Planejador", icon: "plan" },
       { to: "/time/editor", label: "Editor", icon: "plan" },
       { to: "/time/gauntlet", label: "Gauntlet", icon: "gauntlet" },
       { to: "/galeria", label: "FUT Gallery", icon: "gallery", badge: (r) => (r && r.gallery_opportunities > 0 ? { text: String(r.gallery_opportunities), tone: "alert" } : null) },

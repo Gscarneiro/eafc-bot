@@ -70,6 +70,12 @@ type Modelo struct {
 	Liga  []Limiar
 	Nacao []Limiar
 
+	// LigaMulher é o limiar de LIGA para titulares de ligas femininas
+	// (domain.Player.Women), quando diferente de Liga. nil usa Liga para
+	// todo mundo. Só o degrau de liga muda — clube e nação de carta feminina
+	// conferiram sem ajuste contra o próprio jogo, ver modelos.go.
+	LigaMulher []Limiar
+
 	MaxPorJogador int
 	MaxDoTime     int
 
@@ -176,6 +182,12 @@ func DoClube(club domain.Club) ([]Titular, bool) {
 
 // classificar acha o Curinga que descreve a carta, ou nil para carta comum.
 // O primeiro que casar vence — ver o comentário de Curinga sobre precedência.
+//
+// Icon e Hero são checados primeiro por NOME (LigaIgual/VersaoContem) porque
+// o fut.gg marca os dois com isFullChemistry:false — dado incompleto da
+// fonte para essas duas raridades específicas. domain.Player.FullChemistry
+// só entra como fallback, para qualquer OUTRA raridade que o fut.gg já marca
+// certo (ver curingaQuimicaCheia).
 func (m Modelo) classificar(p domain.Player) *Curinga {
 	for i := range m.Curingas {
 		c := &m.Curingas[i]
@@ -186,7 +198,25 @@ func (m Modelo) classificar(p domain.Player) *Curinga {
 			return c
 		}
 	}
+	if p.FullChemistry {
+		return &curingaQuimicaCheia
+	}
 	return nil
+}
+
+// curingaQuimicaCheia cobre qualquer raridade que o fut.gg já marca como
+// química máxima (isFullChemistry) sem precisar cadastrar cada uma pelo
+// nome. Confirmado ao vivo em 22/09/2026: uma carta "Base Hall of FUT"
+// (Giovani dos Santos) ficava presa em 3/3 em todo XI replayado, mesmo sem
+// clube, liga ou nação em comum que justificasse isso — e o fut.gg já
+// marcava essa carta com isFullChemistry:true. Peso 1 (não o dobro de
+// Icon/Hero) porque a fonte não sinaliza bônus extra para os OUTROS
+// titulares (rarity.chemistryProfile.extraSquad*Chemistry vinha 0 nessa
+// carta) — só a química da própria carta é máxima.
+var curingaQuimicaCheia = Curinga{
+	Nome:            "Química cheia",
+	SempreEmPosicao: true, SempreMaximo: true,
+	PesoClube: 1, PesoLiga: 1, PesoNacao: 1,
 }
 
 // emPosicao aplica a regra "Posição certa, contribuindo" do próprio jogo.
@@ -284,9 +314,13 @@ func (c *Contador) avaliar(t Titular) Jogador {
 		return j
 	}
 
+	tabelaLiga := c.m.Liga
+	if t.Player.Women && c.m.LigaMulher != nil {
+		tabelaLiga = c.m.LigaMulher
+	}
 	j.Clube = pontosPara(c.m.Clube, c.clubes[t.Player.Club])
 	j.Nacao = pontosPara(c.m.Nacao, c.nacoes[t.Player.Nation])
-	j.Liga = pontosPara(c.m.Liga, c.ligas[t.Player.League]+c.coringa)
+	j.Liga = pontosPara(tabelaLiga, c.ligas[t.Player.League]+c.coringa)
 	j.Vinculo = j.Clube + j.Liga + j.Nacao
 
 	total := c.m.Base + j.Vinculo

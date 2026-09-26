@@ -185,6 +185,17 @@ func avaliarFutGG(card domain.Player, pos domain.Position, ctx domain.ContextoAv
 	if ctx.Ciclo == "" {
 		ctx.Ciclo = card.Cycle
 	}
+	// O GG por posição é o mesmo número, na mesma escala, que o fut.gg
+	// publica como GG da carta — a nota da melhor posição é só o máximo
+	// dele. Por isso usa a mesma chave "gg_rating_carta": a comparação
+	// entre titular e reserva (avaliacoesComparaveis) e a leitura do banco
+	// continuam tratando os dois como a mesma régua.
+	if v := card.GGRatingPorPosicao[pos]; v > 0 {
+		return domain.AvaliacaoCarta{Disponivel: true, Nota: v, Contexto: ctx,
+			Cobertura:   []string{"GG Rating da carta nesta posição publicado pelo FUT.GG"},
+			Componentes: []domain.ComponenteAvaliacao{{Chave: "gg_rating_carta", Rotulo: "GG Rating da carta na vaga", Valor: v}},
+		}
+	}
 	ratingPos := card.GGRatingPos
 	if ratingPos == "" {
 		ratingPos = card.Position
@@ -195,7 +206,14 @@ func avaliarFutGG(card domain.Player, pos domain.Position, ctx domain.ContextoAv
 			Componentes: []domain.ComponenteAvaliacao{{Chave: "gg_rating_carta", Rotulo: "GG Rating da carta", Valor: card.GGRating}},
 		}
 	}
-	return domain.AvaliacaoCarta{Contexto: ctx, Motivo: "GG Rating do FUT.GG ausente para esta carta nesta posição", Cobertura: []string{"GG Rating da carta sem cobertura nesta vaga"}}
+	// "Ausente" soava como carta sem nota nenhuma; na prática a carta quase
+	// sempre tem GG, só que publicado em outra posição. Dizer qual é o que
+	// deixa o usuário conferir no site em vez de desconfiar do bot.
+	motivo := "GG Rating do FUT.GG ausente para esta carta nesta posição"
+	if card.GGRating > 0 && ratingPos != "" {
+		motivo = fmt.Sprintf("o FUT.GG só trouxe GG %.1f em %s nesta coleta, sem nota em %s", card.GGRating, ratingPos, pos)
+	}
+	return domain.AvaliacaoCarta{Contexto: ctx, Motivo: motivo, Cobertura: []string{"GG Rating da carta sem cobertura nesta vaga"}}
 }
 
 // motivoAvaliacaoIndisponivel mantém a lacuna na fonte rastreável até a vaga
@@ -391,6 +409,7 @@ func ClubeNaRegua(club domain.Club, evaluator Avaliador, ctx domain.ContextoAval
 		player.GGRating = 0
 		player.GGRatingPos = ""
 		player.GGRatings = nil
+		player.GGRatingPorPosicao = nil
 		player.NotasNaRegua = make(map[domain.Position]float64)
 		positions := append([]domain.Position{player.Position}, player.AltPositions...)
 		for _, pos := range positions {

@@ -4,6 +4,7 @@ import type {
   ConfigResponse,
 	EvaluationCatalogResponse,
   EvolutionFavoritesResponse,
+	FormationsResponse,
   EvolutionPlanResponse,
   EvolutionProgressResponse,
   EvolutionProgressListResponse,
@@ -35,6 +36,7 @@ import type {
   UISettings,
   ODataPage,
   WatchlistCollection,
+  WatchlistEntry,
   GalleryPage,
   GalleryRecord,
   GalleryCollection,
@@ -91,12 +93,18 @@ export async function addWatchlist(entry: { ea_id: number; name: string; target_
   if (!res.ok) throw new ApiError(res.status, "Não foi possível gravar a watchlist.");
   return res.json();
 }
+export async function updateWatchlist(entry: WatchlistEntry) {
+  const res = await fetch(`/api/watchlist/${encodeURIComponent(entry.id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+  if (!res.ok) throw new ApiError(res.status, "Não foi possível atualizar a watchlist.");
+  return res.json();
+}
 export async function appendLedger(entry: { kind: string; status: string; gross_coins: number; note?: string }) {
   const res = await fetch("/api/ledger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
   if (!res.ok) throw new ApiError(res.status, "Não foi possível gravar o lançamento.");
   return res.json();
 }
 export const fetchTime = () => getJSON<TimeResponse>("/api/time");
+export const fetchFormations = () => getJSON<FormationsResponse>("/api/formacoes");
 export const fetchSquadEditor = () => getJSON<SquadEditorResponse>("/api/editor/elenco");
 export const fetchSavedSquadPlans = () => getJSON<SavedSquadPlansResponse>("/api/planos/elenco/salvos");
 export async function saveSquadPlan(input: SavedSquadPlanInput, id?: string): Promise<SavedSquadPlanView> {

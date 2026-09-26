@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/gscarneiro/eafc-bot/internal/chemistry"
@@ -412,5 +413,36 @@ func TestSquadPlanNeedsApontaPosicaoSemAlternativa(t *testing.T) {
 	}
 	if gkNeed == nil {
 		t.Fatalf("esperava necessidade no GK (sem alternativa nenhuma no elenco), needs = %+v", plan.Needs)
+	}
+}
+
+// O caso da Yui Hasegawa: CDM de ofício, mas o fut.gg publica o GG dela em
+// CM (85.83), a melhor posição. Com a tabela por posição (CDM 85.53) a vaga
+// tem nota e o planejador não pode avisar "mantido sem nota"; sem a tabela,
+// o aviso diz em que posição o GG foi publicado, em vez de "ausente".
+func TestPlanejadorUsaGGDaVagaQuandoOPublicadoEDeOutraPosicao(t *testing.T) {
+	club := squadPlanFixtureClub(1)
+	var cdm *domain.ClubPlayer
+	for i := range club.Players {
+		if club.Players[i].Position == domain.CDM {
+			cdm = &club.Players[i]
+		}
+	}
+	cdm.CommonName, cdm.GGRating, cdm.GGRatingPos = "Yui Hasegawa", 85.83, domain.CM
+
+	semTabela := BuildSquadPlan(club, DefaultSquadPlanRequest())
+	if len(semTabela.Warnings) != 1 || !strings.Contains(semTabela.Warnings[0], "só trouxe GG 85.8 em CM") {
+		t.Fatalf("sem a tabela por posição, o aviso precisa dizer onde está o GG publicado: %q", semTabela.Warnings)
+	}
+
+	cdm.GGRatingPorPosicao = map[domain.Position]float64{domain.CM: 85.83, domain.CDM: 85.53, domain.CAM: 81.2}
+	comTabela := BuildSquadPlan(club, DefaultSquadPlanRequest())
+	if comTabela.Status != "ok" || len(comTabela.Warnings) != 0 {
+		t.Fatalf("com a nota da CDM publicada, a vaga não pode ficar sem nota: status %q, avisos %q", comTabela.Status, comTabela.Warnings)
+	}
+	for _, a := range comTabela.Scenarios[0].Starters {
+		if a.Position == domain.CDM && (a.RatingUnavailable || a.Rating != 85.53) {
+			t.Fatalf("CDM = %+v, esperava a nota 85.53 publicada para a vaga", a)
+		}
 	}
 }

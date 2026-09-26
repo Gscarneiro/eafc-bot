@@ -23,6 +23,7 @@ import (
 	"github.com/gscarneiro/eafc-bot/internal/chemistry"
 	"github.com/gscarneiro/eafc-bot/internal/config"
 	"github.com/gscarneiro/eafc-bot/internal/domain"
+	"github.com/gscarneiro/eafc-bot/internal/formations"
 	"github.com/gscarneiro/eafc-bot/internal/futgg"
 	"github.com/gscarneiro/eafc-bot/internal/report"
 	"github.com/gscarneiro/eafc-bot/internal/store"
@@ -184,6 +185,7 @@ type SaldoResponse struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.handleStatus)
+	mux.HandleFunc("GET /api/formacoes", s.handleFormations)
 	mux.HandleFunc("GET /api/resumo", s.handleResumo)
 	mux.HandleFunc("GET /api/galeria", s.handleGaleria)
 	mux.HandleFunc("GET /api/galeria/{id}", s.handleGaleriaDetalhe)
@@ -702,6 +704,12 @@ type TimeResponse struct {
 	// handleTimeSlug, ver priceHistoryStatus.
 	PriceSeries        map[int64][]store.PricePoint `json:"price_series"`
 	PriceHistoryStatus map[int64]string             `json:"price_history_status"`
+	// DistribuicaoOVR e ValorXI alimentam a "Leitura do elenco" — ver
+	// time_leitura.go. ValorXI fica nil quando o histórico de preço não pôde
+	// ser lido (erro do store), para a tela não confundir falha com clube
+	// sem cotação.
+	DistribuicaoOVR []FaixaOVR `json:"distribuicao_ovr"`
+	ValorXI         *ValorXI   `json:"valor_xi,omitempty"`
 }
 
 // PositionMapRow é o espelho tagueado de report.PositionMapRow — aquele
@@ -871,6 +879,15 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 		priceStatus[id] = priceHistoryStatus(pts, seriesErr)
 	}
 
+	var valorXI *ValorXI
+	starterIDs := make([]int64, len(starters))
+	for i, st := range starters {
+		starterIDs[i] = st.Player.ID
+	}
+	if starterSeries, err := s.Store.PriceSeries(r.Context(), s.Cycle, starterIDs, priceSeriesWindow); err == nil {
+		valorXI = valorDoXI(starters, starterSeries)
+	}
+
 	swaps := s.currentSquadSwaps(snap)
 	leituras := s.leituraByPlayerComTrocas(r.Context(), snap, pagePlayers, swaps)
 	bench := make([]RosterCard, 0, to-from)
@@ -939,6 +956,8 @@ func (s *Server) handleTime(w http.ResponseWriter, r *http.Request) {
 		SlotOutlook:        analyze.BuildSlotOutlooksWithEvaluations(snap.Club, swaps, snap.Upgrades, avaliacoesDasVagas),
 		PriceSeries:        priceSeries,
 		PriceHistoryStatus: priceStatus,
+		DistribuicaoOVR:    distribuicaoOVR(snap.Club.Players, inSquad),
+		ValorXI:            valorXI,
 	})
 }
 
@@ -1107,18 +1126,7 @@ func filteredBench(players []domain.ClubPlayer, starters map[string]bool, r *htt
 }
 
 func inferFormation(slots []domain.SquadSlot) string {
-	if len(slots) != 11 {
-		return ""
-	}
-	copySlots := append([]domain.SquadSlot(nil), slots...)
-	sort.Slice(copySlots, func(i, j int) bool { return copySlots[i].Index < copySlots[j].Index })
-	want := []domain.Position{domain.GK, domain.RB, domain.CB, domain.CB, domain.LB, domain.RM, domain.CM, domain.CM, domain.LM, domain.CAM, domain.ST}
-	for i, pos := range want {
-		if copySlots[i].Position != pos {
-			return ""
-		}
-	}
-	return "4-4-1-1"
+	return formations.Infer(slots)
 }
 
 // CardDetailResponse é a análise "atual x potencial" de uma carta, mais a
@@ -1412,7 +1420,7 @@ func (s *Server) handleGauntlet(w http.ResponseWriter, r *http.Request) {
 	resp := GauntletResponse{
 		GeneratedAt: snap.GeneratedAt,
 		Avaliacao:   snap.Avaliacao,
-		Formation:   plan.Formation,
+		Formation:   formationForGauntlet(plan.Formation, snap.Club.Squad),
 		Status:      plan.Status,
 		Reason:      plan.Reason,
 		Rules:       gauntletRulesText(rules),

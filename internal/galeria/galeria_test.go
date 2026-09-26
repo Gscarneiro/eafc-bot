@@ -152,3 +152,23 @@ func TestFloorBonusMantemProdutoExatamenteDivisivelPorCem(t *testing.T) {
 		t.Fatalf("500%% de 12.910 = %d; esperava 64.550", got)
 	}
 }
+
+func TestPickDescreveCartaSemInventarPrimeiroDono(t *testing.T) {
+	owner := true
+	set := Set{ID: "meta", RequiredCards: 2, Thresholds: map[Grade]int{GradeD: 1, GradeC: 10, GradeB: 20, GradeA: 30, GradeS: 40}}
+	got := Evaluate(Input{Sets: []Set{set}, Cards: []Card{
+		{ID: 1, Name: "Vini", ItemScore: 20, Positions: []string{"LW", "ST"}, Club: "Real Madrid", Rating: 90, FirstOwner: &owner},
+		{ID: 2, Name: "Sem dono", ItemScore: 20, Position: "CB", Club: "Barcelona", Rating: 85},
+	}, Now: time.Now()})[0]
+	byID := map[int64]Pick{}
+	for _, pick := range got.Evaluation.Picks {
+		byID[pick.CardID] = pick
+	}
+	vini := byID[1]
+	if vini.Position != "LW" || vini.Club != "Real Madrid" || vini.Rating != 90 || vini.FirstOwner == nil || !*vini.FirstOwner {
+		t.Fatalf("pick sem a descrição da carta: %#v", vini)
+	}
+	if semDono := byID[2]; semDono.Position != "CB" || semDono.FirstOwner != nil {
+		t.Fatalf("primeiro dono desconhecido precisa continuar nil, não virar falso: %#v", semDono)
+	}
+}

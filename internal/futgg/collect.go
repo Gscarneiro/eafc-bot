@@ -39,6 +39,7 @@ type Snapshot struct {
 // XI completo como formação desconhecida.
 var formationByID = map[string]string{
 	"18": "4-4-1-1",
+	"36": "4-2-1-3",
 }
 
 // Collect busca todas as fontes em paralelo. Uma fonte que falha não
@@ -81,7 +82,14 @@ func (c *Client) Collect(ctx context.Context, gamerTag string, marketFilter Play
 			if err != nil {
 				return err
 			}
+			// O elenco só traz o GG da melhor posição; sem a tabela por
+			// posição, uma CDM de ofício com GG publicado em CM fica sem nota
+			// na CDM. Falha aqui não derruba o clube: vira aviso.
+			ggPos := c.PreencherGGPorPosicao(ctx, &club)
 			mu.Lock()
+			if aviso := ggPos.Aviso(c.cfg.Cycle); aviso != "" {
+				snap.Errors = append(snap.Errors, aviso)
+			}
 			snap.Club = club
 			// club.SourceCycle só vem preenchido quando diverge do ciclo
 			// configurado (ver majorityGame). Isto NÃO é erro — o clube

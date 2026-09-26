@@ -347,3 +347,79 @@ func TestTrocaDeAvaliadorRecalculaMercadoSemNovaColeta(t *testing.T) {
 }
 
 func bytesReader(body []byte) *bytes.Reader { return bytes.NewReader(body) }
+
+func TestEditorExpoeMediaDoXIAtualComOMesmoAvaliador(t *testing.T) {
+	snap := fixtureSnapshotComGauntletDeSobra()
+	srv, _ := newTestServerWithSnapshot(t, snap)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/editor/elenco", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("lendo editor: status %d: %s", w.Code, w.Body.String())
+	}
+	editor := decodeJSON[SquadEditorResponse](t, w)
+	if editor.MediaAtual == nil {
+		t.Fatalf("editor com 11 titulares avaliados veio sem media_atual")
+	}
+
+	slots := make([]domain.VagaPlanoElenco, 0, len(editor.Titulares))
+	for _, starter := range editor.Titulares {
+		slots = append(slots, domain.VagaPlanoElenco{
+			Index: starter.Index, Posicao: starter.Position,
+			Carta: domain.ReferenciaCartaElenco{ClubItemID: starter.Player.ClubItemID, PlayerID: starter.Player.ID},
+		})
+	}
+	body, err := json.Marshal(struct {
+		Formacao string                   `json:"formacao"`
+		Vagas    []domain.VagaPlanoElenco `json:"vagas"`
+	}{Formacao: editor.Formacao, Vagas: slots})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/editor/elenco/avaliar", bytesReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("avaliando o XI atual: status %d: %s", w.Code, w.Body.String())
+	}
+	evaluation := decodeJSON[AvaliacaoEditorElencoResponse](t, w)
+	if diff := *editor.MediaAtual - evaluation.Media; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("media_atual %.4f não bate com a avaliação do mesmo XI (%.4f)", *editor.MediaAtual, evaluation.Media)
+	}
+}
+
+func TestPlanoSalvoSoMostraMediaComXICompletoAvaliado(t *testing.T) {
+	snap := fixtureSnapshotComGauntletDeSobra()
+	srv, _ := newTestServerWithSnapshot(t, snap)
+	salvar := func(nome string, vagas []domain.VagaPlanoElenco) {
+		body, err := json.Marshal(PlanoElencoInput{Nome: nome, Formacao: snap.Club.Squad.Formation, OrigemFormacao: "manual", Vagas: vagas})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/planos/elenco/salvos", bytesReader(body)))
+		if w.Code != http.StatusOK {
+			t.Fatalf("salvando %q: status %d: %s", nome, w.Code, w.Body.String())
+		}
+	}
+	completo := editorSlotsDoSnapshot(snap.Club.Squad.Starters)
+	salvar("Completo", completo)
+	incompleto := editorSlotsDoSnapshot(snap.Club.Squad.Starters)
+	incompleto[10].Carta = domain.ReferenciaCartaElenco{}
+	salvar("Sem atacante", incompleto)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/planos/elenco/salvos", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("listando planos: status %d: %s", w.Code, w.Body.String())
+	}
+	medias := make(map[string]*float64)
+	for _, view := range decodeJSON[planosElencoSalvosResponse](t, w).Value {
+		medias[view.Plano.Nome] = view.Media
+	}
+	if medias["Completo"] == nil || *medias["Completo"] <= 0 {
+		t.Fatalf("plano com as 11 vagas avaliadas veio sem média: %v", medias["Completo"])
+	}
+	if medias["Sem atacante"] != nil {
+		t.Fatalf("plano com vaga vazia não pode exibir média de 10 cartas: %.2f", *medias["Sem atacante"])
+	}
+}

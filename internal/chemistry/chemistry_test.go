@@ -229,6 +229,97 @@ func TestIconSemClubeNaoFormaVinculoDeClube(t *testing.T) {
 	}
 }
 
+// Carta que o fut.gg marca com isFullChemistry mas que não é Icon nem Hero
+// (o caso real: uma raridade "Base Hall of FUT", 22/09/2026 — Giovani dos
+// Santos ficava preso em 3/3 mesmo sem clube, liga ou nação em comum com o
+// resto do XI). Cobre qualquer raridade especial futura que o fut.gg já
+// marque, sem precisar cadastrar o nome dela aqui.
+func TestFullChemistryDaOTetoMesmoSemVinculoESemSerIconOuHeroi(t *testing.T) {
+	presa := Titular{Index: 0, Position: domain.ST, Player: domain.Player{
+		ID: 1, Position: domain.ST, Club: "HALL OF FUT", League: "LALIGA EA SPORTS",
+		Nation: "Mexico", Version: "Base Hall of FUT", FullChemistry: true,
+	}}
+	res := Calcular(vinculos(), []Titular{presa})
+	if res.Jogadores[0].Pontos != 3 {
+		t.Fatalf("carta com FullChemistry ficou com %d, esperava o teto 3 mesmo sem vínculo", res.Jogadores[0].Pontos)
+	}
+	if res.Jogadores[0].Curinga != "Química cheia" {
+		t.Fatalf("curinga = %q, esperava \"Química cheia\"", res.Jogadores[0].Curinga)
+	}
+}
+
+// Icon continua pelo Curinga nomeado, não pelo fallback de FullChemistry —
+// o fut.gg marca Icon com isFullChemistry:false (dado incompleto da fonte
+// para essa raridade específica), então o fallback nem entraria em ação
+// para ele.
+func TestIconContinuaClassificandoPorNomeMesmoComFullChemistryFalse(t *testing.T) {
+	xi := []Titular{icon(1, "Brazil")}
+	res := Calcular(vinculos(), xi)
+	if res.Jogadores[0].Curinga != "Icon" {
+		t.Fatalf("curinga = %q, esperava Icon", res.Jogadores[0].Curinga)
+	}
+}
+
+// --- Liga feminina ---
+
+func mulher(id int64, pos domain.Position, clube, liga, nacao string) Titular {
+	return Titular{
+		Index:    int(id),
+		Position: pos,
+		Player: domain.Player{
+			ID: id, Name: "Carta", Position: pos,
+			Club: clube, League: liga, Nation: nacao, Version: "Rare", Women: true,
+		},
+	}
+}
+
+// A amostra real que motivou LigaMulher (22/09/2026): 4 titulares de uma
+// liga feminina liberam o SEGUNDO degrau (2 pontos) — a tabela masculina só
+// libera o segundo degrau em 5. (No XI real eram 3 titulares + o coringa do
+// Icon, que soma +1 em toda liga; aqui são 4 titulares de verdade, mesmo
+// efeito.)
+func TestLigaFemininaLiberaOSegundoDegrauComQuatro(t *testing.T) {
+	quatro := []Titular{
+		mulher(1, domain.CDM, "Manchester City", "Barclays Women's Super League", "Japan"),
+		mulher(2, domain.CM, "London City", "Barclays Women's Super League", "France"),
+		mulher(3, domain.ST, "London City", "Barclays Women's Super League", "Germany"),
+		mulher(4, domain.CAM, "KC Current", "Barclays Women's Super League", "Brazil"),
+	}
+	res := Calcular(vinculos(), quatro)
+	for _, j := range res.Jogadores {
+		if j.Liga != 2 {
+			t.Fatalf("liga feminina com 4 titulares deu %d, esperava 2 (segundo degrau)", j.Liga)
+		}
+	}
+}
+
+// O primeiro degrau (3) não muda: duas titulares sozinhas na liga feminina
+// ainda não pontuam.
+func TestLigaFemininaAindaExigeTresParaOPrimeiroPonto(t *testing.T) {
+	duas := []Titular{
+		mulher(1, domain.CDM, "Clube A", "Liga F", "Nação A"),
+		mulher(2, domain.CM, "Clube B", "Liga F", "Nação B"),
+	}
+	if got := Calcular(vinculos(), duas).Total; got != 0 {
+		t.Fatalf("duas da mesma liga feminina deram %d, esperava 0 (o primeiro degrau continua em 3)", got)
+	}
+}
+
+// Uma liga masculina com a mesma contagem (4) fica no primeiro degrau — só a
+// liga feminina usa a tabela mais generosa.
+func TestLigaMasculinaComQuatroFicaNoPrimeiroDegrau(t *testing.T) {
+	var xi []Titular
+	for i := int64(1); i <= 4; i++ {
+		xi = append(xi, carta(i, domain.CM, "Clube "+string(rune('A'+i)), "Premier League", "Nação "+string(rune('A'+i))))
+	}
+	res := Calcular(vinculos(), xi)
+	for _, j := range res.Jogadores {
+		if j.Liga != 1 {
+			t.Fatalf("liga masculina com 4 titulares deu %d, esperava 1 (primeiro degrau; só a feminina libera o segundo em 4)", j.Liga)
+		}
+	}
+}
+
 // --- Fora de posição ---
 
 func TestTitularForaDePosicaoFicaComZero(t *testing.T) {

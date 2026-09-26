@@ -234,6 +234,17 @@ de pista de nome — que é exatamente a situação do FC 27.
 
 ## Armadilhas conhecidas
 
+- **GG Rating é por posição; o elenco só manda o da melhor.** `ggRating`/
+  `ggRatingPos` do GG Club é o máximo da carta (Hasegawa: 85.83 em CM), e
+  uma CDM de ofício fica "sem nota" na CDM sem a tabela por posição. Ela vem
+  de `metarank/player/{eaId}/?game={ciclo}` (endpoint `gg_rating_posicao`):
+  nota da posição = maior score entre as funções dela, em qualquer estilo de
+  química. Os ids de função dessa rota NÃO são os de `/api/fut/roles/`, a
+  definição oficial vem cifrada, e a tabela `posicaoDaFuncaoMetarank`
+  (`internal/futgg/gg_posicao.go`) saiu dos dados — por isso
+  `conferirGGPorPosicao` descarta a tabela que não reproduz o `ggRating`
+  publicado. Já as listas `{eaId, position, score}` do metarank (o
+  `GGRatings` legado) NÃO são GG: Hasegawa dá 84.79 em CM lá.
 - **`Player.ID` é a CARTA; `BasePlayerEaID` é o JOGADOR.** O jogo não aceita
   duas versões do mesmo atleta no mesmo elenco (banco incluso), e Mbappé ouro
   e Mbappé TOTS são ids diferentes — de-duplicar por `ID` deixa passar os

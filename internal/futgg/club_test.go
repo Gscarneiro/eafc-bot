@@ -400,6 +400,19 @@ func activeSquadFixture() string {
 		strings.Join(entries, ",") + `]}}}`
 }
 
+func TestActiveSquadIdentificaID36Como4213(t *testing.T) {
+	fixture := strings.Replace(activeSquadFixture(), `"activeFormationId":"18"`, `"activeFormationId":"36"`, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(fixture))
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL, Cycle: "27", Endpoints: map[string]string{"club_squad": "/api/gg-club/{gamertag}/active-squad/"}})
+	if got, err := c.ActiveSquad(context.Background(), "BilingualBee", nil); err != nil || got.Formation != "4-2-1-3" {
+		t.Fatalf("formação = %q, erro = %v; esperava 4-2-1-3", got.Formation, err)
+	}
+}
+
 func TestActiveSquadSoPegaOsOnzeDoField(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

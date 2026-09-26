@@ -36,7 +36,8 @@
   --on-turf: #f1f3ef;
   --pitch-fill: #e8f0e8;
   --pitch-grid: #d6e2d7;
-  --pitch-line: #c1d1c3;
+  --pitch-stripe: #dfeade;
+  --pitch-line: #b4ceb8;
 
   --coin: #9c6c07;
   --coin-bg: #e6cd9c;
@@ -52,6 +53,9 @@
 
   --shadow-sm: none;
   --shadow-md: none;
+  /* --card-shadow é a única sombra do tema: carta solta sobre o gramado
+     (editor de elenco), onde régua de 1px não separa carta de fundo listrado. */
+  --card-shadow: 0 6px 16px rgba(23, 26, 19, 0.12);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -74,7 +78,8 @@
     --on-turf: #08150d;
     --pitch-fill: #0d1710;
     --pitch-grid: #141f16;
-    --pitch-line: #1d2b20;
+    --pitch-stripe: #101d13;
+    --pitch-line: #24402c;
 
     --coin: #f5b93b;
     --coin-bg: #3a2c0e;
@@ -90,6 +95,7 @@
 
     --shadow-sm: none;
     --shadow-md: none;
+    --card-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
   }
 }
 :root[data-theme="dark"] {
@@ -112,7 +118,8 @@
   --on-turf: #08150d;
   --pitch-fill: #0d1710;
   --pitch-grid: #141f16;
-  --pitch-line: #1d2b20;
+  --pitch-stripe: #101d13;
+  --pitch-line: #24402c;
 
   --coin: #f5b93b;
   --coin-bg: #3a2c0e;
@@ -128,6 +135,7 @@
 
   --shadow-sm: none;
   --shadow-md: none;
+  --card-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
 }
 
 /* Escalas — antes cada arquivo tinha os próprios números mágicos de

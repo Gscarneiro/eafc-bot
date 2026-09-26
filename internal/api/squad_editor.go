@@ -22,15 +22,20 @@ import (
 // reservas continua paginada para a tela Meu time; o editor precisa pesquisar
 // e posicionar qualquer cópia física, inclusive abaixo de qualquer overall.
 type SquadEditorResponse struct {
-	GeneratedAt       time.Time                `json:"generated_at"`
-	Clube             string                   `json:"clube"`
-	Formacao          string                   `json:"formacao"`
-	Titulares         []StarterCard            `json:"titulares"`
-	Cartas            []RosterCard             `json:"cartas"`
-	Alvos             []AlvoEditorElenco       `json:"alvos,omitempty"`
-	Funcoes           []FuncaoEditorElenco     `json:"funcoes,omitempty"`
-	QuimicaReferencia *chemistry.Resultado     `json:"quimica_referencia,omitempty"`
-	Avaliacao         domain.ContextoAvaliacao `json:"avaliacao"`
+	GeneratedAt       time.Time            `json:"generated_at"`
+	Clube             string               `json:"clube"`
+	Formacao          string               `json:"formacao"`
+	Titulares         []StarterCard        `json:"titulares"`
+	Cartas            []RosterCard         `json:"cartas"`
+	Alvos             []AlvoEditorElenco   `json:"alvos,omitempty"`
+	Funcoes           []FuncaoEditorElenco `json:"funcoes,omitempty"`
+	QuimicaReferencia *chemistry.Resultado `json:"quimica_referencia,omitempty"`
+	// MediaAtual é a média do XI que o jogo tem hoje, pelo MESMO avaliador e
+	// contexto que avaliam o rascunho — é a base do "vs jogo" do editor. Usar
+	// a nota posicional dos titulares em vez disso compararia duas fontes
+	// diferentes quando o avaliador ativo não é o do fut.gg.
+	MediaAtual *float64                 `json:"media_atual,omitempty"`
+	Avaliacao  domain.ContextoAvaliacao `json:"avaliacao"`
 }
 
 // AlvoEditorElenco é uma carta hipotética que pode ocupar uma vaga sem
@@ -68,6 +73,7 @@ type PlanoElencoInput struct {
 type planoElencoSalvoView struct {
 	Plano      domain.PlanoElencoSalvo `json:"plano"`
 	Pendencias []string                `json:"pendencias,omitempty"`
+	Media      *float64                `json:"media,omitempty"`
 }
 
 type planosElencoSalvosResponse struct {
@@ -132,8 +138,51 @@ func (s *Server) handleSquadEditor(w http.ResponseWriter, r *http.Request) {
 		Alvos:             alvosDoEditor(snap),
 		Funcoes:           funcoesDoEditor(snap.RoleCatalog),
 		QuimicaReferencia: quimicaReferencia,
+		MediaAtual:        s.mediaDoXIAtual(snap, starters, formation),
 		Avaliacao:         s.resolveEvaluationContext(),
 	})
+}
+
+// mediaDoXIAtual avalia os titulares observados como se fossem um rascunho,
+// para o delta do editor comparar a mesma régua dos dois lados.
+func (s *Server) mediaDoXIAtual(snap store.Snapshot, starters []StarterCard, formation string) *float64 {
+	if len(starters) != 11 {
+		return nil
+	}
+	plan := domain.PlanoElencoSalvo{
+		ID: "xi-atual", Ciclo: squadPlanCycle(s, snap), Clube: squadPlanClubKey(snap.Club), Nome: "XI atual",
+		Formacao: formation, OrigemFormacao: "confirmada", Revisao: 1, Vagas: make([]domain.VagaPlanoElenco, 0, len(starters)),
+	}
+	if plan.Formacao == "" {
+		// A formação não entra na nota: o avaliador lê a posição de cada
+		// vaga e o modelo de química (internal/chemistry) não olha
+		// formação. Ela só precisa existir para o plano passar em Validate;
+		// um clube sem formação sincronizada ainda tem os 11 titulares com
+		// posição, que é o que a média usa.
+		plan.Formacao = "observada"
+	}
+	for _, starter := range starters {
+		plan.Vagas = append(plan.Vagas, domain.VagaPlanoElenco{
+			Index: starter.Index, Posicao: starter.Position,
+			Carta: domain.ReferenciaCartaElenco{ClubItemID: starter.Player.ClubItemID, PlayerID: starter.Player.ID},
+		})
+	}
+	if err := normalizarPlanoContraSnapshot(&plan, snap); err != nil {
+		return nil
+	}
+	return mediaDoXICompleto(s.avaliarPlanoDoEditor(snap, plan))
+}
+
+// mediaDoXICompleto só devolve a média quando as 11 vagas têm nota. A média
+// da avaliação exclui carta sem nota (ver avaliarPlanoDoEditor); comparar a
+// média de 10 cartas com a de 11 — no delta "vs jogo" ou entre planos salvos
+// — seria um palpite silencioso, então nesse caso a tela fica sem o número.
+func mediaDoXICompleto(avaliacao AvaliacaoEditorElencoResponse) *float64 {
+	if avaliacao.Status != "ok" || avaliacao.Cobertura != 11 {
+		return nil
+	}
+	media := avaliacao.Media
+	return &media
 }
 
 func alvosDoEditor(snap store.Snapshot) []AlvoEditorElenco {
@@ -209,7 +258,7 @@ func (s *Server) handleSavedSquadPlans(w http.ResponseWriter, r *http.Request) {
 	}
 	value := make([]planoElencoSalvoView, 0, len(plans))
 	for _, plan := range plans {
-		value = append(value, planoElencoSalvoView{Plano: plan, Pendencias: pendenciasDoPlano(snap, plan)})
+		value = append(value, s.viewDoPlanoSalvo(snap, plan))
 	}
 	writeJSON(w, planosElencoSalvosResponse{Value: value, Count: len(value)})
 }
@@ -352,7 +401,15 @@ func (s *Server) handleSavedSquadPlanReference(w http.ResponseWriter, r *http.Re
 			target = &plans[i]
 		}
 	}
-	writeJSON(w, planoElencoSalvoView{Plano: *target, Pendencias: pendenciasDoPlano(snap, *target)})
+	writeJSON(w, s.viewDoPlanoSalvo(snap, *target))
+}
+
+// viewDoPlanoSalvo junta ao plano o que depende da coleta atual: as
+// pendências de reconciliação e a média. Plano com carta que saiu do clube
+// cai em avaliação "indisponivel" e fica sem média, em vez de uma média das
+// cartas que sobraram.
+func (s *Server) viewDoPlanoSalvo(snap store.Snapshot, plan domain.PlanoElencoSalvo) planoElencoSalvoView {
+	return planoElencoSalvoView{Plano: plan, Pendencias: pendenciasDoPlano(snap, plan), Media: mediaDoXICompleto(s.avaliarPlanoDoEditor(snap, plan))}
 }
 
 func (s *Server) handleSquadEditorEvaluate(w http.ResponseWriter, r *http.Request) {
